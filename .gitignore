@@ -1,0 +1,39 @@
+# Rust
+/target/
+
+# Frontend (app/.gitignore also covers app/dist)
+node_modules/
+
+# MSFS package build output
+/msfs-panel/out/
+
+# Flight data: recordings live in Documents\FOQA-Sim\flights, never in the repo.
+# Test recordings go in fixtures/.
+*.fqj
+*.fqz
+*.raw.jsonl.gz
+!/fixtures/**
+/flights/
+/*.jsonl
+
+# SimConnect is loaded from the MSFS SDK at runtime; never commit it
+SimConnect.dll
+
+# Local env and secrets
+.env
+.env.*
+*.pem
+*.pfx
+*.p12
+
+# Editors and OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Local agent state
+.claude/

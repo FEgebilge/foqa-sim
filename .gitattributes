@@ -1,0 +1,24 @@
+# LF everywhere in the repo, whatever the OS
+* text=auto eol=lf
+
+# Windows scripts keep CRLF (PowerShell 5.1, cmd)
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary
+*.png binary
+*.ico binary
+*.icns binary
+*.gz binary
+*.spb binary
+*.fqj binary
+*.fqz binary
+*.dll binary
+*.exe binary
+*.msi binary
+
+# Generated: collapsed in diffs
+Cargo.lock linguist-generated=true -diff
+app/package-lock.json linguist-generated=true -diff
+app/public/mock/*.json linguist-generated=true
