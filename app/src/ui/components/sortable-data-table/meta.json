@@ -1,0 +1,16 @@
+{
+  "title": "Sortable data table",
+  "description": "Compare structured records with sortable columns.",
+  "category": "Data",
+  "kind": "component",
+  "dependencies": [
+    "lucide-react",
+    "motion"
+  ],
+  "requires": [],
+  "tags": [
+    "data",
+    "table"
+  ],
+  "source": "arc"
+}

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project Version="2" Name="foqa-sim-panel" FolderName="Packages">
+	<OutputDirectory>out</OutputDirectory>
+	<TemporaryOutputDirectory>out\_PackageInt</TemporaryOutputDirectory>
+	<Packages>
+		<Package>PackageDefinitions\foqa-sim-panel.xml</Package>
+	</Packages>
+</Project>

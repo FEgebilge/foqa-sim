@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<SimBase.Document Type="InGamePanels" version="1,0">
+	<Filename>InGamePanel_FOQASim.spb</Filename>
+	<InGamePanels.InGamePanelDefinition id="PANEL_FOQA_SIM" Name="FOQA-Sim" url="html_ui/InGamePanels/FOQASim/FOQASim.html" icon="ICON_TOOLBAR_FOQA_SIM" buttonVisible="true" resizeDirections="Both" minWidth="15" minHeight="18" defaultWidth="25" defaultHeight="40" defaultTop="4" defaultRight="2">
+	</InGamePanels.InGamePanelDefinition>
+</SimBase.Document>

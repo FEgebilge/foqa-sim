@@ -1,0 +1,11 @@
+# Boeing 737 MAX 8 type profile (the MSFS 2024 default 737). Schema: docs/rules.md.
+#
+# No flaps: the VFE table is not confirmed against a primary source.
+# No hard_landing_g: the 2.2 g AMM indication is documented for the 737 NG,
+# not the MAX.
+type: B38M
+name: Boeing 737 MAX 8
+class: transport
+tail_contact:
+  takeoff: { value: 11.0 deg, source: &fctm "Boeing 737 FCTM, takeoff tail clearance table, 737-8 row, e.g. Copa 737 FCTM section 3.35, https://cmpva.org/descargas/B737_FCTM.pdf", note: "struts extended, wheels on runway" }
+  landing: { value: 9.2 deg, source: "Boeing 737 FCTM, landing body/tail-skid contact chart, 737-8 with one-position tail skid, +-0.1 deg, Copa 737 FCTM p. 6.14, https://cmpva.org/descargas/B737_FCTM.pdf#page=276", note: "struts compressed; MSFS skid configuration unverified" }

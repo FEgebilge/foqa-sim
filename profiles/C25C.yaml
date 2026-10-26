@@ -1,0 +1,12 @@
+# Cessna Citation CJ4 (Model 525C) type profile. Schema: docs/rules.md.
+#
+# Class transport although certified Part 23 commuter category: classes
+# here are by weight (above 12,500 lb, `rules::aircraft`), and the CJ4 weighs
+# about 17,000 lb.
+type: C25C
+name: Cessna Citation CJ4 (525C)
+class: transport
+flaps:
+  - up_to: 15 deg
+    vfe: { value: 200 kt, source: &spec "Cessna Citation CJ4 specification SD-CJ4 Unit 0200 to TBD, Oct 2015, Limit Speeds p. 7, https://tadistributors.com/wp-content/uploads/2016/03/SD-CJ4-Unit-0200-to-TBD-2015-Oct.pdf" }
+  - vfe: { value: 160 kt, source: *spec, note: "15 to 35 deg" }

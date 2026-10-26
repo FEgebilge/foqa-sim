@@ -1,0 +1,13 @@
+# Cessna 172S type profile. Schema: docs/rules.md, "Type profiles".
+#
+# No tail_contact: Cessna publishes no tail-contact pitch for the 172S.
+# NTSB ERA21LA202 documents 172S tailstrikes but gives no angle.
+# No hard_landing_g: the 172S maintenance manual sets no numeric
+# hard-landing inspection load.
+type: C172
+name: Cessna 172S Skyhawk SP (G1000)
+class: light
+flaps:
+  - up_to: 10 deg
+    vfe: { value: 110 kt, source: &poh "Cessna 172S POH, Section 2, Fig. 2-1 Airspeed Limitations, p. 2-4, https://aerocadet.com/cbts/pdf/172S-POH.pdf#page=42", note: "FLAPS 10 deg: 110 KIAS" }
+  - vfe: { value: 85 kt, source: *poh, note: "FLAPS 10 deg to FULL: 85 KIAS" }

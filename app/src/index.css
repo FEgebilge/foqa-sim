@@ -1,0 +1,74 @@
+/* egebilge/ui tokens sit below Tailwind; Tailwind's preflight is the reset (src/ui/README: Tailwind app). */
+@layer foundation, theme, base, components, utilities;
+@import "./ui/foundation.css" layer(foundation);
+@import "./styles/night-flight.css" layer(foundation);
+@import "tailwindcss";
+
+/* FOQA-Sim instance styling: a cyan accent (the "selected/interactive" colour of glass cockpits), so amber and red stay
+   reserved for event levels, as on an annunciator panel. */
+@layer foundation {
+  :root {
+    --accent: oklch(52% .11 220);
+    --accent-strong: oklch(44% .1 225);
+    --accent-subtle: oklch(52% .11 220 / .12);
+    --accent-foreground: oklch(99% 0 0);
+    --control-on: oklch(52% .11 220);
+    --control-glyph: oklch(99% 0 0);
+    --control-fill: oklch(52% .11 220);
+  }
+  :root[data-theme="dark"] {
+    --accent: oklch(80% .11 210);
+    --accent-strong: oklch(88% .08 205);
+    --accent-subtle: oklch(80% .11 210 / .14);
+    --accent-foreground: oklch(18% .04 258);
+    --control-on: oklch(72% .11 212);
+    --control-glyph: oklch(18% .04 258);
+    --control-fill: oklch(72% .11 212);
+  }
+}
+
+@theme inline {
+  --color-bg: var(--background);
+  --color-surface: var(--surface);
+  --color-raised: var(--surface-raised);
+  --color-muted: var(--surface-muted);
+  --color-fg: var(--foreground);
+  --color-fg-2: var(--text-secondary);
+  --color-fg-3: var(--text-muted);
+  --color-line: var(--border);
+  --color-line-subtle: var(--border-subtle);
+  --color-line-strong: var(--border-strong);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-accent-subtle: var(--accent-subtle);
+  --color-danger: var(--danger);
+  --color-warning: var(--warning);
+  --color-success: var(--success);
+  --color-level-high: var(--level-high);
+  --color-level-medium: var(--level-medium);
+  --color-level-low: var(--level-low);
+  --color-level-advisory: var(--level-advisory);
+  --font-display: var(--font-display);
+  --font-body: var(--font-body);
+  --radius-control: var(--radius-control);
+  --radius-panel: var(--radius-panel);
+}
+
+@layer base {
+  html, body, #root { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-body);
+    line-height: var(--leading-body);
+    -webkit-font-smoothing: antialiased;
+  }
+  /* Instrument readouts: numbers keep their width so columns and live values do not jitter. */
+  .readout { font-family: var(--font-display); font-variant-numeric: tabular-nums; letter-spacing: 0; }
+  .eyebrow { font-family: var(--font-display); font-size: .6875rem; font-weight: 500; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); }
+}
+
+@layer components {
+  .panel { border: 1px solid var(--border); border-radius: var(--radius-panel); background: var(--surface); }
+}

@@ -1,0 +1,17 @@
+{
+  "title": "Tooltip",
+  "description": "Short supporting text for unfamiliar controls.",
+  "category": "Disclosure",
+  "kind": "component",
+  "dependencies": [
+    "@radix-ui/react-tooltip",
+    "motion"
+  ],
+  "requires": [],
+  "tags": [
+    "hint",
+    "overlay"
+  ],
+  "source": "arc",
+  "canvas": []
+}

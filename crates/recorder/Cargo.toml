@@ -1,0 +1,15 @@
+[package]
+name = "recorder"
+description = "Aircraft segment: sensor wiring, FDAU sampling and the flight journal."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+crc32fast = "1"
+fdm-core = { path = "../fdm-core" }
+flate2 = "1"
+serde_json = "1"
+zstd = "0.14"

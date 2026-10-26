@@ -1,0 +1,580 @@
+//! The in-sim panel feed: what the service reports, mirrored over the
+//! SimConnect Comm Bus to the sim's JavaScript views (the FOQA-Sim toolbar
+//! panel, later an EFB app), so the pilot sees a landing without leaving
+//! the sim, and the views' commands taken back. Messages and payloads:
+//! `docs/ingame-panel-v2.md`.
+//!
+//! A view hears only what is sent while it is open, so the feed repeats:
+//! the status each second, the live values while recording, the flight's
+//! events and landings every few seconds.
+
+use std::sync::mpsc::{self, RecvTimeoutError, Sender};
+use std::thread;
+use std::time::{Duration, Instant};
+
+use debrief::{Event, FlightSummary, LandingNotice, RecorderStatus};
+use serde::Serialize;
+use serde_json::{Value, json};
+use sim_link::{Recv, SimConnect};
+
+use crate::Happening;
+use crate::monitor::Live;
+
+pub const STATUS: &str = "FOQA_SIM_STATUS";
+pub const LIVE: &str = "FOQA_SIM_LIVE";
+pub const EVENTS: &str = "FOQA_SIM_EVENTS";
+pub const LANDING: &str = "FOQA_SIM_LANDING";
+pub const LANDINGS: &str = "FOQA_SIM_LANDINGS";
+/// View to app.
+pub const CMD: &str = "FOQA_SIM_CMD";
+/// Payload version, `v` in every message.
+pub(crate) const VERSION: u32 = 2;
+const STATUS_EVERY: Duration = Duration::from_secs(1);
+const REPEAT_EVERY: Duration = Duration::from_secs(5);
+/// Landings in `FOQA_SIM_LANDINGS`.
+const LANDINGS_SENT: usize = 3;
+/// Client event id of the `CMD` subscription.
+const CMD_EVENT_ID: u32 = 1;
+/// A longer pilot-report note is cut (a journal packet holds 64 KiB).
+const NOTE_MAX_BYTES: usize = 1000;
+/// Wait between attempts to open the feed's own SimConnect connection.
+const RECONNECT: Duration = Duration::from_secs(5);
+const TICK: Duration = Duration::from_millis(250);
+
+/// What the feed shows.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Msg {
+    /// Also passed on to the app.
+    Happening(Happening),
+    Live(Live),
+    Snapshot(Snapshot),
+    /// The answer to a view's command.
+    Ack(Ack),
+}
+
+impl From<Happening> for Msg {
+    fn from(h: Happening) -> Self {
+        Self::Happening(h)
+    }
+}
+
+/// The flight being recorded, analysed as it stands.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Snapshot {
+    pub summary: FlightSummary,
+    pub events: Vec<Event>,
+    /// In time order.
+    pub landings: Vec<LandingNotice>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Ack {
+    pub cmd: String,
+    pub ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
+impl Ack {
+    pub fn new(cmd: &str, result: Result<(), String>) -> Self {
+        Self {
+            cmd: cmd.to_owned(),
+            ok: result.is_ok(),
+            message: result.err(),
+        }
+    }
+}
+
+/// A command from a view (`FOQA_SIM_CMD`).
+#[derive(Debug, Clone, PartialEq)]
+pub enum ViewCommand {
+    EndFlight,
+    DiscardFlight,
+    Mark(String),
+}
+
+impl ViewCommand {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::EndFlight => "end_flight",
+            Self::DiscardFlight => "discard_flight",
+            Self::Mark(_) => "mark",
+        }
+    }
+
+    /// From the view's JSON, with or without trailing NULs; a bad one is
+    /// answered at once.
+    fn parse(data: &str) -> Result<Self, Ack> {
+        let data = data.trim_end_matches('\0');
+        let v: Value =
+            serde_json::from_str(data).map_err(|e| Ack::new("?", Err(format!("not JSON: {e}"))))?;
+        let cmd = v["cmd"].as_str().unwrap_or("?");
+        let fail = |m: &str| Ack::new(cmd, Err(m.to_owned()));
+        if v["v"] != VERSION {
+            return Err(fail("unsupported version"));
+        }
+        Ok(match cmd {
+            "end_flight" => Self::EndFlight,
+            "discard_flight" => Self::DiscardFlight,
+            "mark" => {
+                let mut note = v["note"].as_str().unwrap_or_default().to_owned();
+                let mut end = note.len().min(NOTE_MAX_BYTES);
+                while !note.is_char_boundary(end) {
+                    end -= 1;
+                }
+                note.truncate(end);
+                Self::Mark(note)
+            }
+            _ => return Err(fail("unknown command")),
+        })
+    }
+}
+
+/// Hands every happening on to `out` unchanged and mirrors what it is
+/// given into the sim, a landing in the same instant `out` gets it, and
+/// passes the views' commands on to `commands`. The feed runs on a thread
+/// of its own with a SimConnect connection of its own, opened while the
+/// recorder is connected, so it never touches the recording connection.
+/// It ends when every sender of the returned channel is gone.
+pub fn tee(out: Sender<Happening>, commands: Sender<ViewCommand>) -> Sender<Msg> {
+    let (tx, rx) = mpsc::channel();
+    thread::spawn(move || {
+        let (mut board, mut link) = (Board::default(), Link::default());
+        loop {
+            match rx.recv_timeout(TICK) {
+                Ok(msg) => {
+                    board.take(&msg, Instant::now());
+                    if let Msg::Happening(h) = msg {
+                        // The receiver is gone only when the app is closing.
+                        let _ = out.send(h);
+                    }
+                }
+                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => break,
+            }
+            let now = Instant::now();
+            for data in link.send(board.due(now), board.sim_up(), now) {
+                match ViewCommand::parse(&data) {
+                    Ok(cmd) if board.recording().is_some() => {
+                        let _ = commands.send(cmd);
+                    }
+                    Ok(cmd) => {
+                        let ack = Ack::new(cmd.name(), Err("no flight open".into()));
+                        board.take(&Msg::Ack(ack), now);
+                    }
+                    Err(ack) => board.take(&Msg::Ack(ack), now),
+                }
+            }
+        }
+    });
+    tx
+}
+
+/// `Status.flight`.
+#[derive(Debug, Serialize)]
+struct FlightInfo<'a> {
+    id: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    aircraft: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    departure: Option<&'a str>,
+    elapsed_s: f64,
+    phase: &'static str,
+    landings: usize,
+}
+
+/// What the panel is to show, and when each message is next due.
+#[derive(Debug, Default)]
+struct Board {
+    status: Option<RecorderStatus>,
+    /// The last landing and when it arrived.
+    landing: Option<(LandingNotice, Instant)>,
+    /// Not yet sent.
+    live: Option<Live>,
+    phase: Option<&'static str>,
+    /// Of the flight being recorded.
+    snapshot: Option<Snapshot>,
+    /// Sent once, with the next status.
+    ack: Option<Ack>,
+    /// `None`: due now.
+    next_status: Option<Instant>,
+    next_landing: Option<Instant>,
+    next_events: Option<Instant>,
+    next_landings: Option<Instant>,
+}
+
+impl Board {
+    fn take(&mut self, msg: &Msg, now: Instant) {
+        match msg {
+            Msg::Happening(Happening::Status(status)) => {
+                self.status = Some(status.clone());
+                if self.recording().is_none() {
+                    (self.live, self.phase, self.snapshot) = (None, None, None);
+                }
+            }
+            Msg::Happening(Happening::Landing(notice)) => {
+                self.landing = Some((notice.clone(), now));
+                self.next_landing = None;
+            }
+            Msg::Happening(Happening::FlightSaved(_)) => {}
+            Msg::Live(live) => {
+                self.phase = Some(live.phase());
+                self.live = Some(live.clone());
+            }
+            Msg::Snapshot(s) if self.recording() == Some(&s.summary.id) => {
+                if self
+                    .snapshot
+                    .as_ref()
+                    .is_none_or(|old| old.events != s.events)
+                {
+                    self.next_events = None;
+                }
+                self.snapshot = Some(s.clone());
+            }
+            // Of a flight no longer recorded.
+            Msg::Snapshot(_) => {}
+            Msg::Ack(ack) => {
+                self.ack = Some(ack.clone());
+                self.next_status = None;
+            }
+        }
+    }
+
+    /// The flight being recorded.
+    fn recording(&self) -> Option<&String> {
+        match &self.status {
+            Some(RecorderStatus::Recording { flight_id, .. }) => Some(flight_id),
+            _ => None,
+        }
+    }
+
+    /// The recorder is connected to the sim, so the feed can be too.
+    fn sim_up(&self) -> bool {
+        matches!(
+            self.status,
+            Some(RecorderStatus::Connected | RecorderStatus::Recording { .. })
+        )
+    }
+
+    fn flight(&self) -> Option<FlightInfo<'_>> {
+        let Some(RecorderStatus::Recording {
+            flight_id,
+            elapsed_s,
+        }) = &self.status
+        else {
+            return None;
+        };
+        let summary = self.snapshot.as_ref().map(|s| &s.summary);
+        let aircraft = summary.and_then(|s| s.aircraft.as_ref());
+        Some(FlightInfo {
+            id: flight_id,
+            aircraft: aircraft.map(|a| a.icao.as_deref().unwrap_or(&a.title)),
+            departure: summary.and_then(|s| s.departure.as_deref()),
+            elapsed_s: *elapsed_s,
+            phase: self.phase.unwrap_or("Standing"),
+            landings: summary.map_or(0, |s| s.landings),
+        })
+    }
+
+    /// The messages due at `now`, as (Comm Bus event, JSON).
+    fn due(&mut self, now: Instant) -> Vec<(&'static str, String)> {
+        let is_due = |next: &mut Option<Instant>, every| {
+            let due = next.is_none_or(|t| now >= t);
+            if due {
+                *next = Some(now + every);
+            }
+            due
+        };
+        let mut due = Vec::new();
+        if self.status.is_some() && is_due(&mut self.next_status, STATUS_EVERY) {
+            let mut msg = json!({ "v": VERSION, "status": self.status });
+            if let Some(flight) = self.flight() {
+                msg["flight"] = json!(flight);
+            }
+            if let Some(ack) = self.ack.take() {
+                msg["ack"] = json!(ack);
+            }
+            due.push((STATUS, msg.to_string()));
+        }
+        if let Some(live) = self.live.take() {
+            due.push((LIVE, json!(live).to_string()));
+        }
+        if let Some(s) = &self.snapshot {
+            if is_due(&mut self.next_events, REPEAT_EVERY) {
+                let msg = json!({
+                    "v": VERSION,
+                    "flight_id": s.summary.id,
+                    "events": s.events,
+                    "counts": s.summary.event_counts,
+                });
+                due.push((EVENTS, msg.to_string()));
+            }
+            if is_due(&mut self.next_landings, REPEAT_EVERY) {
+                let last: Vec<_> = s.landings.iter().rev().take(LANDINGS_SENT).collect();
+                let msg = json!({ "v": VERSION, "landings": last });
+                due.push((LANDINGS, msg.to_string()));
+            }
+        }
+        if let Some((notice, at)) = &self.landing
+            && is_due(&mut self.next_landing, REPEAT_EVERY)
+        {
+            let age_s = now.duration_since(*at).as_secs();
+            let msg = json!({ "v": VERSION, "age_s": age_s, "notice": notice });
+            due.push((LANDING, msg.to_string()));
+        }
+        due
+    }
+}
+
+/// The feed's SimConnect connection, opened on demand.
+#[derive(Default)]
+struct Link {
+    sim: Option<SimConnect>,
+    retry_at: Option<Instant>,
+}
+
+impl Link {
+    /// Sends `msgs` while `up` and returns the commands the views sent;
+    /// messages with no connection are dropped, the board repeats them.
+    fn send(&mut self, msgs: Vec<(&'static str, String)>, up: bool, now: Instant) -> Vec<String> {
+        if !up {
+            self.sim = None;
+            return Vec::new();
+        }
+        if self.sim.is_none() && self.retry_at.is_none_or(|t| now >= t) {
+            self.retry_at = Some(now + RECONNECT);
+            self.sim = SimConnect::open("FOQA-Sim panel feed")
+                .inspect(|_| eprintln!("panel feed: connected"))
+                .inspect_err(|e| eprintln!("panel feed: {e}"))
+                .ok();
+            if let Some(sim) = &mut self.sim
+                && let Err(e) = sim.subscribe_comm_bus(CMD_EVENT_ID, CMD)
+            {
+                eprintln!("panel feed: no commands: {e}");
+            }
+        }
+        let Some(sim) = &mut self.sim else {
+            return Vec::new();
+        };
+        publish(sim, &msgs).unwrap_or_else(|e| {
+            eprintln!("panel feed: {e}");
+            self.sim = None;
+            Vec::new()
+        })
+    }
+}
+
+/// Drains the connection's queue, keeping the views' commands, and
+/// broadcasts `msgs` to the sim's views.
+fn publish(sim: &mut SimConnect, msgs: &[(&str, String)]) -> Result<Vec<String>, String> {
+    let mut commands = Vec::new();
+    while let Some(msg) = sim.dispatch() {
+        match msg {
+            Recv::Quit => return Err("simulator quit".into()),
+            Recv::CommBus {
+                event_id: CMD_EVENT_ID,
+                data,
+            } => commands.push(data),
+            _ => {}
+        }
+    }
+    msgs.iter()
+        .try_for_each(|(name, data)| sim.call_comm_bus_js(name, data))
+        .map_err(|e| e.to_string())?;
+    Ok(commands)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use debrief::{Aircraft, Level, Touchdown};
+
+    use super::*;
+
+    fn notice() -> LandingNotice {
+        LandingNotice {
+            flight_id: "flight-1".into(),
+            touchdown: Touchdown {
+                t_s: 259.2,
+                bounce: false,
+                sink_fpm: 200.0,
+                sim_sink_fpm: None,
+                peak_g: 1.27,
+                pitch_deg: None,
+                roll_deg: None,
+                ias_kt: None,
+                runway: None,
+            },
+            events: vec![],
+        }
+    }
+
+    fn recording(elapsed_s: f64) -> Msg {
+        Msg::Happening(Happening::Status(RecorderStatus::Recording {
+            flight_id: "flight-1".into(),
+            elapsed_s,
+        }))
+    }
+
+    fn snapshot(landings: usize) -> Snapshot {
+        Snapshot {
+            summary: FlightSummary {
+                id: "flight-1".into(),
+                started_utc: None,
+                duration_s: 600.0,
+                aircraft: Some(Aircraft {
+                    icao: Some("C172".into()),
+                    title: "C172SP".into(),
+                }),
+                departure: Some("LTBJ".into()),
+                arrival: None,
+                landings,
+                worst_level: None,
+                event_counts: BTreeMap::from([(Level(rules::Level::Advisory), 0)]),
+            },
+            events: vec![],
+            landings: vec![notice(); landings],
+        }
+    }
+
+    fn parsed(due: &[(&str, String)]) -> Vec<(String, Value)> {
+        due.iter()
+            .map(|(n, j)| (n.to_string(), serde_json::from_str(j).unwrap()))
+            .collect()
+    }
+
+    fn named<'a>(due: &'a [(String, Value)], name: &str) -> Option<&'a Value> {
+        due.iter().find(|(n, _)| n == name).map(|(_, v)| v)
+    }
+
+    #[test]
+    fn nothing_is_due_before_anything_happened() {
+        assert!(Board::default().due(Instant::now()).is_empty());
+    }
+
+    #[test]
+    fn status_goes_out_at_most_each_second() {
+        let (mut board, t0) = (Board::default(), Instant::now());
+        board.take(&Happening::Status(RecorderStatus::Connected).into(), t0);
+        let first = parsed(&board.due(t0));
+        assert_eq!(
+            first,
+            [(
+                STATUS.into(),
+                json!({"v": 2, "status": {"state": "connected"}})
+            )]
+        );
+        board.take(&recording(3.0), t0);
+        assert!(board.due(t0 + Duration::from_millis(900)).is_empty());
+        let next = parsed(&board.due(t0 + STATUS_EVERY));
+        assert_eq!(next[0].1["status"]["state"], "recording");
+        assert!(board.sim_up());
+    }
+
+    #[test]
+    fn status_tells_the_flight_while_recording() {
+        let (mut board, t0) = (Board::default(), Instant::now());
+        board.take(&recording(42.0), t0);
+        board.take(&Msg::Snapshot(snapshot(2)), t0);
+        let due = parsed(&board.due(t0));
+        let flight = &named(&due, STATUS).unwrap()["flight"];
+        assert_eq!(
+            flight,
+            &json!({"id": "flight-1", "aircraft": "C172", "departure": "LTBJ",
+                    "elapsed_s": 42.0, "phase": "Standing", "landings": 2})
+        );
+        assert_eq!(named(&due, EVENTS).unwrap()["flight_id"], "flight-1");
+        let landings = &named(&due, LANDINGS).unwrap()["landings"];
+        assert_eq!(landings.as_array().unwrap().len(), 2);
+        // Back to the menu: the flight goes, and with it its snapshot.
+        let connected = Happening::Status(RecorderStatus::Connected);
+        board.take(&connected.into(), t0);
+        let due = parsed(&board.due(t0 + STATUS_EVERY));
+        assert_eq!(due.len(), 1);
+        assert!(due[0].1.get("flight").is_none());
+    }
+
+    #[test]
+    fn landings_are_the_last_three_newest_first() {
+        let (mut board, t0) = (Board::default(), Instant::now());
+        board.take(&recording(1.0), t0);
+        let mut s = snapshot(4);
+        for (i, l) in s.landings.iter_mut().enumerate() {
+            l.touchdown.t_s = i as f64;
+        }
+        board.take(&Msg::Snapshot(s), t0);
+        let due = parsed(&board.due(t0));
+        let times: Vec<_> = named(&due, LANDINGS).unwrap()["landings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|l| l["touchdown"]["t_s"].as_f64().unwrap())
+            .collect();
+        assert_eq!(times, [3.0, 2.0, 1.0]);
+        // A snapshot of another flight is ignored.
+        let mut other = snapshot(1);
+        other.summary.id = "flight-0".into();
+        board.take(&Msg::Snapshot(other), t0);
+        assert_eq!(board.snapshot.as_ref().unwrap().landings.len(), 4);
+    }
+
+    #[test]
+    fn an_ack_goes_out_once_with_the_next_status_at_once() {
+        let (mut board, t0) = (Board::default(), Instant::now());
+        board.take(&Happening::Status(RecorderStatus::Connected).into(), t0);
+        board.due(t0);
+        let ack = Ack::new("end_flight", Err("no flight open".into()));
+        board.take(&Msg::Ack(ack), t0);
+        let due = parsed(&board.due(t0 + Duration::from_millis(100)));
+        assert_eq!(
+            due[0].1["ack"],
+            json!({"cmd": "end_flight", "ok": false, "message": "no flight open"})
+        );
+        let next = parsed(&board.due(t0 + Duration::from_millis(1100)));
+        assert!(next[0].1.get("ack").is_none());
+    }
+
+    #[test]
+    fn landing_goes_out_at_once_then_repeats_with_its_age() {
+        let (mut board, t0) = (Board::default(), Instant::now());
+        board.take(&Happening::Landing(notice()).into(), t0);
+        let first = parsed(&board.due(t0));
+        assert_eq!(first[0].0, LANDING);
+        assert_eq!(first[0].1["v"], 2);
+        assert_eq!(first[0].1["age_s"], 0);
+        assert_eq!(first[0].1["notice"]["touchdown"]["sink_fpm"], 200.0);
+        assert!(board.due(t0 + Duration::from_secs(4)).is_empty());
+        let again = parsed(&board.due(t0 + REPEAT_EVERY));
+        assert_eq!(again[0].1["age_s"], 5);
+        // A new landing is due at once.
+        let later = t0 + Duration::from_secs(6);
+        board.take(&Happening::Landing(notice()).into(), later);
+        assert_eq!(board.due(later).len(), 1);
+        assert!(!board.sim_up());
+    }
+
+    #[test]
+    fn commands_parse_with_or_without_terminators() {
+        use ViewCommand::*;
+        let parse = ViewCommand::parse;
+        assert_eq!(parse(r#"{"v":2,"cmd":"end_flight"}"#), Ok(EndFlight));
+        let terminated = "{\"v\":2,\"cmd\":\"discard_flight\"}\0\0";
+        assert_eq!(parse(terminated), Ok(DiscardFlight));
+        assert_eq!(parse(r#"{"v":2,"cmd":"mark"}"#), Ok(Mark(String::new())));
+        let mark = parse(r#"{"v":2,"cmd":"mark","note":"long flare"}"#);
+        assert_eq!(mark, Ok(Mark("long flare".into())));
+        // Cut at a character boundary.
+        let long = format!(r#"{{"v":2,"cmd":"mark","note":"{}"}}"#, "é".repeat(600));
+        let Ok(Mark(note)) = parse(&long) else {
+            panic!("{long}")
+        };
+        assert_eq!(note.len(), NOTE_MAX_BYTES);
+        let failed = |data: &str| parse(data).unwrap_err();
+        let old = failed(r#"{"v":1,"cmd":"mark"}"#);
+        assert_eq!(old.message.as_deref(), Some("unsupported version"));
+        let unknown = failed(r#"{"v":2,"cmd":"eject"}"#);
+        assert_eq!((unknown.cmd.as_str(), unknown.ok), ("eject", false));
+        assert_eq!(failed("mark").cmd, "?");
+    }
+}

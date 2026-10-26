@@ -1,0 +1,14 @@
+{
+  "title": "Spinner",
+  "description": "A small indeterminate ring for work that has no measurable progress.",
+  "category": "Feedback",
+  "kind": "component",
+  "dependencies": [],
+  "requires": [],
+  "tags": [
+    "loading",
+    "status"
+  ],
+  "source": "egebilge",
+  "canvas": []
+}

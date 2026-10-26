@@ -1,0 +1,13 @@
+# Boeing 737-800 type profile (e.g. third-party add-ons). Schema: docs/rules.md.
+#
+# No flaps: the VFE table is not confirmed against a primary source.
+type: B738
+name: Boeing 737-800
+class: transport
+tail_contact:
+  takeoff: { value: 11.0 deg, source: "Boeing 737 NG FCTM Rev 21, section 3.37-3.38 tail strike pitch table, https://p7aviation.com/LMS/wp-content/uploads/2023/03/B737-NG-FCTM_Rev_21.pdf" }
+  landing: { value: 9.2 deg, source: "Boeing 737 NG FCTM Rev 21, section 6.13-6.15 landing contact chart, https://p7aviation.com/LMS/wp-content/uploads/2023/03/B737-NG-FCTM_Rev_21.pdf", note: "standard / one-position skid; about 8.8 deg with the two-position skid" }
+hard_landing_g:
+  value: 2.2 g
+  source: 'ATSB AO-2023-010 quoting the Boeing 737 AMM: "an indication of a hard landing on the main landing gear is a peak recorded vertical acceleration that exceeds 2.2 G", https://www.atsb.gov.au/sites/default/files/2023-12/AO-2023-010%20Final.pdf#page=9'
+  note: "for main-gear-first touchdowns with roll <= 2 deg; assumes a 16 samples/s DFDR (Flight Safety Digest Aug 2004, flightsafety.org/fsd/fsd_aug04.pdf), so a maintenance-indication proxy at our frame rate"

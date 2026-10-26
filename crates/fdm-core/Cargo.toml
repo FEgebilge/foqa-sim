@@ -1,0 +1,8 @@
+[package]
+name = "fdm-core"
+description = "Sample types, units and the logical frame layout (LFL) shared by the aircraft and ground segments."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true

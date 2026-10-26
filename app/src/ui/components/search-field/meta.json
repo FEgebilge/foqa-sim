@@ -1,0 +1,17 @@
+{
+  "title": "Search field",
+  "description": "A recognizable search entry point with clear affordances.",
+  "category": "Inputs",
+  "kind": "component",
+  "dependencies": [
+    "lucide-react",
+    "motion"
+  ],
+  "requires": [],
+  "tags": [
+    "field",
+    "search"
+  ],
+  "source": "arc",
+  "canvas": []
+}

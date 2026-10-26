@@ -1,0 +1,12 @@
+[package]
+name = "sim-link"
+description = "Own SimConnect client: hand-written FFI over a runtime-loaded SimConnect.dll."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+fdm-core = { path = "../fdm-core" }
+libloading = "0.8"

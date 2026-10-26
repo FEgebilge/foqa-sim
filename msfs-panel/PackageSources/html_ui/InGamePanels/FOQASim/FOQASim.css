@@ -1,0 +1,200 @@
+/* FOQA-Sim board, "Night Flight" dark theme (app/src/styles): cyan accent;
+   red, amber, yellow and blue are reserved for event levels. Coherent GT:
+   flex only (no grid, no gap). */
+.foqa {
+    --bg: rgba(5, 14, 29, 0.92);
+    --surface: #101c2e;
+    --surface-2: #16263b;
+    --border: #1f2c3f;
+    --fg: #e8f0f6;
+    --secondary: #b6c3cf;
+    --muted: #8c9aa9;
+    --accent: #58d1e5;
+    --ok: #5dd68f;
+    --high: #f0605a;
+    --medium: #f2a33a;
+    --low: #e2cf5c;
+    --advisory: #73aee6;
+    --ink: #050e1d;
+    --mono: "RobotoMono-Regular", monospace;
+    --bold: "Roboto-Bold", "Roboto-Regular", sans-serif;
+    --big: 30px;
+    display: flex;
+    flex-direction: column;
+    box-sizing: border-box;
+    width: 100%;
+    height: 100%;
+    padding: 8px 10px;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: "Roboto-Regular", sans-serif;
+    font-size: 14px;
+    line-height: 1.3;
+    overflow: hidden;
+}
+.foqa.short { --big: 22px; padding: 6px 8px; }
+.foqa .top, .foqa .tabs, .foqa .flash-slot, .foqa .toast-slot { flex-shrink: 0; }
+.foqa .body { flex: 1 1 auto; min-height: 0; overflow-x: hidden; overflow-y: auto; padding: 0 3px; }
+.foqa .body::-webkit-scrollbar { width: 6px; }
+.foqa .body::-webkit-scrollbar-track { background: transparent; }
+.foqa .body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+/* Header: state, flight, phase, Mark */
+.foqa .top { display: flex; align-items: center; white-space: nowrap; min-height: 26px; }
+.foqa .dot { width: 9px; height: 9px; border-radius: 50%; margin-right: 7px; background: var(--muted); flex-shrink: 0; }
+.foqa .dot.rec { background: var(--high); }
+.foqa .dot.idle { background: var(--accent); }
+.foqa .dot.err { background: var(--medium); }
+.foqa .state { color: var(--fg); font-family: var(--mono); flex-shrink: 0; }
+.foqa .sub { flex: 1 1 auto; min-width: 0; margin: 0 8px; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
+.foqa .phase {
+    flex-shrink: 0; padding: 1px 7px; margin-right: 6px;
+    border: 1px solid var(--border); border-radius: 10px; font-size: 12px; color: var(--secondary);
+}
+.foqa .phase.hot { border-color: var(--accent); color: var(--ink); background: var(--accent); font-family: var(--bold); }
+
+/* Buttons */
+.foqa .btn {
+    flex-shrink: 0; min-width: 24px; height: 24px; padding: 0 8px; box-sizing: border-box;
+    border: 1px solid var(--border); border-radius: 4px; background: var(--surface);
+    text-align: center; line-height: 22px; color: var(--secondary); cursor: pointer;
+}
+.foqa .btn:hover { color: var(--fg); border-color: var(--accent); }
+.foqa .btn.mark { color: var(--accent); border-color: var(--accent); }
+.foqa .btn.off { opacity: 0.45; pointer-events: none; }
+.foqa .btn.wide { display: block; height: 32px; line-height: 30px; margin-top: 6px; font-size: 14px; color: var(--fg); }
+.foqa .btn.danger { color: var(--high); border-color: rgba(240, 96, 90, 0.5); }
+.foqa .btn.danger.armed { color: var(--ink); background: var(--high); border-color: var(--high); font-family: var(--bold); }
+
+/* New-event banner: plays its animation once, since a section is only redrawn when it changes. */
+@keyframes foqa-flash { 0% { background: var(--flash); } 100% { background: var(--surface-2); } }
+.foqa .flash {
+    --flash: var(--muted);
+    display: flex; flex-wrap: wrap; align-items: baseline;
+    margin-top: 6px; padding: 5px 8px; border-left: 4px solid var(--muted); border-radius: 3px;
+    background: var(--surface-2); cursor: pointer;
+    animation: foqa-flash 1.6s ease-out 1;
+}
+.foqa .flash.lvl-high { --flash: rgba(240, 96, 90, 0.75); }
+.foqa .flash.lvl-medium { --flash: rgba(242, 163, 58, 0.75); }
+.foqa .flash.lvl-low { --flash: rgba(226, 207, 92, 0.7); }
+.foqa .flash.lvl-advisory { --flash: rgba(115, 174, 230, 0.7); }
+.foqa .flash .lvl { margin-right: 8px; font-size: 11px; font-family: var(--bold); text-transform: uppercase; letter-spacing: 1px; }
+.foqa .flash .name { margin-right: 8px; font-family: var(--bold); }
+.foqa .flash .detail { color: var(--secondary); font-family: var(--mono); font-size: 13px; }
+.foqa .flash .more { margin-left: auto; color: var(--muted); font-size: 12px; }
+
+/* Tabs */
+.foqa .tabs { display: flex; margin-top: 6px; border-bottom: 1px solid var(--border); }
+.foqa .tab {
+    flex: 1 1 auto; padding: 5px 4px 4px; text-align: center; white-space: nowrap;
+    color: var(--muted); border-bottom: 2px solid transparent; cursor: pointer;
+}
+.foqa .tab:hover { color: var(--fg); }
+.foqa .tab.on { color: var(--fg); border-bottom-color: var(--accent); }
+.foqa .badge {
+    display: inline-block; min-width: 16px; margin-left: 5px; padding: 0 4px; box-sizing: border-box;
+    border-radius: 8px; background: var(--surface-2); color: var(--fg);
+    font-size: 11px; line-height: 16px; text-align: center; font-family: var(--bold);
+}
+.foqa .badge.lvl-high { background: var(--high); color: var(--ink); }
+.foqa .badge.lvl-medium { background: var(--medium); color: var(--ink); }
+.foqa .badge.lvl-low { background: var(--low); color: var(--ink); }
+.foqa .badge.lvl-advisory { background: var(--advisory); color: var(--ink); }
+.foqa.narrow .tab { font-size: 13px; padding-left: 2px; padding-right: 2px; }
+
+.foqa .note { margin-top: 10px; color: var(--secondary); }
+.foqa .section { margin-top: 10px; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+
+/* Now: instrument tiles. Hot (approach): three large, two small; else five small. */
+.foqa .tiles { display: flex; flex-wrap: wrap; margin: 4px -3px 0; }
+.foqa .tile {
+    display: flex; flex-direction: column; box-sizing: border-box;
+    width: 20%; padding: 5px 6px; margin-top: 4px;
+    border-left: 3px solid transparent; border-right: 3px solid transparent; background-clip: padding-box;
+}
+.foqa .tile .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap; }
+.foqa .tile .value { font-family: var(--mono); font-size: 18px; line-height: 1.15; }
+.foqa .tile .unit { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; }
+.foqa .tiles.hot .tile.main { width: 33.33%; background-color: var(--surface); }
+.foqa .tiles.hot .tile.main .value { font-size: var(--big); }
+.foqa .tiles.hot .tile.aux { width: 50%; flex-direction: row; align-items: baseline; }
+.foqa .tiles.hot .tile.aux .label { margin-right: 8px; }
+.foqa .tiles.hot .tile.aux .value { font-size: 18px; }
+.foqa .tile.near .value { color: var(--medium); }
+.foqa .tile.bad { background-color: rgba(240, 96, 90, 0.18); }
+.foqa .tile.bad .value, .foqa .tile.bad .unit { color: var(--high); }
+.foqa.narrow .tile { width: 33.33%; }
+
+/* Stabilised-approach gates */
+.foqa .gates { display: flex; flex-wrap: wrap; margin: 4px -3px 0; }
+.foqa .gate {
+    box-sizing: border-box; width: 50%; margin-top: 4px; padding: 6px 8px;
+    border-left: 3px solid transparent; border-right: 3px solid transparent; background-clip: padding-box;
+    background-color: var(--surface);
+}
+.foqa.narrow .gate { width: 100%; }
+.foqa .ghead { display: flex; align-items: center; }
+.foqa .gate .at { flex: 1; font-family: var(--mono); font-size: 16px; }
+.foqa .gstate { padding: 1px 6px; border-radius: 3px; font-size: 11px; font-family: var(--bold); text-transform: uppercase; letter-spacing: 1px; color: var(--secondary); border: 1px solid var(--border); }
+.foqa .gate .gbody { margin-top: 3px; font-size: 13px; color: var(--muted); }
+.foqa .gate.stable .gstate { background: var(--ok); border-color: var(--ok); color: var(--ink); }
+.foqa .gate.unstable { background-color: rgba(240, 96, 90, 0.16); }
+.foqa .gate.unstable .gstate { background: var(--high); border-color: var(--high); color: var(--ink); }
+.foqa .gate .fail { color: var(--fg); font-family: var(--mono); font-size: 12px; }
+
+/* Events */
+.foqa .counts { display: flex; flex-wrap: wrap; margin-top: 6px; }
+.foqa .count {
+    margin: 0 6px 4px 0; padding: 2px 8px; border-radius: 3px; border-left: 3px solid var(--muted);
+    background: var(--surface); font-size: 12px; color: var(--secondary); text-transform: capitalize;
+}
+.foqa .count b { font-family: var(--mono); font-weight: normal; color: var(--fg); margin-right: 3px; }
+.foqa .count.zero { opacity: 0.5; }
+.foqa .event { margin-top: 5px; padding: 4px 8px; background: var(--surface); border-left: 3px solid var(--muted); border-radius: 3px; }
+.foqa .erow { display: flex; align-items: baseline; }
+.foqa .event .name { flex: 1; }
+.foqa .event .time { margin-left: 8px; font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.foqa .event .detail { font-family: var(--mono); font-size: 12px; color: var(--secondary); }
+
+/* Landings */
+.foqa .card { margin-top: 8px; padding-top: 6px; border-top: 2px solid var(--accent); }
+.foqa .head { display: flex; align-items: center; }
+.foqa .title { flex: 1; font-family: var(--bold); color: var(--accent); }
+.foqa .stats { display: flex; margin-top: 4px; }
+.foqa .stat { display: flex; flex-direction: column; margin-right: 22px; }
+.foqa .stat .value { font-family: var(--mono); font-size: var(--big); line-height: 1.1; }
+.foqa .stat .unit { font-size: 12px; color: var(--muted); }
+.foqa .tags { display: flex; flex-wrap: wrap; align-items: center; margin-top: 6px; }
+.foqa .tag { padding: 1px 7px; margin-right: 6px; border-radius: 3px; font-size: 12px; font-family: var(--bold); color: var(--ink); white-space: nowrap; }
+.foqa .tag.ok { background: var(--ok); }
+.foqa .tag.warn { background: var(--medium); }
+.foqa .where { font-size: 12px; color: var(--secondary); }
+.foqa .clean { margin-top: 6px; font-size: 13px; color: var(--ok); }
+.foqa .lrow {
+    display: flex; align-items: center; margin-top: 5px; padding: 4px 8px;
+    background: var(--surface); border-left: 3px solid var(--muted); border-radius: 3px; cursor: pointer;
+}
+.foqa .lrow .rw { margin-right: 10px; font-family: var(--bold); white-space: nowrap; }
+.foqa .lrow .nums { flex: 1; font-family: var(--mono); font-size: 12px; color: var(--secondary); }
+
+/* Flight */
+.foqa .facts { display: flex; flex-wrap: wrap; margin-top: 6px; }
+.foqa .fact { display: flex; flex-direction: column; box-sizing: border-box; width: 33.33%; padding: 3px 6px 3px 0; }
+.foqa.narrow .fact { width: 50%; }
+.foqa .fact .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+.foqa .fact .fv { font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.foqa .actions { margin-top: 6px; }
+.foqa .hint { margin-top: 6px; font-size: 12px; color: var(--muted); }
+
+/* Command reply */
+.foqa .toast { margin-top: 6px; padding: 5px 8px; border-radius: 3px; font-family: var(--bold); color: var(--ink); cursor: pointer; }
+.foqa .toast.ok { background: var(--ok); }
+.foqa .toast.fail { background: var(--high); }
+
+/* Level colour: a card's top rule, an event's, flash's and row's left rule. */
+.foqa .lvl-high { border-top-color: var(--high); border-left-color: var(--high); }
+.foqa .lvl-medium { border-top-color: var(--medium); border-left-color: var(--medium); }
+.foqa .lvl-low { border-top-color: var(--low); border-left-color: var(--low); }
+.foqa .lvl-advisory { border-top-color: var(--advisory); border-left-color: var(--advisory); }
+.foqa .lvl-none { border-top-color: var(--ok); border-left-color: var(--ok); }

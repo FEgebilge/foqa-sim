@@ -1,0 +1,91 @@
+[
+  {
+    "id": "flight-1793027213",
+    "started_utc": "2026-10-26T14:26:53Z",
+    "duration_s": 933,
+    "aircraft": {
+      "icao": "C172",
+      "title": "Cessna Skyhawk G1000 Asobo"
+    },
+    "departure": "LTFA",
+    "arrival": "LTFA",
+    "landings": 2,
+    "worst_level": "medium",
+    "event_counts": {
+      "advisory": 0,
+      "low": 2,
+      "medium": 6,
+      "high": 0
+    }
+  },
+  {
+    "id": "flight-1792941000",
+    "started_utc": "2026-10-25T14:30:00Z",
+    "duration_s": 1297.5,
+    "aircraft": {
+      "icao": "C172",
+      "title": "Cessna Skyhawk G1000 Asobo"
+    },
+    "departure": "LTFA",
+    "arrival": "LTFA",
+    "landings": 2,
+    "event_counts": {
+      "advisory": 0,
+      "low": 0,
+      "medium": 0,
+      "high": 0
+    }
+  },
+  {
+    "id": "flight-1792850400",
+    "started_utc": "2026-10-24T13:20:00Z",
+    "duration_s": 933.5,
+    "aircraft": {
+      "icao": "B738",
+      "title": "Boeing 737-800 Asobo"
+    },
+    "departure": "LTFA",
+    "landings": 2,
+    "worst_level": "medium",
+    "event_counts": {
+      "advisory": 0,
+      "low": 0,
+      "medium": 5,
+      "high": 0
+    }
+  },
+  {
+    "id": "flight-1792764000",
+    "started_utc": "2026-10-23T13:20:00Z",
+    "duration_s": 520,
+    "aircraft": {
+      "icao": "C172",
+      "title": "Cessna Skyhawk G1000 Asobo"
+    },
+    "departure": "LTFA",
+    "arrival": "LTFA",
+    "landings": 1,
+    "worst_level": "medium",
+    "event_counts": {
+      "advisory": 0,
+      "low": 1,
+      "medium": 4,
+      "high": 0
+    }
+  },
+  {
+    "id": "flight-1792677600",
+    "started_utc": "2026-10-22T13:20:00Z",
+    "duration_s": 935.5,
+    "departure": "LTFA",
+    "arrival": "LTFA",
+    "landings": 2,
+    "worst_level": "medium",
+    "event_counts": {
+      "advisory": 0,
+      "low": 2,
+      "medium": 5,
+      "high": 0
+    }
+  }
+]
