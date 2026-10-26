@@ -89,9 +89,9 @@ npm --prefix app run lint
 npm --prefix app run build
 ```
 
-CI runs the same on Windows.
+No hosted CI for now: run the above before moving `dev` to `test`.
 
-Branches: work goes to `dev`, then `dev` → `test` → `main` through pull requests.
+Branches: work goes to `dev`, then `dev` → `test` → `main`.
 
 ## License
 
