@@ -122,8 +122,10 @@ impl Uploader {
 
     /// Before placing (B5): when library entry `key` came from a site,
     /// asks it for an attempt under the local id and returns the marker
-    /// `ref` it issued; offline or signed out, the attempt is practice. A
-    /// local file gets no sidecar.
+    /// `ref` it issued; offline or signed out, the attempt is practice. An
+    /// attempt this app can't fly as issued (another definition, a `ref` a
+    /// marker can't carry) is given back to the site and flown as
+    /// practice. A local file gets no sidecar.
     pub fn issue(&self, id: &str, key: &str, definition_sha256: &str) -> Option<String> {
         let (site, linked) = self.sites.source(key)?;
         let dir = self.dir(id)?;
@@ -150,6 +152,7 @@ impl Uploader {
                 let now = (self.now)();
                 let got = format!("{:x}", Sha256::digest(definition.get().as_bytes()));
                 let matches = got == definition_sha256 && a.definition_sha256 == definition_sha256;
+                let usable = recorder::is_reference(&a.marker_ref);
                 car.attempt_id = Some(a.id.clone());
                 car.marker_ref = Some(a.marker_ref.clone());
                 car.definition_sha256 = Some(a.definition_sha256.clone());
@@ -157,21 +160,31 @@ impl Uploader {
                 car.fly_by_ms = Some(now + a.fly_within_s as i64 * 1000);
                 car.upload_by_ms = Some(now + a.upload_within_s as i64 * 1000);
                 car.upload_by = a.upload_by.clone();
-                let fields = json!({
+                let mut fields = json!({
                     "origin": origin, "attempt_id": a.id, "ref": a.marker_ref,
                     "definition_sha256": a.definition_sha256, "definition_match": matches,
                     "fly_within_s": a.fly_within_s, "upload_within_s": a.upload_within_s,
                 });
-                if matches {
+                if matches && usable {
                     car.text = format!("Ranked on {host}: fly within {} min.", a.fly_within_s / 60);
                     self.save(id, &dir, &mut car, SiteState::Issued, "issued", fields);
                     Some(a.marker_ref)
                 } else {
-                    // The site would score another definition than the one flown.
+                    // The site would score another definition than the one
+                    // flown, or a recording without its marker.
                     let _ = session.abandon(&a.id);
-                    car.text = practice(&format!(
-                        "this challenge changed on {host}; take it again from Sites."
-                    ));
+                    let (reason, why) = match matches {
+                        true => (
+                            "bad_ref",
+                            format!("{host} issued a ref FOQA-Sim can't record."),
+                        ),
+                        false => (
+                            "definition_changed",
+                            format!("this challenge changed on {host}; take it again from Sites."),
+                        ),
+                    };
+                    fields["reason"] = reason.into();
+                    car.text = practice(&why);
                     self.save(id, &dir, &mut car, SiteState::Practice, "practice", fields);
                     None
                 }
@@ -188,25 +201,21 @@ impl Uploader {
 
     /// The core finished (`done` or `sliced`): an issued attempt is queued.
     pub fn core_done(&self, id: &str) {
-        self.after_core(
-            id,
-            SiteState::UploadPending,
-            "Waiting to upload…",
-            "upload_queued",
-        );
+        let text = "Waiting to upload…";
+        let to = SiteState::UploadPending;
+        self.after_core(id, to, text, "upload_queued", json!({}));
     }
 
-    /// The core abandoned the attempt: the site is told (queued if offline).
-    pub fn core_abandoned(&self, id: &str) {
-        self.after_core(
-            id,
-            SiteState::Abandoning,
-            "Abandoning on the site…",
-            "abandon_queued",
-        );
+    /// The core abandoned the attempt, or ended it without a slice to
+    /// upload (`reason`): the site is told (queued if offline), so it does
+    /// not stay open there.
+    pub fn core_abandoned(&self, id: &str, reason: &str) {
+        let fields = json!({ "reason": reason });
+        let text = "Abandoning on the site…";
+        self.after_core(id, SiteState::Abandoning, text, "abandon_queued", fields);
     }
 
-    fn after_core(&self, id: &str, to: SiteState, text: &str, event: &str) {
+    fn after_core(&self, id: &str, to: SiteState, text: &str, event: &str, fields: Value) {
         let Some(dir) = self.dir(id) else { return };
         let Some(mut car) = Sidecar::read(&dir) else {
             return;
@@ -214,7 +223,7 @@ impl Uploader {
         if car.state == SiteState::Issued {
             car.text = text.into();
             car.next_at_ms = Some((self.now)());
-            self.save(id, &dir, &mut car, to, event, json!({}));
+            self.save(id, &dir, &mut car, to, event, fields);
         }
     }
 
@@ -596,12 +605,17 @@ mod tests {
     /// A site that answers uploads with `uploads` in order, and one local
     /// attempt at its challenge, flown with a flight file on disk.
     fn world(uploads: Vec<Reply>) -> World {
+        world_issuing(uploads, "Qe3v1hJ0dEa9fP2kLm7xRw")
+    }
+
+    /// `world` with a site that issues `marker_ref`.
+    fn world_issuing(uploads: Vec<Reply>, marker_ref: &'static str) -> World {
         let uploads = Mutex::new(uploads);
         let mock = Mock::start(move |req, base| {
             match (req.method.as_str(), req.path.as_str()) {
             (_, crate::discovery::PATH) => Reply::json(200, well_known(base)),
             ("POST", "/api/foqa/v1/challenges/ltfj-06/attempts") => Reply::raw(201, "application/json", format!(
-                r#"{{"attempt":{{"id":"srv-1","ref":"Qe3v1hJ0dEa9fP2kLm7xRw","challenge_id":"ltfj-06","challenge_version":1,"definition_sha256":"{}","issued_at":"t","fly_within_s":1800,"upload_within_s":86400,"upload_by":"28 Oct 18:02"}},"definition":{DEFINITION}}}"#,
+                r#"{{"attempt":{{"id":"srv-1","ref":"{marker_ref}","challenge_id":"ltfj-06","challenge_version":1,"definition_sha256":"{}","issued_at":"t","fly_within_s":1800,"upload_within_s":86400,"upload_by":"28 Oct 18:02"}},"definition":{DEFINITION}}}"#,
                 sha(DEFINITION.as_bytes())
             ).into_bytes()),
             ("PUT", "/api/foqa/v1/attempts/srv-1/recording") => {
@@ -864,10 +878,13 @@ mod tests {
 
         let w = world(vec![]);
         w.issue();
-        w.up.core_abandoned(ID);
+        w.up.core_abandoned(ID, "no_marker");
         w.up.run_due();
         assert_eq!(w.car().state, SiteState::Abandoned);
         assert_eq!(w.mock.hits("/abandon"), 1);
+        let log = sidecar::read_log(&w.dir);
+        let queued = log.iter().find(|l| l["event"] == "abandon_queued");
+        assert_eq!(queued.unwrap()["reason"], "no_marker");
     }
 
     #[test]
@@ -887,6 +904,22 @@ mod tests {
             1,
             "the issued attempt is given back"
         );
+    }
+
+    #[test]
+    fn a_reference_no_marker_can_carry_is_practice_and_given_back() {
+        let w = world_issuing(vec![], "not a ref!");
+        assert_eq!(w.issue(), None, "practice has no marker ref");
+        let car = w.car();
+        assert_eq!(car.state, SiteState::Practice);
+        assert!(car.text.contains("can't record"), "{}", car.text);
+        assert_eq!(
+            w.mock.hits("/abandon"),
+            1,
+            "the issued attempt is given back"
+        );
+        let log = sidecar::read_log(&w.dir);
+        assert_eq!(log.last().unwrap()["reason"], "bad_ref");
     }
 
     #[test]

@@ -30,6 +30,8 @@ const REASON: Record<string, string> = {
   interrupted: "the app closed mid-attempt",
   replaced: "flown again",
   cancelled: "cancelled",
+  no_marker: "the recording has no marker for this attempt",
+  no_flight: "its flight is gone",
 };
 const reason = (r: unknown) => (typeof r === "string" ? REASON[r] ?? r : "");
 
@@ -194,13 +196,14 @@ function describe(line: AttemptLogLine): string {
       return `Graded here: ${score}, ${f.valid ? "counts" : `doesn't count${failed.length ? ` (${failed.map((c) => words(c, CHECK).toLowerCase()).join(", ")})` : ""}`}`;
     }
     case "sliced": return "Recording slice cut";
-    case "done": return "Done";
+    case "done": return f.slice_failed ? `Done without a recording slice: ${reason(f.slice_failed)}` : "Done";
     case "abandoned": return `Abandoned: ${reason(f.reason)}`;
     case "error": return `Error while ${String(f.during ?? "working")}: ${String(f.message ?? "")}`;
     // The site's log (site.log.jsonl), merged in by time.
     case "issued": return `Issued by the site, attempt ${String(f.attempt_id ?? "?")}${f.definition_match === false ? ", definition differs" : ""}`;
     case "practice": return `Practice, not uploaded (${String(f.reason ?? "no attempt issued")})`;
     case "upload_queued": return "Upload queued";
+    case "abandon_queued": return `Abandoning on the site${f.reason ? `: ${reason(f.reason)}` : ""}`;
     case "upload": return typeof f.status === "string" ? `Uploaded, try ${String(f.try)}: ${f.status}` : `Upload try ${String(f.try)} failed: ${String(f.error ?? "?")}${typeof f.retry_in_s === "number" ? `, retry in ${f.retry_in_s} s` : ""}`;
     case "server_status": return `Site: ${String(f.status)}${typeof f.score === "number" ? `, ${number(f.score, 1)}` : ""}${typeof f.rank === "number" ? `, #${f.rank}` : ""}`;
     case "upload_refused": return `Upload refused (${String(f.reason ?? "by the site")})`;

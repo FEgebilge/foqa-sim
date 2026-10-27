@@ -256,7 +256,9 @@ pub fn value_text(id: &str, unit: Option<&str>, x: f64) -> String {
         _ if x.abs() < 10.0 && x.fract() != 0.0 => 1,
         _ => 0,
     };
-    let sign = if SIGNED.contains(&id) && x > 0.0 {
+    let text = number(x, digits);
+    let zero = !text.bytes().any(|b| (b'1'..=b'9').contains(&b));
+    let sign = if SIGNED.contains(&id) && x > 0.0 && !zero {
         "+"
     } else {
         ""
@@ -265,11 +267,11 @@ pub fn value_text(id: &str, unit: Option<&str>, x: f64) -> String {
         "deg" => "\u{b0}".to_owned(),
         u => format!(" {u}"),
     };
-    format!("{sign}{}{unit}", number(x, digits))
+    format!("{sign}{text}{unit}")
 }
 
 /// `x` with `digits` decimals, halves away from zero, thousands grouped
-/// with commas (en-US).
+/// with commas (en-US); a value that rounds to zero is unsigned.
 fn number(x: f64, digits: usize) -> String {
     let scale = 10f64.powi(digits as i32);
     let r = (x * scale).round() / scale;
@@ -282,11 +284,7 @@ fn number(x: f64, digits: usize) -> String {
         }
         grouped.push(c);
     }
-    let sign = if r.is_sign_negative() && !r.is_nan() {
-        "-"
-    } else {
-        ""
-    };
+    let sign = if r < 0.0 { "-" } else { "" };
     format!("{sign}{grouped}{frac}")
 }
 
@@ -428,6 +426,11 @@ mod tests {
             assert_eq!(value_text(id, unit, x), want, "{id} {x}");
         }
         assert_eq!(number(1_234_567.891, 2), "1,234,567.89");
-        assert_eq!(number(-0.4, 0), "-0");
+        assert_eq!(number(-0.4, 0), "0");
+        assert_eq!(number(-0.04, 1), "0.0");
+        assert_eq!(number(-0.0, 1), "0.0");
+        assert_eq!(number(-0.05, 1), "-0.1");
+        assert_eq!(value_text("A1", Some("ft"), -0.02), "0.0 ft");
+        assert_eq!(value_text("A1", Some("ft"), 0.02), "0.0 ft");
     }
 }

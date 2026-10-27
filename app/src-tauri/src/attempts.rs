@@ -66,11 +66,21 @@ impl State {
         )
     }
 
-    /// Between placing and the grade: what a crash leaves to recover
+    /// Between creation and the grade: what a crash leaves to recover
     /// (an attempt graded but not sliced is recovered apart).
     fn interrupted(self) -> bool {
         use State::*;
-        matches!(self, Placing | Flying | Approach | Rollout | Finished)
+        matches!(
+            self,
+            Created | Placing | Flying | Approach | Rollout | Finished
+        )
+    }
+
+    /// Started and without its end marker yet: one at a time, so a second
+    /// begin marker never lands inside an attempt's flight.
+    fn open(self) -> bool {
+        use State::*;
+        matches!(self, Created | Placing | Flying | Approach | Rollout)
     }
 
     /// Flown and not yet landed.
@@ -108,6 +118,10 @@ pub struct Record {
     pub touchdown_s: Option<f64>,
     /// Why it finished or was abandoned.
     pub reason: Option<String>,
+    /// Why its slice can never be cut (`no_marker`, `no_flight`): it is
+    /// done without one and never uploaded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slice_failed: Option<String>,
 }
 
 /// An attempt as the Challenges screen lists it.
@@ -122,6 +136,15 @@ pub struct View {
 
 /// Grades an attempt from its record and the definition flown.
 pub type Grade<'a> = &'a dyn Fn(&Record, &str) -> Result<Attempt, String>;
+
+/// Why a slice was not cut.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Uncut {
+    /// It may be later (the flight file locked or unreadable).
+    Later(String),
+    /// It never can be: the code (`no_marker`, `no_flight`) and the error.
+    Never(&'static str, String),
+}
 
 /// A recording slice cut for an attempt.
 #[derive(Debug, Clone, PartialEq)]
@@ -138,6 +161,8 @@ pub struct Attempts {
     guard: Mutex<()>,
     /// Attempts being finished and graded right now.
     grading: Mutex<HashSet<String>>,
+    /// Attempts whose slice is being cut right now.
+    slicing: Mutex<HashSet<String>>,
     changed: Box<dyn Fn(&Record) + Send + Sync>,
 }
 
@@ -148,6 +173,7 @@ impl Attempts {
             dir,
             guard: Mutex::new(()),
             grading: Mutex::new(HashSet::new()),
+            slicing: Mutex::new(HashSet::new()),
             changed: Box::new(|_| {}),
         })
     }
@@ -158,10 +184,22 @@ impl Attempts {
         self
     }
 
-    /// A new attempt at the definition `json`, from library entry `key`.
+    /// A new attempt at the definition `json`, from library entry `key`;
+    /// refused while another attempt is open.
     pub fn create(&self, key: &str, json: &str) -> Result<Record, String> {
+        self.create_beside(key, json, true)
+    }
+
+    /// `create`; `alone` refuses it while another attempt is open.
+    fn create_beside(&self, key: &str, json: &str, alone: bool) -> Result<Record, String> {
         let c = Challenge::parse(json)?;
         let _held = lock(&self.guard);
+        if let Some(open) = self.records().find(|r| alone && r.state.open()) {
+            return Err(format!(
+                "Attempt {} at {} is still open: finish or abandon it first.",
+                open.n, open.title
+            ));
+        }
         let n = self.records().filter(|r| r.key == key).count() as u32 + 1;
         let now = now();
         let record = Record {
@@ -180,6 +218,7 @@ impl Attempts {
             begin_s: None,
             touchdown_s: None,
             reason: None,
+            slice_failed: None,
         };
         let dir = self.dir.join(&record.id);
         fs::create_dir_all(&dir).map_err(text)?;
@@ -432,12 +471,27 @@ impl Attempts {
     }
 
     /// Cuts the slice of a graded attempt with `cut`, writes it, then
-    /// `sliced` and `done`. A failed cut is logged and the attempt stays
-    /// `graded_local`, to be cut again (`unsliced`).
+    /// `sliced` and `done`. A failed cut is logged; the attempt stays
+    /// `graded_local` to be cut again (`unsliced`), unless it never can be:
+    /// then it is `done` without a slice (`slice_failed`). A cut already
+    /// running for `id` is not repeated.
     pub fn slice(
         &self,
         id: &str,
-        cut: impl FnOnce(&Record) -> Result<Cut, String>,
+        cut: impl FnOnce(&Record) -> Result<Cut, Uncut>,
+    ) -> Result<Record, String> {
+        if !lock(&self.slicing).insert(id.to_owned()) {
+            return self.get(id);
+        }
+        let result = self.slice_claimed(id, cut);
+        lock(&self.slicing).remove(id);
+        result
+    }
+
+    fn slice_claimed(
+        &self,
+        id: &str,
+        cut: impl FnOnce(&Record) -> Result<Cut, Uncut>,
     ) -> Result<Record, String> {
         let record = self.get(id)?;
         if record.state != State::GradedLocal || record.marker_ref.is_none() {
@@ -446,14 +500,28 @@ impl Attempts {
         let dir = self.folder(id)?;
         let written = cut(&record).and_then(|c| {
             let part = dir.join(format!("{SLICE}.part"));
-            fs::write(&part, &c.bytes).map_err(text)?;
-            fs::rename(part, dir.join(SLICE)).map_err(text)?;
+            fs::write(&part, &c.bytes).map_err(|e| Uncut::Later(e.to_string()))?;
+            fs::rename(part, dir.join(SLICE)).map_err(|e| Uncut::Later(e.to_string()))?;
             Ok(c)
         });
         let c = match written {
             Ok(c) => c,
-            Err(e) => {
+            Err(Uncut::Later(e)) => {
                 self.note(id, "error", json!({ "during": "slicing", "message": e }))?;
+                return Err(e);
+            }
+            Err(Uncut::Never(code, e)) => {
+                let fields = json!({ "during": "slicing", "message": e, "final": true });
+                self.note(id, "error", fields)?;
+                self.step(
+                    id,
+                    State::Done,
+                    "done",
+                    json!({ "slice_failed": code }),
+                    |r| {
+                        r.slice_failed = Some(code.to_owned());
+                    },
+                )?;
                 return Err(e);
             }
         };
@@ -482,7 +550,7 @@ impl Attempts {
         for r in stuck {
             let id = r.id.clone();
             let resolved = match r.state {
-                State::Placing => self.abandon(&id, "interrupted"),
+                State::Created | State::Placing => self.abandon(&id, "interrupted"),
                 State::Finished => self.finish(&id, "recovered", grade),
                 _ => match grade(&r, &self.definition(&id).unwrap_or_default()) {
                     Ok(a) if a.touchdown_s.is_some() => self
@@ -649,8 +717,13 @@ pub(crate) mod tests {
         flying_as(a, begin_s, None)
     }
 
+    /// Beside any open attempt: what an older app could leave behind.
+    fn created(a: &Attempts) -> Record {
+        a.create_beside("test-20-v1", JSON, false).unwrap()
+    }
+
     fn flying_as(a: &Attempts, begin_s: f64, marker_ref: Option<&str>) -> Record {
-        let r = a.create("test-20-v1", JSON).unwrap();
+        let r = created(a);
         a.place(&r.id, "flight-1", Some(begin_s), marker_ref, |_| {
             Ok(json!({ "start": { "alt_ft": 2600 } }))
         })
@@ -731,7 +804,7 @@ pub(crate) mod tests {
 
         // A failed cut is logged and cut again later.
         assert!(
-            a.slice(&r.id, |_| Err("flight file locked".into()))
+            a.slice(&r.id, |_| Err(Uncut::Later("flight file locked".into())))
                 .is_err()
         );
         assert_eq!(a.get(&r.id).unwrap().state, State::GradedLocal);
@@ -761,6 +834,51 @@ pub(crate) mod tests {
         let local = flying(&a, 100.0);
         let done = a.finish(&local.id, "stopped", &|_, _| Ok(graded(Some(400.0))));
         assert_eq!(done.unwrap().state, State::Done);
+    }
+
+    #[test]
+    fn a_slice_that_never_can_be_cut_ends_the_attempt_done_without_one() {
+        let (_tmp, a) = attempts();
+        let r = flying_as(&a, 100.0, Some("Qe3v1hJ0dEa9fP2kLm7xRw"));
+        a.finish(&r.id, "stopped", &|_, _| Ok(graded(Some(400.0))))
+            .unwrap();
+        let never = Uncut::Never("no_marker", "flight-1 has no begin marker".into());
+        assert!(a.slice(&r.id, |_| Err(never)).is_err());
+        let done = a.get(&r.id).unwrap();
+        assert_eq!(
+            (done.state, done.slice_failed.as_deref()),
+            (State::Done, Some("no_marker"))
+        );
+        assert!(a.unsliced().is_empty(), "never cut again");
+        let log = read_log(&a.folder(&r.id).unwrap());
+        assert_eq!(log.last().unwrap()["slice_failed"], "no_marker");
+        assert!(!a.folder(&r.id).unwrap().join(SLICE).exists());
+    }
+
+    #[test]
+    fn two_cuts_slice_an_attempt_once() {
+        let (_tmp, a) = attempts();
+        let r = flying_as(&a, 100.0, Some("Qe3v1hJ0dEa9fP2kLm7xRw"));
+        a.finish(&r.id, "stopped", &|_, _| Ok(graded(Some(400.0))))
+            .unwrap();
+        let cut = || Cut {
+            bytes: b"FQJC slice".to_vec(),
+            from_s: 90.0,
+            to_s: 405.0,
+        };
+        thread::scope(|s| {
+            s.spawn(|| {
+                a.slice(&r.id, |_| {
+                    thread::sleep(std::time::Duration::from_millis(300));
+                    Ok(cut())
+                })
+                .unwrap()
+            });
+            thread::sleep(std::time::Duration::from_millis(100));
+            let busy = a.slice(&r.id, |_| unreachable!("already being cut"));
+            assert_eq!(busy.unwrap().state, State::GradedLocal);
+        });
+        assert_eq!(a.get(&r.id).unwrap().state, State::Done);
     }
 
     #[test]
@@ -795,6 +913,20 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn one_attempt_is_open_at_a_time() {
+        let (_tmp, a) = attempts();
+        let r = flying(&a, 100.0);
+        let refused = a.create("test-20-v1", JSON).unwrap_err();
+        assert!(refused.contains("Attempt 1"), "{refused}");
+        assert_eq!(a.list().len(), 1, "nothing created");
+        a.landed("flight-1", 400.0, 142.0, 1.18);
+        assert!(a.create("test-20-v1", JSON).is_err(), "rolling out");
+        a.finish(&r.id, "stopped", &|_, _| Ok(graded(Some(400.0))))
+            .unwrap();
+        assert_eq!(a.create("test-20-v1", JSON).unwrap().n, 2);
+    }
+
+    #[test]
     fn closing_the_flight_abandons_an_attempt_in_the_air_and_finishes_one_rolling_out() {
         let (_tmp, a) = attempts();
         let (rolling, air) = (flying(&a, 100.0), flying(&a, 500.0));
@@ -815,10 +947,11 @@ pub(crate) mod tests {
         let (_tmp, a) = attempts();
         let landed = flying(&a, 100.0);
         let lost = flying(&a, 100.0);
-        let placing = a.create("test-20-v1", JSON).unwrap();
+        let placing = created(&a);
         a.step(&placing.id, State::Placing, "placing", json!({}), |_| {})
             .unwrap();
-        let done = a.create("test-20-v1", JSON).unwrap();
+        let unplaced = created(&a);
+        let done = created(&a);
         a.abandon(&done.id, "cancelled").unwrap();
 
         let (landed_id, done_id) = (landed.id.clone(), done.id.clone());
@@ -831,7 +964,7 @@ pub(crate) mod tests {
             (landed.state, landed.reason.as_deref()),
             (State::Done, Some("recovered"))
         );
-        for id in [&lost.id, &placing.id] {
+        for id in [&lost.id, &placing.id, &unplaced.id] {
             let r = a.get(id).unwrap();
             assert_eq!(
                 (r.state, r.reason.as_deref()),

@@ -410,6 +410,7 @@ export interface AttemptRecord {
   begin_s: number | null;
   touchdown_s: number | null;
   reason: string | null;  // why it finished or was abandoned
+  slice_failed?: string;  // why its slice can never be cut (no_marker, no_flight): done, never uploaded
 }
 
 /** The local grade (`challenge::Attempt`). */

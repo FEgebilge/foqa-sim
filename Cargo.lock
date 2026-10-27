@@ -731,6 +731,7 @@ dependencies = [
  "chrono",
  "getrandom 0.3.4",
  "keyring",
+ "recorder",
  "serde",
  "serde_json",
  "sha2",

@@ -122,12 +122,16 @@ impl Connect {
     }
 
     /// The core changed an attempt: sliced → upload (`done` too: one done
-    /// without a slice is refused), abandoned → tell the site.
+    /// without a slice is refused), abandoned or done with a slice that
+    /// can never be cut → tell the site, with why.
     pub fn attempt_changed(&self, record: &Record) {
-        match record.state {
-            AttemptState::Sliced | AttemptState::Done => self.uploader.core_done(&record.id),
-            AttemptState::Abandoned | AttemptState::FailedStart => {
-                self.uploader.core_abandoned(&record.id)
+        let id = &record.id;
+        match (record.state, &record.slice_failed) {
+            (AttemptState::Done, Some(why)) => self.uploader.core_abandoned(id, why),
+            (AttemptState::Sliced | AttemptState::Done, _) => self.uploader.core_done(id),
+            (AttemptState::Abandoned | AttemptState::FailedStart, _) => {
+                let why = record.reason.as_deref().unwrap_or("failed_start");
+                self.uploader.core_abandoned(id, why)
             }
             _ => return,
         }

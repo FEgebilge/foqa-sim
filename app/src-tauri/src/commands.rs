@@ -5,6 +5,7 @@ use std::fs::File;
 use std::io::{self, BufReader};
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
@@ -14,14 +15,14 @@ use ::debrief::{
     Debrief, FlightSummary, Index, LandingNotice, RecorderStatus, Station, StorageUsage,
 };
 use capture::{ASK_TIMEOUT, InitPosition, SimRequests, Start, Stopper};
-use challenge::{Attempt, Challenge, Mode, StartState};
+use challenge::{Attempt, Begin, Challenge, Mode, StartState};
 use recorder::{AttemptMarker, AttemptPhase};
 use serde::Serialize;
 use serde_json::json;
 use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
 
-use crate::attempts::{Attempts, Cut, Record, State as AttemptState, View};
+use crate::attempts::{Attempts, Cut, Record, State as AttemptState, Uncut, View};
 use crate::library::{Briefing, Entry, Library};
 use crate::setup::{Setup, SetupStatus};
 
@@ -44,6 +45,8 @@ pub struct Shared {
     attempts: Attempts,
     /// What an optional module adds to an attempt (the site client).
     hooks: Option<Arc<dyn AttemptHooks>>,
+    /// A pass over the slices still to cut is running.
+    reslicing: AtomicBool,
 }
 
 /// Where an optional module joins the attempt lifecycle; the core knows
@@ -82,6 +85,7 @@ impl Shared {
             dir,
             setup,
             hooks: None,
+            reslicing: AtomicBool::new(false),
         }
     }
 
@@ -307,18 +311,20 @@ impl Shared {
         )
     }
 
-    /// Grades an attempt from its flight: only a landing after the start.
+    /// Grades an attempt from its whole flight: only a landing after its
+    /// own begin marker (or its start), not another attempt's.
     fn grade(&self, r: &Record, definition: &str) -> Result<Attempt, String> {
         let c = Challenge::parse(definition)?;
         let id = r.flight_id.as_deref().ok_or("the attempt has no flight")?;
-        let mut a = self
+        let a = self
             .station
             .open(&self.flight(id)?)
             .map_err(|e| format!("{id}: {e}"))?;
-        if let Some(begin) = r.begin_s {
-            a.touchdowns.retain(|td| td.t.as_secs_f64() >= begin);
-        }
-        Ok(challenge::evaluate(&c, &a))
+        let begin = Begin::Of {
+            reference: r.marker_ref.as_deref(),
+            begin_s: r.begin_s,
+        };
+        Ok(challenge::evaluate_after(&c, &a, begin))
     }
 
     /// Creates an attempt at `definition` and places it.
@@ -388,24 +394,40 @@ impl Shared {
     }
 
     /// The slice of an attempt from its flight (A5). While the flight
-    /// records, waits up to `SLICE_WAIT` for the data past the end marker.
-    fn cut(&self, r: &Record) -> Result<Cut, String> {
-        let reference = r.marker_ref.as_deref().ok_or("the attempt has no marker")?;
-        let id = r.flight_id.as_deref().ok_or("the attempt has no flight")?;
+    /// records, waits up to `SLICE_WAIT` for the data past the end marker
+    /// (and for a begin marker not on disk yet); a failed read is tried
+    /// again after `READ_BACKOFF`, doubling, `READ_TRIES` times.
+    fn cut(&self, r: &Record) -> Result<Cut, Uncut> {
+        let never = |code, e: &str| Uncut::Never(code, e.to_owned());
+        let reference = r.marker_ref.as_deref();
+        let reference = reference.ok_or_else(|| never("no_marker", "the attempt has no marker"))?;
+        let id = r.flight_id.as_deref();
+        let id = id.ok_or_else(|| never("no_flight", "the attempt has no flight"))?;
         let until = Instant::now() + SLICE_WAIT;
         loop {
-            let file = File::open(self.flight(id)?).map_err(|e| format!("{id}: {e}"))?;
-            let slice = recorder::slice(BufReader::new(file), recorder::Cut::Attempt(reference))
-                .map_err(|e| format!("{id}: {e}"))?
-                .ok_or_else(|| format!("{id} has no begin marker for this attempt"))?;
-            if slice.complete || !self.recording(id) || Instant::now() >= until {
-                return Ok(Cut {
-                    bytes: slice.to_bytes().map_err(|e| e.to_string())?,
-                    from_s: slice.from.as_secs_f64(),
-                    to_s: slice.to.as_secs_f64(),
-                });
+            let path = self.flight(id).map_err(|e| never("no_flight", &e))?;
+            let read = || {
+                let file = File::open(&path)?;
+                recorder::slice(BufReader::new(file), recorder::Cut::Attempt(reference))
+            };
+            let read = retried(read, READ_BACKOFF, READ_TRIES);
+            let read = read.map_err(|e| Uncut::Later(format!("{id}: {e}")))?;
+            let waiting = self.recording(id) && Instant::now() < until;
+            match read {
+                None if !waiting => {
+                    let e = format!("{id} has no begin marker for this attempt");
+                    return Err(never("no_marker", &e));
+                }
+                Some(slice) if slice.complete || !waiting => {
+                    let bytes = slice.to_bytes().map_err(|e| Uncut::Later(e.to_string()))?;
+                    return Ok(Cut {
+                        bytes,
+                        from_s: slice.from.as_secs_f64(),
+                        to_s: slice.to.as_secs_f64(),
+                    });
+                }
+                _ => thread::sleep(Duration::from_secs(1)),
             }
-            thread::sleep(Duration::from_secs(1));
         }
     }
 
@@ -463,14 +485,31 @@ impl Shared {
         }
     }
 
-    /// At start-up: attempts a crash left open, resolved from their
-    /// flights, then the graded ones still to slice.
-    pub fn recover(self: &Arc<Self>) {
-        self.attempts.recover(&|r, d| self.grade(r, d));
+    /// Cuts again, on a thread of its own, the slices a failed cut or a
+    /// crash left: at start-up, every `RESLICE` and when the Challenges
+    /// screen lists the attempts. One pass at a time.
+    fn reslice(self: &Arc<Self>) {
+        if self.reslicing.swap(true, Ordering::SeqCst) {
+            return;
+        }
         let shared = Arc::clone(self);
         thread::spawn(move || {
             for id in shared.attempts.unsliced() {
                 shared.slice(&id);
+            }
+            shared.reslicing.store(false, Ordering::SeqCst);
+        });
+    }
+
+    /// At start-up: attempts a crash left open, resolved from their
+    /// flights; then the graded ones still to slice, every `RESLICE`.
+    pub fn recover(self: &Arc<Self>) {
+        self.attempts.recover(&|r, d| self.grade(r, d));
+        let shared = Arc::clone(self);
+        thread::spawn(move || {
+            loop {
+                shared.reslice();
+                thread::sleep(RESLICE);
             }
         });
     }
@@ -481,6 +520,29 @@ impl Shared {
 const ROLLOUT: Duration = Duration::from_secs(120);
 /// How long a slice waits for the recording to pass its end marker.
 const SLICE_WAIT: Duration = Duration::from_secs(15);
+/// A failed read of the flight is tried again this much later, doubling.
+const READ_BACKOFF: Duration = Duration::from_secs(1);
+const READ_TRIES: u32 = 3;
+/// How often the slices still to cut are tried again.
+const RESLICE: Duration = Duration::from_secs(300);
+
+/// `read`, tried again while it fails up to `tries` more times, after
+/// `pause`, doubling: a flight file briefly locked is read all the same.
+fn retried<T>(
+    mut read: impl FnMut() -> io::Result<T>,
+    pause: Duration,
+    tries: u32,
+) -> io::Result<T> {
+    let mut pause = pause;
+    for _ in 0..tries {
+        if let Ok(v) = read() {
+            return Ok(v);
+        }
+        thread::sleep(pause);
+        pause *= 2;
+    }
+    read()
+}
 
 fn marker(
     challenge: &str,
@@ -616,8 +678,11 @@ pub fn attempt_abandon(id: String, shared: State<'_, Arc<Shared>>) -> Result<Rec
     shared.abandon(&id, "cancelled")
 }
 
+/// Every attempt; the Challenges screen listing them also cuts again the
+/// slices still to cut.
 #[tauri::command]
 pub fn attempts_list(shared: State<'_, Arc<Shared>>) -> Vec<View> {
+    shared.reslice();
     shared.attempts.list()
 }
 
@@ -703,4 +768,41 @@ pub async fn setup_pick_community(
         }
     })
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_failed_read_is_tried_again_with_backoff() {
+        let pause = Duration::from_millis(5);
+        let mut calls = 0;
+        let flaky = retried(
+            || {
+                calls += 1;
+                if calls < 3 {
+                    Err(io::Error::other("locked"))
+                } else {
+                    Ok(calls)
+                }
+            },
+            pause,
+            READ_TRIES,
+        );
+        assert_eq!(flaky.unwrap(), 3);
+        let mut calls = 0;
+        let started = Instant::now();
+        let locked: io::Result<()> = retried(
+            || {
+                calls += 1;
+                Err(io::Error::other("locked"))
+            },
+            pause,
+            READ_TRIES,
+        );
+        assert!(locked.is_err());
+        assert_eq!(calls, READ_TRIES + 1);
+        assert!(started.elapsed() >= pause * 7, "5, 10 and 20 ms apart");
+    }
 }

@@ -133,6 +133,45 @@ fn the_golden_slice_grades_to_the_golden_attempt() {
     assert_eq!(got["aircraft"]["icao"], "C172");
 }
 
+/// An end marker crafted at the end of time neither wraps the window nor
+/// panics: the slice runs to the end of the data, not complete.
+#[test]
+fn an_end_marker_at_the_end_of_time_slices_to_the_end_of_the_data() {
+    let whole = fs::read(dir().join("flight.fqz")).unwrap();
+    let records = read_records(&whole[..]).unwrap();
+    let mut journal = JournalWriter::new(Vec::new(), &Lfl::V1).unwrap();
+    for record in records {
+        match record.unwrap() {
+            Record::Sample(s) => journal.sample(&s).unwrap(),
+            Record::Event(_, SimEvent::Attempt(m)) if m.phase == AttemptPhase::End => {}
+            Record::Event(t, e) => journal.event(t, &e).unwrap(),
+        }
+    }
+    let (_, end) = marker(AttemptPhase::End, 0.0);
+    let last = fdm_core::SimTime::from_micros(i64::MAX - 1);
+    journal.event(last, &end).unwrap();
+    let tmp = tempfile::tempdir().unwrap();
+    let (flight, out) = (tmp.path().join("crafted.fqj"), tmp.path().join("out.fqz"));
+    fs::write(&flight, journal.into_inner()).unwrap();
+    let args = [
+        "slice".as_ref(),
+        flight.as_path(),
+        "--ref".as_ref(),
+        REF.as_ref(),
+        "-o".as_ref(),
+        &out,
+    ];
+    let report: Value = serde_json::from_slice(&fdm(&args)).unwrap();
+    assert_eq!(report["complete"], false, "{report}");
+    assert_eq!(report["to_s"], i64::MAX as f64 / 1e6, "{report}");
+    let sliced = fs::read(&out).unwrap();
+    let samples = read_records(&sliced[..])
+        .unwrap()
+        .filter(|r| matches!(r, Ok(Record::Sample(_))))
+        .count();
+    assert!(samples > 1000, "{samples} samples");
+}
+
 /// The records of a flight file as a journal: every event's text in plain.
 fn plain(file: &[u8]) -> Vec<u8> {
     let records = read_records(file).unwrap();

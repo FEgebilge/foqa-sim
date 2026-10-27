@@ -31,7 +31,7 @@ pub struct Attempt {
     /// The aircraft graded, from the recorded identity and weight.
     pub aircraft: Flown,
     /// The attempt marker graded after, when the flight has one: the
-    /// latest begin (docs/challenge-protocol.md A7).
+    /// latest begin (docs/challenge-protocol.md A7), or the attempt's own.
     pub marker: Option<Marker>,
     /// Every check passed: the attempt counts.
     pub valid: bool,
@@ -80,13 +80,43 @@ struct Graded {
     score: Option<Score>,
 }
 
+/// Which begin marker an attempt is graded after.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum Begin<'a> {
+    /// The latest begin of any attempt: a slice holds one attempt (A7).
+    #[default]
+    Latest,
+    /// One attempt of a whole flight: its begin, the first carrying
+    /// `reference` (`None` for a local attempt) at or after `begin_s`,
+    /// the sim time it was placed at. Without that marker, a landing after
+    /// `begin_s` is graded.
+    Of {
+        reference: Option<&'a str>,
+        begin_s: Option<f64>,
+    },
+}
+
 /// Grades the analysed flight as an attempt at `challenge`.
 /// Only a touchdown after the latest begin marker is graded, when the
 /// flight has one.
 pub fn evaluate(challenge: &Challenge, a: &Analysis) -> Attempt {
+    evaluate_after(challenge, a, Begin::Latest)
+}
+
+/// Grades one attempt of the analysed flight: only a touchdown after the
+/// begin `begin` picks.
+pub fn evaluate_after(challenge: &Challenge, a: &Analysis, begin: Begin) -> Attempt {
     let mut checks = vec![aircraft_check(challenge, a)];
-    let marker = marker(a);
-    let after = marker.as_ref().map(|m| SimTime::from_secs_f64(m.begin_s));
+    let marker = marker(a, begin);
+    let fallback = match begin {
+        Begin::Of { begin_s, .. } => begin_s,
+        Begin::Latest => None,
+    };
+    let after = marker
+        .as_ref()
+        .map(|m| m.begin_s)
+        .or(fallback)
+        .map(SimTime::from_secs_f64);
     let graded = landing(challenge, a, after, &mut checks);
     Attempt {
         challenge: challenge.id.clone(),
@@ -117,16 +147,22 @@ pub fn aircraft_check(c: &Challenge, a: &Analysis) -> Check {
     check("aircraft", class_ok && type_ok, detail)
 }
 
-/// The latest begin marker (events are in time order) and the first end
-/// marker of the same attempt after it.
-fn marker(a: &Analysis) -> Option<Marker> {
+/// The begin marker `begin` picks (events are in time order) and the
+/// first end marker of the same attempt after it.
+fn marker(a: &Analysis, begin: Begin) -> Option<Marker> {
     let markers = a.flight.events.iter().filter_map(|(t, e)| match e {
         SimEvent::Attempt(m) => Some((*t, m)),
         _ => None,
     });
-    let (begin, m) = markers
+    let mut begins = markers
         .clone()
-        .rfind(|(_, m)| m.phase == AttemptPhase::Begin)?;
+        .filter(|(_, m)| m.phase == AttemptPhase::Begin);
+    let (begin, m) = match begin {
+        Begin::Latest => begins.next_back()?,
+        Begin::Of { reference, begin_s } => begins.find(|(t, m)| {
+            m.reference.as_deref() == reference && begin_s.is_none_or(|b| t.as_secs_f64() >= b)
+        })?,
+    };
     let end = markers
         .filter(|(t, e)| *t >= begin && e.phase == AttemptPhase::End && e.reference == m.reference)
         .map(|(t, _)| t)

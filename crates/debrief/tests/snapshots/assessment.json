@@ -650,7 +650,7 @@
               "title": "Touchdown past the target",
               "unit": "ft",
               "value": 0.0,
-              "value_text": "+0.0 ft"
+              "value_text": "0.0 ft"
             }
           ],
           "findings": [],

@@ -12,6 +12,7 @@ base64 = "0.23"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 getrandom = "0.3"
 keyring = { version = "3", features = ["windows-native", "apple-native", "sync-secret-service", "crypto-rust"] }
+recorder = { path = "../recorder" }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
 sha2 = "0.10"
