@@ -19,8 +19,9 @@ use recorder::{Acquisition, AttemptMarker, TOUCHDOWN_WINDOW_US, Telemetry};
 
 use crate::history::History;
 use crate::monitor::Monitor;
-use crate::panel::{self, Ack, Msg, Snapshot, ViewCommand};
+use crate::panel::{self, Ack, Msg, Snapshot, Tee, ViewCommand};
 use crate::place::{Ask, Start};
+use crate::views::{AppCommand, Views};
 use crate::{Command, LiveSource, Progress, Reply, record};
 
 /// First and longest wait between attempts to reach the simulator.
@@ -115,6 +116,12 @@ pub struct Service {
     requests: Sender<Command>,
     /// The app's requests (`SimRequests`): `Place`, `Airport` and `Attempt`.
     requested: Receiver<Command>,
+    /// What the in-sim views show, from the recorder and the app (`Views`).
+    feed: Sender<Msg>,
+    feed_rx: Option<Receiver<Msg>>,
+    /// The views' attempt commands, for the app.
+    app: Sender<AppCommand>,
+    app_rx: Option<Receiver<AppCommand>>,
 }
 
 impl Service {
@@ -122,7 +129,13 @@ impl Service {
     pub fn new(dir: PathBuf, station: Arc<Station>) -> io::Result<Self> {
         std::fs::create_dir_all(&dir)?;
         let (requests, requested) = mpsc::channel();
+        let (feed, feed_rx) = mpsc::channel();
+        let (app, app_rx) = mpsc::channel();
         Ok(Self {
+            feed,
+            feed_rx: Some(feed_rx),
+            app,
+            app_rx: Some(app_rx),
             index: Arc::new(Index::open(&dir)),
             dir,
             station,
@@ -149,6 +162,17 @@ impl Service {
         SimRequests(self.requests.clone())
     }
 
+    /// The app's way to the in-sim views (challenge attempts, B9).
+    pub fn views(&self) -> Views {
+        Views(self.feed.clone())
+    }
+
+    /// The views' attempt commands; taken once, by the app. Unless taken,
+    /// a view's attempt command is refused.
+    pub fn app_commands(&mut self) -> Option<Receiver<AppCommand>> {
+        self.app_rx.take()
+    }
+
     /// The flights folder's index; share it rather than open another.
     pub fn index(&self) -> Arc<Index> {
         self.index.clone()
@@ -157,12 +181,24 @@ impl Service {
     /// Runs until stopped. Blocks: give it a thread of its own, which then
     /// owns the SimConnect connection. Analyses run on threads of their own
     /// so recording never waits for them.
-    pub fn run(self, out: Sender<Happening>) {
+    pub fn run(mut self, out: Sender<Happening>) {
         // Everything reported also goes to the in-sim panel, which sends
         // its views' commands back and answers their history queries.
         let (commands_tx, commands) = mpsc::channel();
         let history = History::new(self.dir.clone(), self.station.clone(), self.index.clone());
-        let feed = panel::tee(out, commands_tx, history);
+        // Not taken by the app: attempt commands are refused, not lost.
+        drop(self.app_rx.take());
+        let feed = self.feed.clone();
+        let Some(rx) = self.feed_rx.take() else {
+            return;
+        };
+        let tee = Tee {
+            rx,
+            out,
+            commands: commands_tx,
+            app: self.app.clone(),
+        };
+        panel::tee(tee, history);
         // Journals of earlier runs, listed before any new flight exists.
         let backlog = debrief::journals(&self.dir);
         thread::spawn(move || debrief::compact_all(backlog));
