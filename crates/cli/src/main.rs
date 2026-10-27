@@ -6,6 +6,7 @@
 //! `fdm compact <journal.fqj|folder>`           journals to compact flights
 //! `fdm list <folder>`                          the app's flight list, as JSON
 //! `fdm challenge <challenge.json> <flight.fqz>` a landing-challenge attempt, as JSON
+//! `fdm challenge --check <challenge.json>`      validates a definition (exit 1 if invalid)
 //!
 //! `<flight>` is a journal (`.fqj`), a compact flight (`.fqz`) or a raw
 //! capture (`.raw.jsonl.gz`), which is first recorded through the on-board
@@ -29,7 +30,8 @@ const USAGE: &str =
        fdm export <flight> [out-dir]
        fdm compact <journal.fqj|folder>
        fdm list <folder>
-       fdm challenge <challenge.json> <flight.fqz>";
+       fdm challenge <challenge.json> <flight.fqz>
+       fdm challenge --check <challenge.json>";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -41,6 +43,7 @@ fn main() -> ExitCode {
         ["export", path, out] => export(Path::new(path), Path::new(out)),
         ["compact", path] => compact(Path::new(path)),
         ["list", dir] => list(Path::new(dir)),
+        ["challenge", "--check", def] => check(Path::new(def)),
         ["challenge", def, path] => challenge(Path::new(def), Path::new(path)),
         _ => {
             eprintln!("{USAGE}");
@@ -207,6 +210,15 @@ fn challenge(def: &Path, path: &Path) -> Result<(), Box<dyn Error>> {
     let station = Station::core()?;
     let attempt = challenge::evaluate(&challenge, &open(&station, path)?);
     println!("{}", serde_json::to_string_pretty(&attempt)?);
+    Ok(())
+}
+
+/// Validates a challenge definition the way an attempt is graded against
+/// it: what a site runs on its catalogue, so both agree (docs/challenges.md).
+fn check(def: &Path) -> Result<(), Box<dyn Error>> {
+    let c = challenge::Challenge::parse(&fs::read_to_string(def)?)?;
+    let ok = serde_json::json!({ "ok": true, "id": c.id, "version": c.version });
+    println!("{ok}");
     Ok(())
 }
 
