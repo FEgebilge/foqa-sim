@@ -12,7 +12,6 @@ mod commands;
 mod connect;
 mod insim;
 mod library;
-#[cfg(not(feature = "connect"))]
 mod links;
 mod setup;
 
@@ -90,19 +89,28 @@ fn main() {
         connect::site_open,
         connect::deep_link_pending,
         connect::deep_link_consent,
-        connect::deep_link_done
+        connect::deep_link_open,
+        connect::deep_link_done,
+        connect::site_settings,
+        connect::site_settings_set
     );
     #[cfg(not(feature = "connect"))]
     let commands: Commands = handler!(links::deep_link_pending, links::deep_link_done);
     let builder = tauri::Builder::default()
-        // First, so a second launch only brings this one's window up; with
-        // `connect` its `deep-link` feature hands a link on to that plugin.
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _| {
+        // First, so a second launch only brings this one's window up, and
+        // hands on a link it was started with, as its argument (B2).
+        .plugin(tauri_plugin_single_instance::init(|app, args, _| {
             show(app, None);
+            #[cfg(feature = "connect")]
+            if let Some(connect) = app.try_state::<Arc<connect::Connect>>() {
+                links::in_args(args).for_each(|link| connect.open_url(&link));
+            }
             #[cfg(not(feature = "connect"))]
-            links::arrived(app, _args);
+            links::arrived(app, args);
         }));
     // The `foqa-sim` scheme (tauri.conf.json; the installer registers it).
+    // Links themselves are read from the command line, not from this plugin,
+    // which hands them on already parsed (normalised).
     #[cfg(feature = "connect")]
     let builder = builder.plugin(tauri_plugin_deep_link::init());
     #[cfg(not(feature = "connect"))]
@@ -135,8 +143,12 @@ fn main() {
             let library = Library::new(data.join("challenges"))?;
             let handle = app.handle().clone();
             #[cfg(feature = "connect")]
-            let connect =
-                connect::Connect::start(data.clone(), data.join("attempts"), handle.clone())?;
+            let connect = connect::Connect::start(
+                data.clone(),
+                app.path().app_config_dir()?,
+                data.join("attempts"),
+                handle.clone(),
+            )?;
             #[cfg(feature = "connect")]
             let site = Arc::clone(&connect);
             let (changed, strip) = mpsc::channel();
@@ -164,16 +176,8 @@ fn main() {
                 if let Err(e) = links.register(::connect::deeplink::SCHEME) {
                     eprintln!("deep links not registered: {e}");
                 }
-                let forwarded = Arc::clone(&connect);
-                links.on_open_url(move |event| {
-                    for url in event.urls() {
-                        forwarded.open_url(url.as_str());
-                    }
-                });
                 // A link that started the app.
-                for url in links.get_current().ok().flatten().unwrap_or_default() {
-                    connect.open_url(url.as_str());
-                }
+                links::in_args(std::env::args()).for_each(|link| connect.open_url(&link));
                 app.manage(connect);
             }
             #[cfg(not(feature = "connect"))]

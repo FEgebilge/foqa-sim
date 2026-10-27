@@ -15,7 +15,7 @@ path = "src/main.rs"
 default = ["connect"]
 # The site client (docs/challenge-protocol.md B1): off, the app has no
 # network code for challenges and works from challenge files only.
-connect = ["dep:connect", "dep:open", "dep:tauri-plugin-deep-link", "tauri-plugin-single-instance/deep-link"]
+connect = ["dep:connect", "dep:open", "dep:tauri-plugin-deep-link"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

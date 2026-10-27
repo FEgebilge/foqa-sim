@@ -7,7 +7,7 @@ import { api } from "../../api";
 import { useNotify } from "../../lib/context";
 import { flightDate } from "../../lib/format";
 import { challengeHref } from "../../lib/route";
-import type { SiteChallenge, SiteView } from "../../lib/sites";
+import type { SiteChallenge, SiteSettings, SiteView } from "../../lib/sites";
 import { ConfirmDialog } from "../ConfirmDialog";
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
@@ -57,11 +57,40 @@ export function SitesPanel({ sites, onChanged }: { sites: SiteView[]; onChanged:
           {sites.map((site) => <SiteRow key={site.origin} site={site} onChanged={onChanged} onLeave={(remove) => setLeaving({ site, remove })} />)}
         </ul>
       ) : <p className="px-4 py-3 text-sm text-fg-3">No sites. Add one by its address to fly its challenges ranked.</p>}
+      <Settings />
       <ConfirmDialog open={leaving !== null} busy={busy} title={leaving?.remove ? "Remove this site?" : "Sign out of this site?"}
         confirmLabel={leaving?.remove ? "Remove site" : "Sign out"} onConfirm={leave} onCancel={() => setLeaving(null)}>
         {leaving ? <LeaveText site={leaving.site} remove={leaving.remove} /> : null}
       </ConfirmDialog>
     </section>
+  );
+}
+
+const SETTINGS: { key: keyof SiteSettings; label: string; hint: string }[] = [
+  { key: "links", label: "Open challenge links from websites", hint: "Off, a site's “Fly this challenge” link is ignored." },
+  { key: "notify", label: "Notify when a site scores an attempt", hint: "A Windows notification while FOQA-Sim isn't in front." },
+];
+
+/** The global switches of Sites (B3), kept by the app. */
+function Settings() {
+  const notify = useNotify();
+  const [settings, setSettings] = useState<SiteSettings | null>(null);
+  useEffect(() => { api.siteSettings().then(setSettings, () => setSettings(null)); }, []);
+  if (!settings) return null;
+  const change = (key: keyof SiteSettings, on: boolean) => {
+    api.siteSettingsSet({ ...settings, [key]: on })
+      .then(setSettings, (error: unknown) => notify({ tone: "error", title: "Could not change the setting", body: message(error) }));
+  };
+  return (
+    <fieldset className="flex flex-wrap gap-x-6 gap-y-2 border-t border-line px-4 py-3">
+      <legend className="sr-only">Site settings</legend>
+      {SETTINGS.map(({ key, label, hint }) => (
+        <label key={key} className="flex items-start gap-2 text-sm">
+          <input type="checkbox" className="mt-0.5 accent-[var(--accent)]" checked={settings[key]} onChange={(e) => change(key, e.target.checked)} />
+          <span>{label}<span className="block text-xs text-fg-3">{hint}</span></span>
+        </label>
+      ))}
+    </fieldset>
   );
 }
 

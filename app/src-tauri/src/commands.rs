@@ -153,6 +153,11 @@ impl Shared {
     pub fn import_challenge(&self, json: &str) -> Result<Entry, String> {
         self.library.import(json)
     }
+
+    /// The kept challenge that importing `json` would replace.
+    pub fn challenge_conflict(&self, json: &str) -> Option<Entry> {
+        self.library.conflict(json)
+    }
 }
 
 pub fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {

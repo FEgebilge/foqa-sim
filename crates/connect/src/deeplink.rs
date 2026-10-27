@@ -1,8 +1,9 @@
 //! Deep links from websites (A3): `foqa-sim://challenge?site=…&id=…[&v=…]`
 //! and `foqa-sim://connect?site=…`, parsed as untrusted input, and the
 //! gate that keeps a link from acting without the user: an unknown site
-//! waits for "Connect", a known one only opens the briefing. The pending
-//! link lives in memory for ten minutes, never on disk.
+//! waits for "Connect", a known one for "Open"; every answer names the
+//! link it was shown for. A pending link lives in memory for ten minutes,
+//! never on disk, and is given to the window once.
 
 use url::Url;
 
@@ -135,76 +136,122 @@ pub enum Consent {
     /// The site isn't one of the user's: nothing is fetched from it until
     /// the user allows connecting.
     Ask,
-    /// A site the user has: the challenge's briefing may open.
+    /// A site the user has: the challenge may open once the user clicks.
     Open,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Pending {
+    /// Names this link in every answer, so a click acts on the link it
+    /// was shown for and on no other.
+    pub seq: u64,
     pub link: Link,
     pub consent: Consent,
     pub at_ms: i64,
+    /// Given to the window already; it is never given twice.
+    handed: bool,
 }
 
-/// The one link waiting for the user; a newer link replaces it.
+/// The link the window asks about, and the newest one that arrived while
+/// it asked (shown after it). Nothing here acts: every answer names the
+/// link's `seq`, which must be the one asked about.
 #[derive(Debug, Default)]
 pub struct Gate {
-    pending: Option<Pending>,
+    current: Option<Pending>,
+    next: Option<Pending>,
+    seq: u64,
 }
 
+const GONE: &str = "That link is no longer waiting; open it from the website again.";
+
 impl Gate {
-    /// A link arrived; `known` when its site is one of the user's.
-    pub fn offer(&mut self, link: Link, known: bool, now_ms: i64) -> Pending {
-        let consent = if known { Consent::Open } else { Consent::Ask };
-        let pending = Pending {
-            link,
-            consent,
-            at_ms: now_ms,
-        };
-        self.pending = Some(pending.clone());
-        pending
-    }
-
-    /// The link waiting, unless it is older than `PENDING_MS`.
-    pub fn pending(&mut self, now_ms: i64) -> Option<Pending> {
-        if self
-            .pending
-            .as_ref()
-            .is_some_and(|p| now_ms - p.at_ms > PENDING_MS)
-        {
-            self.pending = None;
+    /// A link arrived; `known` when its site is one of the user's. A link
+    /// already waiting is not queued again (false).
+    pub fn offer(&mut self, link: Link, known: bool, now_ms: i64) -> bool {
+        self.expire(now_ms);
+        let waiting = [&self.current, &self.next];
+        if waiting.into_iter().flatten().any(|p| p.link == link) {
+            return false;
         }
-        self.pending.clone()
+        self.seq += 1;
+        let pending = Pending {
+            seq: self.seq,
+            link,
+            consent: if known { Consent::Open } else { Consent::Ask },
+            at_ms: now_ms,
+            handed: false,
+        };
+        if self.current.is_none() {
+            self.current = Some(pending);
+        } else {
+            self.next = Some(pending);
+        }
+        true
     }
 
-    /// The user's answer to "Connect to <origin>?". Only the link waiting
-    /// for it, for that very origin, is answered: allowed, it may open
-    /// (and is returned); denied, it is dropped (`None`).
-    pub fn consent(
-        &mut self,
-        origin: &str,
-        allow: bool,
-        now_ms: i64,
-    ) -> Result<Option<Link>, String> {
-        let asked = self
-            .pending(now_ms)
-            .filter(|p| p.consent == Consent::Ask && p.link.site().as_str() == origin);
-        let Some(mut p) = asked else {
-            return Err("That link is no longer waiting; open it from the website again.".into());
-        };
+    fn expire(&mut self, now_ms: i64) {
+        let old = |p: &Option<Pending>| p.as_ref().is_some_and(|p| now_ms - p.at_ms > PENDING_MS);
+        if old(&self.next) {
+            self.next = None;
+        }
+        if old(&self.current) {
+            self.current = self.next.take();
+        }
+    }
+
+    /// The link for the window to ask about, given once. The window asks
+    /// only while it shows no link, so one given before is no longer shown
+    /// (the window reloaded): it is dropped, not replayed.
+    pub fn hand(&mut self, now_ms: i64) -> Option<Pending> {
+        self.expire(now_ms);
+        if self.current.as_ref().is_some_and(|p| p.handed) {
+            self.current = self.next.take();
+        }
+        let p = self.current.as_mut()?;
+        p.handed = true;
+        Some(p.clone())
+    }
+
+    /// The link asked about, if it is `seq`.
+    fn asked(&mut self, seq: u64, now_ms: i64) -> Result<&mut Pending, String> {
+        self.expire(now_ms);
+        self.current
+            .as_mut()
+            .filter(|p| p.seq == seq && p.handed)
+            .ok_or_else(|| GONE.into())
+    }
+
+    /// The user's answer to "Connect to <origin>?" for link `seq`, which
+    /// must be waiting for it: allowed, it may open (and is returned);
+    /// denied, it is dropped (`None`).
+    pub fn consent(&mut self, seq: u64, allow: bool, now_ms: i64) -> Result<Option<Link>, String> {
+        let p = self.asked(seq, now_ms)?;
+        if p.consent != Consent::Ask {
+            return Err(GONE.into());
+        }
         if !allow {
-            self.pending = None;
+            self.done(seq);
             return Ok(None);
         }
         p.consent = Consent::Open;
-        let link = p.link.clone();
-        self.pending = Some(p);
-        Ok(Some(link))
+        Ok(Some(p.link.clone()))
     }
 
-    /// The link was acted on or dismissed.
-    pub fn done(&mut self) {
-        self.pending = None;
+    /// Link `seq`, for the click that opens it; its site is the user's by
+    /// then. It stays until `done`.
+    pub fn ready(&mut self, seq: u64, now_ms: i64) -> Result<Link, String> {
+        let p = self.asked(seq, now_ms)?;
+        if p.consent != Consent::Open {
+            return Err(GONE.into());
+        }
+        Ok(p.link.clone())
+    }
+
+    /// Link `seq` was acted on or dismissed; the next one, if any, waits.
+    pub fn done(&mut self, seq: u64) {
+        if self.current.as_ref().is_some_and(|p| p.seq == seq) {
+            self.current = self.next.take();
+        }
     }
 }
 
@@ -414,48 +461,105 @@ mod tests {
     }
 
     #[test]
-    fn an_unknown_site_waits_for_consent_and_a_known_one_only_opens() {
+    fn an_unknown_site_waits_for_consent_and_a_known_one_for_a_click() {
         let mut gate = Gate::default();
-        let known = gate.offer(link("https://a.example"), true, 0);
+        assert!(gate.offer(link("https://a.example"), true, 0));
+        let known = gate.hand(1).unwrap();
         assert_eq!(known.consent, Consent::Open);
         assert!(
-            gate.consent("https://a.example", true, 1).is_err(),
+            gate.consent(known.seq, true, 1).is_err(),
             "a known site needs no consent"
         );
+        assert_eq!(gate.ready(known.seq, 2).unwrap(), link("https://a.example"));
+        assert!(
+            gate.ready(known.seq + 1, 2).is_err(),
+            "only the link asked about"
+        );
+        gate.done(known.seq);
+        assert!(gate.ready(known.seq, 3).is_err() && gate.hand(3).is_none());
 
-        let asked = gate.offer(link("https://b.example"), false, 10);
+        gate.offer(link("https://b.example"), false, 10);
+        let asked = gate.hand(10).unwrap();
         assert_eq!(asked.consent, Consent::Ask);
         assert!(
-            gate.consent("https://a.example", true, 11).is_err(),
-            "only the link waiting is answered"
+            gate.ready(asked.seq, 11).is_err(),
+            "nothing opens before Connect"
         );
-        let allowed = gate
-            .consent("https://b.example", true, 12)
-            .unwrap()
-            .unwrap();
+        let allowed = gate.consent(asked.seq, true, 12).unwrap().unwrap();
         assert_eq!(allowed.site().as_str(), "https://b.example");
-        assert_eq!(
-            gate.pending(13).unwrap().consent,
-            Consent::Open,
-            "kept to resume"
+        assert!(
+            gate.ready(asked.seq, 13).is_ok(),
+            "kept to resume after sign-in"
         );
-        gate.done();
-        assert!(gate.pending(14).is_none());
+        gate.done(asked.seq);
 
         gate.offer(link("https://c.example"), false, 20);
-        assert_eq!(gate.consent("https://c.example", false, 21), Ok(None));
-        assert!(gate.pending(22).is_none(), "denied is dropped");
+        let denied = gate.hand(20).unwrap();
+        assert_eq!(gate.consent(denied.seq, false, 21), Ok(None));
+        assert!(gate.hand(22).is_none(), "denied is dropped");
+    }
+
+    #[test]
+    fn nothing_is_answered_before_the_window_was_given_the_link() {
+        let mut gate = Gate::default();
+        gate.offer(link("https://a.example"), true, 0);
+        assert!(gate.ready(1, 0).is_err(), "a guessed seq opens nothing");
+    }
+
+    #[test]
+    fn a_link_is_handed_once_and_a_duplicate_is_not_queued() {
+        let mut gate = Gate::default();
+        assert!(gate.offer(link("https://a.example"), true, 0));
+        let first = gate.hand(1).unwrap();
+        assert!(
+            !gate.offer(link("https://a.example"), true, 2),
+            "the same link again"
+        );
+        // Asked again: the window lost it (a reload); it is dropped, not replayed.
+        assert!(gate.hand(3).is_none());
+        assert!(gate.ready(first.seq, 4).is_err());
+        // Once done with, the same link may come again, and needs its own click.
+        assert!(gate.offer(link("https://a.example"), true, 5));
+        assert_ne!(gate.hand(6).unwrap().seq, first.seq);
+    }
+
+    #[test]
+    fn a_newer_link_waits_behind_the_one_asked_about() {
+        let mut gate = Gate::default();
+        gate.offer(link("https://a.example"), false, 0);
+        let a = gate.hand(0).unwrap();
+        gate.offer(link("https://b.example"), false, 1);
+        gate.offer(link("https://c.example"), false, 2);
+        // The window still asks about a: Connect answers a, never c.
+        let allowed = gate.consent(a.seq, true, 3).unwrap().unwrap();
+        assert_eq!(allowed.site().as_str(), "https://a.example");
+        gate.done(a.seq + 7);
+        assert_eq!(
+            gate.ready(a.seq, 4).unwrap(),
+            allowed,
+            "done names its link"
+        );
+        gate.done(a.seq);
+        let c = gate.hand(5).unwrap();
+        assert_eq!(c.link, link("https://c.example"), "the newest replaced b");
+        gate.done(c.seq);
+        assert!(gate.hand(6).is_none());
     }
 
     #[test]
     fn a_pending_link_expires_after_ten_minutes() {
         let mut gate = Gate::default();
         gate.offer(link("https://b.example"), false, 0);
-        assert!(gate.pending(PENDING_MS).is_some());
-        assert!(
-            gate.consent("https://b.example", true, PENDING_MS + 1)
-                .is_err()
+        let p = gate.hand(PENDING_MS).unwrap();
+        assert!(gate.consent(p.seq, true, PENDING_MS + 1).is_err());
+        assert!(gate.hand(PENDING_MS + 1).is_none());
+        gate.offer(link("https://a.example"), false, 0);
+        gate.offer(link("https://c.example"), false, PENDING_MS);
+        let c = gate.hand(PENDING_MS + 1).unwrap();
+        assert_eq!(
+            c.link,
+            link("https://c.example"),
+            "the expired one gives way"
         );
-        assert!(gate.pending(PENDING_MS + 1).is_none());
     }
 }

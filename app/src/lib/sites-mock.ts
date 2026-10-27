@@ -1,4 +1,4 @@
-import type { SiteAttempt, SiteChallenge, SitesApi, SiteView } from "./sites";
+import type { SiteAttempt, SiteChallenge, SiteSettings, SitesApi, SiteView } from "./sites";
 
 // Sites in the browser: one example site (a reserved `.example` host, not a real one), changed in memory so the
 // Sites panel can be clicked through. `?sites=none` starts with no site, `?sites=off` is a build without `connect`.
@@ -17,6 +17,9 @@ export function mockSites(mode: string | null): SitesApi {
     { id: "egll-27l-night-2026w45", version: 1, title: "Heathrow 27L at night", state: "upcoming", opens_at: "2026-11-02T00:00:00Z", closes_at: null, key: null },
   ];
   const at = "2026-10-27T18:05:59.000Z";
+  let settings: SiteSettings = { links: true, notify: true };
+  // `?link=…` plays one link arriving at start-up, given once.
+  let link = new URLSearchParams(window.location.search).get("link");
   const attempts: SiteAttempt[] = [
     {
       id: "6f1c2d3e-4a5b-4c6d-8e7f-9a0b1c2d3e4f", origin: ORIGIN, site: "Example Landings (landings.example)", state: "scored",
@@ -92,22 +95,38 @@ export function mockSites(mode: string | null): SitesApi {
       Object.assign(a, { state: "queued", text: "Uploaded. Scoring…", detail: null });
     },
     async siteOpen(url) { window.open(url, "_blank", "noopener"); },
-    // `?link=ask|open|refused|disabled` plays a link from a website arriving at start-up.
+    // `?link=ask|open|signed-out|refused|disabled` plays a link from a website arriving at start-up.
     async deepLinkPending() {
-      const state = new URLSearchParams(window.location.search).get("link");
-      if (state !== "ask" && state !== "open" && state !== "refused" && state !== "disabled") return null;
+      const state = link;
+      link = null;
+      if (!settings.links) return null;
       if (state === "refused") return { state, signed_in: false, text: "The link's site address isn't one FOQA-Sim can connect to." };
       if (state === "disabled") return { state, signed_in: false, text: "Sites are disabled in this build." };
+      if (state !== "ask" && state !== "open" && state !== "signed-out") return null;
       const origin = state === "ask" ? "https://xn--pilotaptitud-yjb.example" : ORIGIN;
-      return { state, kind: "challenge", origin, host: new URL(origin).host, signed_in: state === "open", id: "lfpg-27r-self", v: 1 };
+      if (state === "signed-out") site(ORIGIN).signed_in = false;
+      return { state: state === "ask" ? "ask" : "open", seq: 1, kind: "challenge", origin, host: new URL(origin).host, signed_in: state === "open", id: "ltfj-06-gusty-2026w44", v: 1 };
     },
-    async deepLinkConsent(origin, allow) {
+    async deepLinkConsent(_seq, allow) {
       await settle();
       if (!allow) return null;
+      const origin = "https://xn--pilotaptitud-yjb.example";
       const added: SiteView = { origin, host: new URL(origin).host, name: "Look-alike", handle: null, signed_in: false, pending: 0, device: null, account_url: null };
       sites.push(added);
       return added;
     },
+    // The mock challenge is in the library already with other bytes: Open asks to replace it.
+    async deepLinkOpen(_seq, replace) {
+      await settle();
+      const c = challenges[0];
+      const entry = { key: `${c.id}-v${c.version}`, title: c.title };
+      return replace ? { entry, conflict: null } : { entry: null, conflict: { ...entry, version: c.version } };
+    },
     async deepLinkDone() {},
+    siteSettings: async () => ({ ...settings }),
+    async siteSettingsSet(next) {
+      settings = { ...next };
+      return { ...settings };
+    },
   };
 }

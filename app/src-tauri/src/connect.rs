@@ -20,7 +20,7 @@ use ::connect::sites::{Flow, SiteRecord, Sites};
 use ::connect::store::KeyringStore;
 use ::connect::uploader::{self, Uploader};
 use capture::SiteStrip;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_notification::NotificationExt;
@@ -42,9 +42,13 @@ pub struct Connect {
     app: AppHandle,
     /// "Allow local sites" (A1).
     allow_local: bool,
-    /// The deep link waiting for the user, and the last one refused.
+    /// The deep links waiting for the user, and why the last one was
+    /// refused, told once.
     links: Mutex<Gate>,
     refused: Mutex<Option<&'static str>>,
+    /// The global switches of Challenges → Sites (B3), and their file.
+    settings: Mutex<SiteSettings>,
+    settings_file: PathBuf,
     /// The attempt folders, for a toast's challenge title.
     attempts: PathBuf,
     /// Attempts whose verdict was shown in a toast.
@@ -54,9 +58,12 @@ pub struct Connect {
 /// A deep link as the app asks about it (`deep-link` event).
 #[derive(Debug, Clone, Serialize)]
 pub struct LinkView {
-    /// `ask`: "Connect to <host>?"; `open`: the site is the user's, open
-    /// the challenge; `refused`: the link is invalid (`text` says why).
+    /// `ask`: "Connect to <host>?"; `open`: the site is the user's, "Open
+    /// …?"; `refused`: the link is invalid (`text` says why).
     state: &'static str,
+    /// Names the link in every answer (`deep_link_consent`, `_open`, `_done`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    seq: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     kind: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -73,6 +80,54 @@ pub struct LinkView {
     signed_in: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     text: Option<&'static str>,
+}
+
+/// The global settings of Challenges → Sites (B3), in the app's config
+/// folder. A missing or unreadable file is the defaults.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SiteSettings {
+    /// "Open challenge links from websites": off, a link is dropped unseen.
+    links: bool,
+    /// "Notify when a site scores an attempt" (B7).
+    notify: bool,
+}
+
+impl Default for SiteSettings {
+    fn default() -> Self {
+        Self {
+            links: true,
+            notify: true,
+        }
+    }
+}
+
+impl SiteSettings {
+    const FILE: &str = "sites-settings.json";
+
+    fn load(file: &Path) -> Self {
+        std::fs::read(file)
+            .ok()
+            .and_then(|b| serde_json::from_slice(&b).ok())
+            .unwrap_or_default()
+    }
+
+    fn save(&self, file: &Path) -> Result<(), String> {
+        let bytes = serde_json::to_vec_pretty(self).map_err(|e| e.to_string())?;
+        file.parent()
+            .map_or(Ok(()), std::fs::create_dir_all)
+            .and_then(|()| std::fs::write(file, bytes))
+            .map_err(|e| format!("The settings couldn't be saved: {e}"))
+    }
+}
+
+/// What opening a link's challenge did: `entry` taken (or already in the
+/// library, unchanged), or `conflict`: another copy of that id and version
+/// is in the library, kept until the user says to replace it.
+#[derive(Debug, Clone, Serialize)]
+pub struct Opened {
+    entry: Option<Entry>,
+    conflict: Option<Entry>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -111,8 +166,14 @@ pub struct SiteChallenge {
 }
 
 impl Connect {
-    /// `data` is the app's data folder; `attempts` the attempt folders.
-    pub fn start(data: PathBuf, attempts: PathBuf, app: AppHandle) -> std::io::Result<Arc<Self>> {
+    /// `data` is the app's data folder, `config` its config folder (the
+    /// settings) and `attempts` the attempt folders.
+    pub fn start(
+        data: PathBuf,
+        config: PathBuf,
+        attempts: PathBuf,
+        app: AppHandle,
+    ) -> std::io::Result<Arc<Self>> {
         // Developer setting "Allow local sites" (A1); off by default.
         let allow_local = std::env::var_os("FOQA_ALLOW_LOCAL_SITES").is_some();
         let http = Arc::new(Http::new(APP_VERSION));
@@ -139,6 +200,8 @@ impl Connect {
             allow_local,
             links: Mutex::new(Gate::default()),
             refused: Mutex::new(None),
+            settings: Mutex::new(SiteSettings::load(&config.join(SiteSettings::FILE))),
+            settings_file: config.join(SiteSettings::FILE),
             attempts,
             toasted: Mutex::new(HashSet::new()),
         });
@@ -207,57 +270,67 @@ impl Connect {
             .ok_or_else(|| format!("{origin} isn't one of your sites."))
     }
 
-    /// A link from a website (B2), forwarded or at a cold start: parsed
-    /// strictly and logged; it only brings the window up and asks. Nothing
-    /// is fetched from a site the user hasn't connected.
+    /// A link from a website (B2), forwarded or at a cold start, as the
+    /// command line carried it: parsed strictly and logged, then the window
+    /// comes up and is told to ask (`deep-link`). Nothing is fetched, kept
+    /// or placed here; with links off it is dropped unseen.
     pub fn open_url(&self, raw: &str) {
+        if !lock(&self.settings).links {
+            self.sites.log(json!({
+                "event": "deep_link", "accepted": false, "reason": "links_off", "bytes": raw.len(),
+            }));
+            return;
+        }
         match deeplink::parse(raw, self.allow_local) {
             Err(refused) => {
                 self.sites.log(json!({
                     "event": "deep_link", "accepted": false, "reason": refused.0, "bytes": raw.len(),
                 }));
+                // Told once, apart from the links waiting: it drops none.
                 *lock(&self.refused) = Some(refused.text());
             }
             Ok(link) => {
+                let (kind, site) = (link.kind(), link.site().as_str().to_owned());
                 let (id, v) = match &link {
-                    Link::Challenge { id, version, .. } => (Some(id.as_str()), *version),
+                    Link::Challenge { id, version, .. } => (Some(id.clone()), *version),
                     Link::Connect { .. } => (None, None),
                 };
+                let known = self.sites.get(&site).is_some();
+                let queued = lock(&self.links).offer(link, known, ::connect::now_ms());
                 self.sites.log(json!({
-                    "event": "deep_link", "accepted": true, "kind": link.kind(),
-                    "origin": link.site(), "id": id, "v": v,
+                    "event": "deep_link", "accepted": true, "kind": kind,
+                    "origin": site, "id": id, "v": v, "duplicate": !queued,
                 }));
-                let known = self.sites.get(link.site().as_str()).is_some();
-                lock(&self.links).offer(link, known, ::connect::now_ms());
             }
         }
-        if let Some(view) = self.pending_link(false) {
-            let _ = self.app.emit("deep-link", view);
-        }
+        let _ = self.app.emit("deep-link", ());
         crate::show(&self.app, None);
     }
 
-    /// The link to ask about; a refused one is told once (`take`).
-    fn pending_link(&self, take: bool) -> Option<LinkView> {
-        let refused = if take {
-            lock(&self.refused).take()
-        } else {
-            *lock(&self.refused)
+    /// What the window asks about next, while it shows no link: a refused
+    /// link's words, else the link waiting, each given once.
+    fn hand_link(&self) -> Option<LinkView> {
+        let none = LinkView {
+            state: "refused",
+            seq: None,
+            kind: None,
+            origin: None,
+            host: None,
+            name: None,
+            id: None,
+            v: None,
+            signed_in: false,
+            text: None,
         };
-        if let Some(text) = refused {
+        if let Some(text) = lock(&self.refused).take() {
             return Some(LinkView {
-                state: "refused",
-                kind: None,
-                origin: None,
-                host: None,
-                name: None,
-                id: None,
-                v: None,
-                signed_in: false,
                 text: Some(text),
+                ..none
             });
         }
-        let Pending { link, consent, .. } = lock(&self.links).pending(::connect::now_ms())?;
+        let Pending {
+            seq, link, consent, ..
+        } = lock(&self.links).hand(::connect::now_ms())?;
         let site = self.sites.get(link.site().as_str());
         let (id, v) = match &link {
             Link::Challenge { id, version, .. } => (Some(id.clone()), *version),
@@ -268,6 +341,7 @@ impl Connect {
                 Consent::Ask => "ask",
                 Consent::Open => "open",
             },
+            seq: Some(seq),
             kind: Some(link.kind()),
             origin: Some(link.site().as_str().to_owned()),
             host: Some(link.site().host().to_owned()),
@@ -275,7 +349,53 @@ impl Connect {
             id,
             v,
             signed_in: self.sites.signed_in(link.site().as_str()),
-            text: None,
+            ..none
+        })
+    }
+
+    /// Takes challenge `id` of `origin` into the library, as the site has
+    /// it now: its exact bytes, checked against the site's SHA-256 and by
+    /// `Challenge::parse`. `version` is the one a link named: another one
+    /// is refused. Another copy of that id and version already kept is left
+    /// alone (`conflict`) unless `replace`; the same bytes are not rewritten.
+    fn take(
+        &self,
+        shared: &Shared,
+        origin: &str,
+        id: &str,
+        version: Option<u32>,
+        replace: bool,
+    ) -> Result<Opened, String> {
+        let site = self.site(origin)?;
+        let host = site.origin.host();
+        let session = self.sites.session(origin).ok_or("no site")?;
+        let entries = session.challenges().map_err(|e| plain(&e, &site))?;
+        let entry = entries
+            .into_iter()
+            .find(|e| e.id == id)
+            .ok_or_else(|| format!("This challenge is no longer on {host}."))?;
+        if let Some(why) = version_mismatch(host, version, entry.version) {
+            return Err(why);
+        }
+        let bytes = entry.definition.get();
+        if sha256_hex(bytes.as_bytes()) != entry.definition_sha256 {
+            return Err(format!(
+                "{host} sent a challenge that doesn't match its checksum."
+            ));
+        }
+        if !replace && let Some(kept) = shared.challenge_conflict(bytes) {
+            return Ok(Opened {
+                entry: None,
+                conflict: Some(kept),
+            });
+        }
+        let kept = shared.import_challenge(bytes)?;
+        self.sites
+            .link(origin, &kept.key, &entry.id, entry.version)?;
+        emit(&self.app, json!({ "origin": origin }));
+        Ok(Opened {
+            entry: Some(kept),
+            conflict: None,
         })
     }
 
@@ -287,6 +407,7 @@ impl Connect {
         };
         if !matches!(v.state, SiteState::Scored | SiteState::Rejected)
             || !lock(&self.toasted).insert(id.to_owned())
+            || !lock(&self.settings).notify
         {
             return;
         }
@@ -312,6 +433,20 @@ impl Connect {
             eprintln!("notification not shown: {e}");
         }
     }
+}
+
+/// Why a link's challenge version can't open: the site has another one.
+fn version_mismatch(host: &str, linked: Option<u32>, site: u32) -> Option<String> {
+    let linked = linked.filter(|v| *v != site)?;
+    Some(if site > linked {
+        format!(
+            "{host} has a newer version of this challenge (version {site}) than the link's (version {linked}). Open it from the website again, or add it under Sites."
+        )
+    } else {
+        format!(
+            "{host} doesn't publish version {linked} of this challenge yet (it has version {site})."
+        )
+    })
 }
 
 /// A verdict toast's headline and body from the attempt's site copy (A6):
@@ -398,26 +533,31 @@ pub fn connect_available() -> bool {
     true
 }
 
-/// The deep link waiting for the user, asked when the window is ready so
-/// a link that started the app is not lost.
+/// What the window asks about next, when it is ready and after each link:
+/// a link that started the app is not lost, and none is given twice.
 #[tauri::command]
 pub fn deep_link_pending(c: Connected<'_>) -> Option<LinkView> {
-    c.pending_link(true)
+    c.hand_link()
 }
 
-/// The answer to "Connect to <host>?" for the link waiting: allowed, the
-/// site is added (its well-known document fetched only now) and the link
-/// stays, to open the challenge after sign-in; denied, it is dropped.
+/// The answer to "Connect to <host>?" for link `seq`: allowed, the site is
+/// added (its well-known document fetched only now) and the link stays,
+/// for the user's sign-in; denied, it is dropped.
 #[tauri::command]
 pub async fn deep_link_consent(
-    origin: String,
+    seq: u64,
     allow: bool,
     c: Connected<'_>,
 ) -> Result<Option<SiteView>, String> {
     let c = Arc::clone(&c);
     blocking(move || {
-        let answered = lock(&c.links).consent(&origin, allow, ::connect::now_ms());
+        let answered = lock(&c.links).consent(seq, allow, ::connect::now_ms());
         let decision = if allow { "allow" } else { "deny" };
+        let origin = answered
+            .as_ref()
+            .ok()
+            .and_then(|l| l.as_ref())
+            .map(|l| l.site().as_str());
         c.sites.log(json!({
             "event": "consent", "origin": origin, "decision": decision, "waiting": answered.is_ok(),
         }));
@@ -425,17 +565,66 @@ pub async fn deep_link_consent(
             return Ok(None);
         };
         let added = c.sites.add(link.site().as_str());
-        let r = added.inspect_err(|_| lock(&c.links).done())?;
+        let r = added.inspect_err(|_| lock(&c.links).done(seq))?;
         emit(&c.app, json!({ "origin": r.origin }));
         Ok(Some(c.view(&r)))
     })
     .await
 }
 
-/// The link was acted on or dismissed.
+/// The user's click on "Open" for link `seq` (its site the user's, signed
+/// in): the challenge is taken as the link names it and the link is done;
+/// a `conflict` keeps it waiting for "Replace" (`replace`).
 #[tauri::command]
-pub fn deep_link_done(c: Connected<'_>) {
-    lock(&c.links).done();
+pub async fn deep_link_open(
+    seq: u64,
+    replace: bool,
+    c: Connected<'_>,
+    shared: State<'_, Arc<Shared>>,
+) -> Result<Opened, String> {
+    let (c, shared) = (Arc::clone(&c), Arc::clone(&shared));
+    blocking(move || {
+        let link = lock(&c.links).ready(seq, ::connect::now_ms())?;
+        let origin = link.site().as_str();
+        if !c.sites.signed_in(origin) {
+            return Err(format!("Sign in to {} first.", link.site().host()));
+        }
+        let opened = match &link {
+            Link::Challenge { id, version, .. } => {
+                c.take(&shared, origin, id, *version, replace)?
+            }
+            Link::Connect { .. } => Opened {
+                entry: None,
+                conflict: None,
+            },
+        };
+        if opened.conflict.is_none() {
+            lock(&c.links).done(seq);
+        }
+        Ok(opened)
+    })
+    .await
+}
+
+/// Link `seq` was acted on or dismissed.
+#[tauri::command]
+pub fn deep_link_done(seq: u64, c: Connected<'_>) {
+    lock(&c.links).done(seq);
+}
+
+#[tauri::command]
+pub fn site_settings(c: Connected<'_>) -> SiteSettings {
+    *lock(&c.settings)
+}
+
+/// Changes and keeps the global settings of Challenges → Sites.
+#[tauri::command]
+pub fn site_settings_set(settings: SiteSettings, c: Connected<'_>) -> Result<SiteSettings, String> {
+    settings.save(&c.settings_file)?;
+    *lock(&c.settings) = settings;
+    c.sites
+        .log(json!({ "event": "settings", "links": settings.links, "notify": settings.notify }));
+    Ok(settings)
 }
 
 #[tauri::command]
@@ -558,8 +747,8 @@ pub async fn site_challenges(
     .await
 }
 
-/// Takes a site's challenge into the library: its exact bytes, checked
-/// against the site's SHA-256 and by `Challenge::parse`.
+/// Takes a site's challenge into the library (the Sites list's "Add to
+/// library"); another copy of it already kept is never overwritten.
 #[tauri::command]
 pub async fn site_challenge_take(
     origin: String,
@@ -569,24 +758,14 @@ pub async fn site_challenge_take(
 ) -> Result<Entry, String> {
     let (c, shared) = (Arc::clone(&c), Arc::clone(&shared));
     blocking(move || {
-        let site = c.site(&origin)?;
-        let session = c.sites.session(&origin).ok_or("no site")?;
-        let entries = session.challenges().map_err(|e| plain(&e, &site))?;
-        let entry = entries
-            .into_iter()
-            .find(|e| e.id == id)
-            .ok_or_else(|| format!("This challenge is no longer on {}.", site.origin.host()))?;
-        let bytes = entry.definition.get();
-        if sha256_hex(bytes.as_bytes()) != entry.definition_sha256 {
-            return Err(format!(
-                "{} sent a challenge that doesn't match its checksum.",
-                site.origin.host()
-            ));
+        let opened = c.take(&shared, &origin, &id, None, false)?;
+        match (opened.entry, opened.conflict) {
+            (Some(entry), _) => Ok(entry),
+            (None, kept) => Err(format!(
+                "Another copy of “{}” is in your library already. Remove it there to add this site's copy.",
+                kept.map_or(id, |k| k.title)
+            )),
         }
-        let kept = shared.import_challenge(bytes)?;
-        c.sites.link(&origin, &kept.key, &entry.id, entry.version)?;
-        emit(&c.app, json!({ "origin": origin }));
-        Ok(kept)
     })
     .await
 }
@@ -608,6 +787,42 @@ pub fn attempt_upload(id: Option<String>, c: Connected<'_>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_link_for_another_version_is_refused_with_why() {
+        assert_eq!(version_mismatch("a.example", None, 3), None);
+        assert_eq!(version_mismatch("a.example", Some(3), 3), None);
+        let newer = version_mismatch("a.example", Some(2), 3).unwrap();
+        assert!(
+            newer.contains("newer version") && newer.contains("version 3"),
+            "{newer}"
+        );
+        let ahead = version_mismatch("a.example", Some(4), 3).unwrap();
+        assert!(
+            ahead.contains("version 4") && ahead.contains("yet"),
+            "{ahead}"
+        );
+    }
+
+    #[test]
+    fn site_settings_are_on_by_default_and_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("config").join(SiteSettings::FILE);
+        assert_eq!(SiteSettings::load(&file), SiteSettings::default());
+        assert!(SiteSettings::default().links && SiteSettings::default().notify);
+        let off = SiteSettings {
+            links: false,
+            notify: false,
+        };
+        off.save(&file).unwrap();
+        assert_eq!(SiteSettings::load(&file), off);
+        // A file from an older or newer app keeps what it can.
+        std::fs::write(&file, br#"{"notify":false,"other":1}"#).unwrap();
+        let partial = SiteSettings::load(&file);
+        assert!(partial.links && !partial.notify);
+        std::fs::write(&file, b"not json").unwrap();
+        assert_eq!(SiteSettings::load(&file), SiteSettings::default());
+    }
 
     #[test]
     fn a_verdict_toast_reads_like_the_site_copy() {
