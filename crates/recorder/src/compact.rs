@@ -15,6 +15,10 @@ use crate::journal::{Malformed, event_from, event_parts, invalid, ssm_code, ssm_
 use crate::{JournalReader, Record, SimEvent};
 
 pub const EXT: &str = "fqz";
+/// Largest decompressed body read, far above a day-long flight: a crafted
+/// file (an uploaded challenge attempt) cannot make the reader hold more.
+const MAX_BODY: u64 = 256 << 20;
+
 const MAGIC: &[u8; 4] = b"FQJC";
 const FORMAT_VERSION: u16 = 1;
 /// zstd level: within 2% of xz -9e on a journal, at about 10 MB/s.
@@ -70,8 +74,7 @@ impl Recording {
         if u16::from_le_bytes([head[0], head[1]]) != FORMAT_VERSION {
             return Err(invalid("not a FOQA-Sim v1 compact flight"));
         }
-        let mut body = Vec::new();
-        zstd::Decoder::new(input)?.read_to_end(&mut body)?;
+        let body = body(input, MAX_BODY)?;
         Self::decode(u16::from_le_bytes([head[2], head[3]]), &body)
             .ok_or_else(|| invalid("corrupt compact flight"))
     }
@@ -317,12 +320,33 @@ fn take<'a>(c: &mut Cursor<&'a [u8]>, n: usize) -> Option<&'a [u8]> {
     Some(bytes)
 }
 
+/// The zstd body, refused beyond `max` bytes.
+fn body(input: impl Read, max: u64) -> io::Result<Vec<u8>> {
+    let mut body = Vec::new();
+    zstd::Decoder::new(input)?
+        .take(max + 1)
+        .read_to_end(&mut body)?;
+    if body.len() as u64 > max {
+        return Err(invalid("compact flight larger than this reader accepts"));
+    }
+    Ok(body)
+}
+
 #[cfg(test)]
 mod tests {
     use fdm_core::{Lfl, Ssm};
 
     use super::*;
     use crate::{FlowEvent, JournalWriter};
+
+    /// A body past the limit is refused, not read whole.
+    #[test]
+    fn refuses_a_body_beyond_the_limit() {
+        let packed = zstd::encode_all(&[0u8; 1000][..], 3).unwrap();
+        assert_eq!(body(&packed[..], 1000).unwrap().len(), 1000);
+        let err = body(&packed[..], 999).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+    }
 
     fn journal() -> Vec<u8> {
         let mut w = JournalWriter::new(Vec::new(), &Lfl::V1).unwrap();

@@ -3,7 +3,7 @@
 //! Spec: `docs/format.md`.
 
 use std::fs::File;
-use std::io::{self, BufRead, BufReader, BufWriter, Lines, Write};
+use std::io::{self, BufRead, BufReader, BufWriter, Read, Write};
 use std::path::Path;
 
 use flate2::Compression;
@@ -20,6 +20,11 @@ const FORMAT: &str = "foqa-raw";
 const VERSION: u64 = 1;
 /// Frames between flushes; a killed capture loses at most about a second.
 const FLUSH_EVERY: u32 = 128;
+/// Largest decompressed capture read, far above a day-long flight (about
+/// 25 MB an hour), and longest line (a frame is under 1 KB): a crafted
+/// file cannot make the replay read without end or hold one huge line.
+const MAX_RAW: u64 = 1 << 30;
+const MAX_LINE: u64 = 64 << 10;
 
 /// Writes a raw capture while recording.
 pub struct RawWriter {
@@ -86,15 +91,21 @@ impl RawWriter {
 /// Replays a raw capture. Columns are matched to the current wiring by SimVar
 /// and unit; columns the capture lacks arrive as `NaN`.
 pub struct ReplaySource {
-    lines: Lines<BufReader<GzDecoder<File>>>,
+    input: BufReader<GzDecoder<File>>,
+    /// Decompressed bytes still allowed, from `MAX_RAW`.
+    left: u64,
     /// For each acquisition column, its position in the capture.
     map: Vec<Option<usize>>,
 }
 
 impl ReplaySource {
     pub fn open(path: impl AsRef<Path>, acq: &Acquisition) -> io::Result<Self> {
-        let mut lines = BufReader::new(GzDecoder::new(File::open(path)?)).lines();
-        let header = parse(&lines.next().ok_or_else(|| invalid("empty capture"))??)?;
+        let mut source = Self {
+            input: BufReader::new(GzDecoder::new(File::open(path)?)),
+            left: MAX_RAW,
+            map: Vec::new(),
+        };
+        let header = parse(&source.line()?.ok_or_else(|| invalid("empty capture"))?)?;
         if header["format"] != FORMAT || header["version"] != VERSION {
             return Err(invalid("not a foqa-raw v1 capture"));
         }
@@ -118,17 +129,34 @@ impl ReplaySource {
                     .position(|&(simvar, unit)| simvar == c.simvar && unit == c.unit)
             })
             .collect();
-        Ok(Self { lines, map })
+        source.map = map;
+        Ok(source)
+    }
+
+    /// The next line, newline kept, `None` at the end; an error past
+    /// `MAX_LINE` or `MAX_RAW`.
+    fn line(&mut self) -> io::Result<Option<String>> {
+        let mut line = String::new();
+        let n = (&mut self.input).take(MAX_LINE + 1).read_line(&mut line)? as u64;
+        if n > MAX_LINE {
+            return Err(invalid("capture line too long"));
+        }
+        self.left = self
+            .left
+            .checked_sub(n)
+            .ok_or_else(|| invalid("capture too large"))?;
+        // JSON allows the trailing newline.
+        Ok((n > 0).then_some(line))
     }
 }
 
 impl TelemetrySource for ReplaySource {
     fn recv(&mut self) -> io::Result<Option<Telemetry>> {
-        let line = match self.lines.next() {
-            None => return Ok(None),
+        let line = match self.line() {
+            Ok(None) => return Ok(None),
             // An unfinished capture (killed recorder) ends mid-stream.
-            Some(Err(e)) if e.kind() == io::ErrorKind::UnexpectedEof => return Ok(None),
-            Some(line) => line?,
+            Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => return Ok(None),
+            line => line?.unwrap_or_default(),
         };
         match parse(&line)? {
             Value::Array(row) => Ok(Some(Telemetry::Frame(
@@ -220,5 +248,25 @@ mod tests {
         }
         // NaN != NaN, so compare frames through their debug text.
         assert_eq!(format!("{replayed:?}"), format!("{items:?}"));
+    }
+
+    #[test]
+    fn an_oversized_capture_or_line_is_refused() {
+        let acq = Acquisition::new(&Lfl::V1);
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("raw.jsonl.gz");
+        let mut writer = RawWriter::create(&path, acq.columns()).unwrap();
+        writer.write(&Telemetry::Event(SimEvent::Crashed)).unwrap();
+        writer
+            .write(&Telemetry::Event(SimEvent::PilotReport("x".repeat(70_000))))
+            .unwrap();
+        writer.finish().unwrap();
+        let mut source = ReplaySource::open(&path, &acq).unwrap();
+        let err = |r: io::Result<Option<Telemetry>>| r.unwrap_err().to_string();
+        source.left = 10;
+        assert_eq!(err(source.recv()), "capture too large");
+        let mut source = ReplaySource::open(&path, &acq).unwrap();
+        assert!(source.recv().unwrap().is_some());
+        assert_eq!(err(source.recv()), "capture line too long");
     }
 }

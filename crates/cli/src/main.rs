@@ -5,6 +5,7 @@
 //! `fdm export <flight> [out-dir]`              long-format Parquet (+ events)
 //! `fdm compact <journal.fqj|folder>`           journals to compact flights
 //! `fdm list <folder>`                          the app's flight list, as JSON
+//! `fdm challenge <challenge.json> <flight.fqz>` a landing-challenge attempt, as JSON
 //!
 //! `<flight>` is a journal (`.fqj`), a compact flight (`.fqz`) or a raw
 //! capture (`.raw.jsonl.gz`), which is first recorded through the on-board
@@ -27,7 +28,8 @@ const USAGE: &str =
        fdm debrief <flight> [--json]
        fdm export <flight> [out-dir]
        fdm compact <journal.fqj|folder>
-       fdm list <folder>";
+       fdm list <folder>
+       fdm challenge <challenge.json> <flight.fqz>";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -39,6 +41,7 @@ fn main() -> ExitCode {
         ["export", path, out] => export(Path::new(path), Path::new(out)),
         ["compact", path] => compact(Path::new(path)),
         ["list", dir] => list(Path::new(dir)),
+        ["challenge", def, path] => challenge(Path::new(def), Path::new(path)),
         _ => {
             eprintln!("{USAGE}");
             return ExitCode::from(2);
@@ -90,10 +93,11 @@ fn analyze(path: &Path, rules_path: Option<&Path>) -> Result<(), Box<dyn Error>>
     println!("\nPhases (CICTT)");
     for s in &a.phases {
         println!(
-            "  {:>7.1} – {:>7.1} s  {:?}",
+            "  {:>7.1} – {:>7.1} s  {:<12}  {}",
             s.start.as_secs_f64(),
             s.end.as_secs_f64(),
-            s.phase
+            s.phase.name(),
+            debrief::phase_trigger(&s.cause)
         );
     }
     println!("\nTouchdowns");
@@ -195,9 +199,50 @@ fn compact(path: &Path) -> Result<(), Box<dyn Error>> {
     }
 }
 
+/// The flight graded as an attempt at the challenge: what the site's server
+/// runs on an uploaded recording (docs/challenges.md).
+fn challenge(def: &Path, path: &Path) -> Result<(), Box<dyn Error>> {
+    let challenge = challenge::Challenge::parse(&fs::read_to_string(def)?)?;
+    uploadable(path)?;
+    let station = Station::core()?;
+    let attempt = challenge::evaluate(&challenge, &open(&station, path)?);
+    println!("{}", serde_json::to_string_pretty(&attempt)?);
+    Ok(())
+}
+
+/// An upload is a compact flight (`.fqz`) only: its decompressed body is
+/// capped, while a raw capture's gzip would let a small upload expand.
+fn uploadable(path: &Path) -> Result<(), String> {
+    match path.extension().is_some_and(|e| e == "fqz") {
+        true => Ok(()),
+        false => Err(format!(
+            "{}: a challenge attempt is a .fqz compact flight",
+            path.display()
+        )),
+    }
+}
+
 /// The summaries through the folder's index, which it brings up to date.
 fn list(dir: &Path) -> Result<(), Box<dyn Error>> {
     let summaries = Index::open(dir).summaries(&Station::core()?);
     println!("{}", serde_json::to_string_pretty(&summaries)?);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_challenge_takes_a_compact_flight_only() {
+        assert!(uploadable(Path::new("a/attempt.fqz")).is_ok());
+        for other in [
+            "attempt.fqj",
+            "attempt.raw.jsonl.gz",
+            "attempt.fqz.gz",
+            "attempt",
+        ] {
+            assert!(uploadable(Path::new(other)).is_err(), "{other}");
+        }
+    }
 }
