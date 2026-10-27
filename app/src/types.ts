@@ -256,9 +256,18 @@ export interface Series {
   nz_g: SeriesValues;
   pitch_deg: SeriesValues;
   roll_deg: SeriesValues;
+  /** Magnetic heading. */
+  hdg_deg: SeriesValues;
+  /** Radio height, on-ground bias removed; null above 2500 ft. */
+  ra_ft: SeriesValues;
   flap_deg: SeriesValues;
   /** The profile's flap-speed limit at `flap_deg`. */
   vfe_kt: SeriesValues;
+  /** `gear.extended` as recorded, 0 = up; full is 1 from MSFS (a fraction), 100 from a source that sends percent. */
+  gear_ext: SeriesValues;
+  /** 1 engaged, 0 not. */
+  ap_engaged: SeriesValues;
+  at_engaged: SeriesValues;
   lat: SeriesValues;
   lon: SeriesValues;
 }

@@ -513,8 +513,13 @@ impl Analysis<'_> {
             nz_g: pick(&track.nz_g),
             pitch_deg: pick(&track.pitch_deg),
             roll_deg: pick(&track.roll_deg),
+            hdg_deg: param("heading.mag"),
+            ra_ft: pick(&track.ra_ft),
             flap_deg,
             vfe_kt,
+            gear_ext: param("gear.extended"),
+            ap_engaged: param("ap.engaged"),
+            at_engaged: param("at.engaged"),
             lat: param("pos.lat"),
             lon: param("pos.lon"),
         }
@@ -690,13 +695,32 @@ mod tests {
             &s.nz_g,
             &s.pitch_deg,
             &s.roll_deg,
+            &s.hdg_deg,
+            &s.ra_ft,
             &s.flap_deg,
             &s.vfe_kt,
+            &s.gear_ext,
+            &s.ap_engaged,
+            &s.at_engaged,
             &s.lat,
             &s.lon,
         ]
         .map(Vec::len);
-        assert_eq!(lengths, [n; 12]);
+        assert_eq!(lengths, [n; 17]);
+        // What the replay's instruments read: heading in range, radio height
+        // only low down, the discretes as 0 or 1.
+        let known = |v: &[f64]| {
+            v.iter()
+                .copied()
+                .filter(|x| x.is_finite())
+                .collect::<Vec<_>>()
+        };
+        assert!(known(&s.hdg_deg).iter().all(|h| (0.0..=360.0).contains(h)));
+        assert!(!known(&s.ra_ft).is_empty());
+        assert!(known(&s.ra_ft).iter().all(|&h| h <= 2500.0));
+        for discrete in [&s.ap_engaged, &s.at_engaged] {
+            assert!(known(discrete).iter().all(|&x| x == 0.0 || x == 1.0));
+        }
         assert!(s.t_s.windows(2).all(|w| w[0] < w[1]));
         // 2 Hz outside the touchdown window, 8 Hz inside it.
         let step = |t: f64| {

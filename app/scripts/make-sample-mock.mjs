@@ -182,6 +182,7 @@ function build(id, opts = {}) {
   const samples = cut > 0 ? keep.slice(0, cut) : keep
   const r1 = (v, d = 1) => Math.round(v * 10 ** d) / 10 ** d
   // profiles/C172.yaml flap bands; other types here have none.
+  const jet = opts.class === "transport"
   const vfe = (flap) => (opts.aircraft?.icao === "C172" && flap > 0 ? (flap <= 10 ? 110 : 85) : null)
   const pos = samples.map((x) => toLatLon(x.a, x.r))
   const series = {
@@ -194,8 +195,15 @@ function build(id, opts = {}) {
     nz_g: samples.map((x) => r1(x.nz, 3)),
     pitch_deg: samples.map((x) => r1(x.pitch)),
     roll_deg: samples.map((x) => r1(x.roll)),
+    hdg_deg: samples.map((x) => r1((((HDG + x.heading / DEG) % 360) + 360) % 360)),
+    ra_ft: samples.map((x) => (x.h / FT <= 2500 ? r1(x.h / FT) : null)),
     flap_deg: samples.map((x) => x.flap),
     vfe_kt: samples.map((x) => vfe(x.flap)),
+    // As MSFS sends them: gear as a fraction; a C172's fixed gear always 1, the 737's up between 150 ft and flaps 20; its autopilot and autothrottle on the downwind.
+    // Without an aircraft identity the sim sent none of the three.
+    gear_ext: samples.map((x) => (!opts.aircraft ? null : jet && x.h / FT > 150 && x.flap < 20 ? 0 : 1)),
+    ap_engaged: samples.map((x) => (!opts.aircraft ? null : jet && x.h / FT > 900 && x.flap === 0 ? 1 : 0)),
+    at_engaged: samples.map((x) => (!opts.aircraft ? null : jet && x.h / FT > 900 && x.flap === 0 ? 1 : 0)),
     lat: pos.map((p) => r1(p.lat, 6)),
     lon: pos.map((p) => r1(p.lon, 6)),
   }
@@ -287,7 +295,7 @@ function build(id, opts = {}) {
   }
   const thr17 = toLatLon(LDA, 0)
   const debrief = {
-    flight: { ...summary, lfl_version: 1, profile: opts.profile, class: opts.class, phase_values, assessment_detail, damaged_at: opts.damagedAt },
+    flight: { ...summary, lfl_version: 1, profile: opts.profile, class: opts.class, profile_limits: opts.profileLimits, phase_values, assessment_detail, damaged_at: opts.damagedAt },
     phases, touchdowns, events: ordered, series,
     airports: withRunway ? [{ icao: "LTFA", runways: [{ width_m: 45, ends: [
       { runway: "35", lat: THR35.lat, lon: THR35.lon, heading_deg: HDG, lda_m: LDA, tdz_m: Math.round(TDZ) },
@@ -428,7 +436,8 @@ function landing2({ touchdowns, events, samples, phases, lastT, cls, legacy }) {
   return { method: "landing-2", score, grade: score >= 85 ? "good" : score >= 60 ? "fair" : "poor", confidence: "full", caps, partial_note: null, graded_by, landings, other_findings }
 }
 
-const c172 = { aircraft: { icao: "C172", title: "Cessna Skyhawk G1000 Asobo" }, profile: "C172 profile", class: "light" }
+const c172 = { aircraft: { icao: "C172", title: "Cessna Skyhawk G1000 Asobo" }, profile: "C172 profile", class: "light",
+  profileLimits: { vmo: { value: 163, source: "Cessna 172S POH, Section 2 (sample)", note: "VNE (never exceed)" }, vso: { value: 40, source: "Cessna 172S POH, Section 2 (sample)" } } }
 
 const flights = [
   build("flight-1793027213", { started: "2026-10-26T14:26:53Z", ...c172 }),
