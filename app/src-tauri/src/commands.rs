@@ -14,7 +14,9 @@ use std::time::{Duration, Instant};
 use ::debrief::{
     Debrief, FlightSummary, Index, LandingNotice, RecorderStatus, Station, StorageUsage,
 };
-use capture::{ASK_TIMEOUT, InitPosition, SimRequests, Start, Stopper};
+use capture::{
+    ASK_TIMEOUT, InitPosition, PreflightLine, SimRequests, SiteStrip, Start, Stopper, Views,
+};
 use challenge::{Attempt, Begin, Challenge, Mode, StartState};
 use recorder::{AttemptMarker, AttemptPhase};
 use serde::Serialize;
@@ -41,10 +43,12 @@ pub struct Shared {
     /// Requests to the sim through the recorder's connection.
     sim: SimRequests,
     /// Challenge files the user opened.
-    library: Library,
-    attempts: Attempts,
+    pub(crate) library: Library,
+    pub(crate) attempts: Attempts,
     /// What an optional module adds to an attempt (the site client).
-    hooks: Option<Arc<dyn AttemptHooks>>,
+    pub(crate) hooks: Option<Arc<dyn AttemptHooks>>,
+    /// The in-sim views' challenge part (B9).
+    pub(crate) views: Views,
     /// A pass over the slices still to cut is running.
     reslicing: AtomicBool,
 }
@@ -58,6 +62,12 @@ pub trait AttemptHooks: Send + Sync {
     /// The pre-flight card's ranking line for library entry `key`, when it
     /// is not a local file: `(state, text, fix)`.
     fn ranking(&self, key: &str) -> Option<(&'static str, String, Option<String>)>;
+    /// Where library entry `key` came from, when not a local file:
+    /// `<name> (<ascii host>)`.
+    fn source(&self, key: &str) -> Option<String>;
+    /// The site part of attempt `id` for the in-sim strip, and whether
+    /// nothing more will happen to it.
+    fn site_strip(&self, id: &str) -> Option<(SiteStrip, bool)>;
 }
 
 impl Shared {
@@ -72,8 +82,10 @@ impl Shared {
         sim: SimRequests,
         library: Library,
         attempts: Attempts,
+        views: Views,
     ) -> Self {
         Self {
+            views,
             library,
             attempts,
             sim,
@@ -140,6 +152,11 @@ impl Shared {
     /// Imports a challenge's exact bytes into the library.
     pub fn import_challenge(&self, json: &str) -> Result<Entry, String> {
         self.library.import(json)
+    }
+
+    /// The kept challenge that importing `json` would replace.
+    pub fn challenge_conflict(&self, json: &str) -> Option<Entry> {
+        self.library.conflict(json)
     }
 }
 
@@ -327,8 +344,14 @@ impl Shared {
         Ok(challenge::evaluate_after(&c, &a, begin))
     }
 
-    /// Creates an attempt at `definition` and places it.
-    fn start_attempt(&self, key: &str, definition: &str) -> Result<Record, String> {
+    /// Creates an attempt at `definition` and places it; as `practice` no
+    /// site is asked for an attempt, so it is never uploaded.
+    pub(crate) fn start_attempt(
+        &self,
+        key: &str,
+        definition: &str,
+        practice: bool,
+    ) -> Result<Record, String> {
         let c = Challenge::parse(definition)?;
         let (lines, flight) = self.preflight(key, &c);
         let (flight_id, begin_s) = flight.ok_or_else(|| lines[0].text.clone())?;
@@ -336,6 +359,7 @@ impl Shared {
         let marker_ref = self
             .hooks
             .as_ref()
+            .filter(|_| !practice)
             .and_then(|hooks| hooks.before_place(&record))
             .filter(|r| recorder::is_reference(r));
         let checks: serde_json::Map<_, _> = lines
@@ -388,9 +412,51 @@ impl Shared {
     }
 
     /// Abandons attempt `id` (`cancelled`, `replaced`), ending its marker.
-    fn abandon(&self, id: &str, reason: &str) -> Result<Record, String> {
+    pub(crate) fn abandon(&self, id: &str, reason: &str) -> Result<Record, String> {
         self.end_marker(&self.attempts.get(id)?, reason);
         self.attempts.abandon(id, reason)
+    }
+
+    /// Abandons attempt `id` if it is still open (`replaced`) and starts
+    /// the same definition again, so one attempt is open at a time.
+    pub(crate) fn fly_again(&self, id: &str) -> Result<Record, String> {
+        let record = self.attempts.get(id)?;
+        if record.state.can_become(AttemptState::Abandoned) {
+            self.abandon(id, "replaced")?;
+        }
+        self.start_attempt(&record.key, &self.attempts.definition(id)?, false)
+    }
+
+    /// The pre-flight card of library entry `key`, as the views show it.
+    pub(crate) fn preflight_lines(&self, key: &str) -> Result<Vec<PreflightLine>, String> {
+        let (c, _) = self.library.get(key)?;
+        let lines = self.preflight(key, &c).0.into_iter();
+        Ok(lines
+            .map(|l| PreflightLine {
+                name: l.name.into(),
+                state: l.state.into(),
+                text: l.text,
+                fix: l.fix,
+            })
+            .collect())
+    }
+
+    /// An attempt placed in the flight being recorded moves to the
+    /// approach once the recording shows its gate passed (B5).
+    pub(crate) fn watch_gate(&self, r: &Record) {
+        let recording = r.flight_id.as_deref().is_some_and(|f| self.recording(f));
+        if r.state != AttemptState::Flying || !recording {
+            return;
+        }
+        let graded = self
+            .attempts
+            .definition(&r.id)
+            .and_then(|d| self.grade(r, &d));
+        if let Ok(Some(gate_s)) = graded.map(|a| a.gate_s)
+            && let Err(e) = self.attempts.gate(&r.id, gate_s)
+        {
+            eprintln!("attempt {}: {e}", r.id);
+        }
     }
 
     /// The slice of an attempt from its flight (A5). While the flight
@@ -464,7 +530,7 @@ impl Shared {
 
     /// Ends attempt `id` (its end marker first) and grades it; its slice is
     /// then cut on a thread of its own.
-    fn finish(self: &Arc<Self>, id: &str, reason: &str) -> Result<Record, String> {
+    pub(crate) fn finish(self: &Arc<Self>, id: &str, reason: &str) -> Result<Record, String> {
         if let Ok(r) = self.attempts.get(id) {
             self.end_marker(&r, reason);
         }
@@ -645,7 +711,7 @@ pub async fn challenge_preflight(
 #[tauri::command]
 pub async fn attempt_start(key: String, shared: State<'_, Arc<Shared>>) -> Result<Record, String> {
     let shared = Arc::clone(&shared);
-    blocking(move || shared.start_attempt(&key, &shared.library.get(&key)?.1)).await
+    blocking(move || shared.start_attempt(&key, &shared.library.get(&key)?.1, false)).await
 }
 
 /// Abandons the attempt if it is still open (`replaced`) and starts the
@@ -656,14 +722,7 @@ pub async fn attempt_fly_again(
     shared: State<'_, Arc<Shared>>,
 ) -> Result<Record, String> {
     let shared = Arc::clone(&shared);
-    blocking(move || {
-        let record = shared.attempts.get(&id)?;
-        if record.state.can_become(AttemptState::Abandoned) {
-            shared.abandon(&id, "replaced")?;
-        }
-        shared.start_attempt(&record.key, &shared.attempts.definition(&id)?)
-    })
-    .await
+    blocking(move || shared.fly_again(&id)).await
 }
 
 /// Ends the attempt now and grades it from its flight.

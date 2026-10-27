@@ -66,8 +66,20 @@ impl Library {
                 kept.id
             ));
         }
-        fs::write(self.dir.join(format!("{}.json", entry.key)), json).map_err(|e| e.to_string())?;
+        if self.conflict(json).is_none() {
+            fs::write(self.dir.join(format!("{}.json", entry.key)), json)
+                .map_err(|e| e.to_string())?;
+        }
         Ok(entry)
+    }
+
+    /// The entry kept under the same id and version as `json` with other
+    /// bytes, which importing `json` would replace. `None` when there is
+    /// none, the same bytes are kept, or `json` isn't a challenge.
+    pub fn conflict(&self, json: &str) -> Option<Entry> {
+        let c = Challenge::parse(json).ok()?;
+        let (kept, bytes) = self.get(&key(&c)).ok()?;
+        (bytes != json).then(|| entry(&kept, &bytes))
     }
 
     /// Reads a file the user picked, then imports it.
@@ -228,6 +240,27 @@ mod tests {
         lib.remove("test-20-v1").unwrap();
         assert_eq!(lib.list().len(), 1);
         assert!(lib.remove("test-20-v1").is_err());
+    }
+
+    #[test]
+    fn another_copy_of_a_kept_challenge_is_a_conflict() {
+        let (_tmp, lib) = library();
+        assert_eq!(lib.conflict(JSON), None, "nothing kept yet");
+        lib.import(JSON).unwrap();
+        assert_eq!(lib.conflict(JSON), None, "the same bytes");
+        let other = JSON.replace("Runway 20", "Runway 20, edited");
+        let kept = lib.conflict(&other).unwrap();
+        assert_eq!(
+            (kept.key.as_str(), kept.title.as_str()),
+            ("test-20-v1", "Runway 20")
+        );
+        assert_eq!(lib.conflict("not json"), None);
+        let next = JSON.replace(r#""version": 1"#, r#""version": 2"#);
+        assert_eq!(
+            lib.conflict(&next),
+            None,
+            "another version is another entry"
+        );
     }
 
     #[test]

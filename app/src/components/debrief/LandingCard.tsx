@@ -58,7 +58,7 @@ export function LandingCard({ index, landing: { touchdown: td, bounces }, events
         {fix ? <span className="readout rounded-sm bg-muted px-1.5 text-xs">{fix.icao} {fix.runway}</span> : null}
         <span className="ml-auto flex items-center gap-2">
           {scored?.score != null && scored.grade ? (
-            <span className="inline-flex items-center gap-1.5" title={`landing-2 score of this landing${scored.full_stop ? "" : " (touch-and-go: no rollout scored, does not set the flight grade)"}`}>
+            <span className="inline-flex items-center gap-1.5" title={`Score of this landing${scored.full_stop ? "" : " (touch-and-go: no rollout scored, does not set the flight grade)"}`}>
               <span className="readout text-sm font-semibold">{number(scored.score, 1)}</span>
               <GradeTag grade={scored.grade} label={scored.full_stop ? undefined : "Touch-and-go"} />
             </span>
@@ -76,10 +76,10 @@ export function LandingCard({ index, landing: { touchdown: td, bounces }, events
               </li>
             ))}
           </ul>
-        ) : <p className="text-fg-2">No rule exceeded from the start of the approach to 10 s into the rollout.</p>}
+        ) : <p className="text-fg-2">Nothing was flagged from the start of the approach to 10 s into the rollout.</p>}
         <p className="mt-1.5 text-[11px] text-fg-3">{scored?.status === "scored"
-          ? `Events from the rules (${flight.profile}). The shaded bands are landing-2's for each value (ideal, tolerance, levels 1–3), the same ones the score uses; dashed ticks are published references. ⓘ lists the sources.`
-          : `Events from the rules (${flight.profile}). Not scored by landing-2${scored?.missing.length ? `: no ${scored.missing.join(", ")}` : ""}; the gauges show published references only.`}</p>
+          ? `Events from the rules (${flight.profile}). The shaded bands are the limits the landing score uses for each value (ideal, tolerance, levels 1–3); dashed ticks are published references. ⓘ lists the sources.`
+          : `Events from the rules (${flight.profile}). ${scored?.note ?? "Not scored."} The gauges show published references only.`}</p>
       </div>
 
       <dl className="flex flex-col gap-3">
@@ -98,7 +98,7 @@ export function LandingCard({ index, landing: { touchdown: td, bounces }, events
         </Metric>
         <Metric label="Speed" value={td.ias_kt !== undefined ? `${number(td.ias_kt)} kt` : "–"} sub="indicated">
           {speed ? <Gauge scale={speed} value={td.ias_kt!} unit="kt" />
-            : <Note text={scored?.status === "scored" ? `No Vref for this type: touchdown speed is not graded.` : "Compare with your reference speed (Vref)."} />}
+            : <Note text={scored?.status === "scored" ? `No reference speed (Vref) for this type: touchdown speed is not graded.` : "Compare with your reference speed (Vref)."} />}
         </Metric>
         {td.wind ? (
           <Metric label="Wind" value={windValue(td.wind)} sub="at touchdown">
@@ -208,7 +208,7 @@ function Gauge({ scale, value, unit, digits = 0, flag }: { scale: Scale; value: 
     <div className="flex flex-col gap-0.5">
       <div className="relative mt-2 h-2 rounded-full bg-muted">
         {bands.map((b, i) => (
-          <span key={`${b.from}-${b.to}-${i}`} className="absolute inset-y-0 border-r border-surface first:rounded-l-full last:rounded-r-full last:border-r-0" title={`${b.label} (landing-2)`}
+          <span key={`${b.from}-${b.to}-${i}`} className="absolute inset-y-0 border-r border-surface first:rounded-l-full last:rounded-r-full last:border-r-0" title={b.label}
             style={{ left: `${pct(scale, b.from)}%`, width: `${pct(scale, b.to) - pct(scale, b.from)}%`, background: b.color, opacity: b === current ? 1 : 0.55 }} />
         ))}
         {scale.marks.map((mark) => mark.to === undefined
@@ -221,11 +221,11 @@ function Gauge({ scale, value, unit, digits = 0, flag }: { scale: Scale; value: 
         {edges.map((v) => <span key={v} className="absolute -translate-x-1/2" style={{ left: `${pct(scale, v)}%` }}>{fmt(v)}</span>)}
       </div>
       <p className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-[11px] text-fg-3">
-        {[...(current ? [`landing-2: ${current.label.toLowerCase()}`] : []), ...scale.marks.map((m) => m.label)].join(" · ")}
+        {[...(current ? [`Score band: ${current.label.toLowerCase()}`] : []), ...scale.marks.map((m) => m.label)].join(" · ")}
         <Sources>
           {scale.marks.length ? <span className="block font-medium">Reference</span> : null}
           {scale.marks.map((m) => <span key={m.label} className="block"><b>{m.to === undefined ? `┊ ${fmt(m.at)}` : `${fmt(m.at)}–${fmt(m.to)}`} {unit}</b> {m.label}</span>)}
-          {bands.length ? <span className="mt-1 block font-medium">landing-2 bands (the score)</span> : null}
+          {bands.length ? <span className="mt-1 block font-medium">Bands the landing score uses</span> : null}
           {bands.map((b, i) => <span key={i} className="block"><b>{b.to === Infinity ? `> ${fmt(b.from)}` : `${fmt(b.from)}–${fmt(b.to)}`} {unit}</b> {b.label}</span>)}
           <span className="mt-1 block font-medium">Sources</span>
           {[...new Set([...scale.marks.map((m) => m.source), scale.bands?.source])].filter(Boolean).map((source) => <span key={source} className="block opacity-80">{source}</span>)}

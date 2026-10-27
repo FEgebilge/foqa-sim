@@ -10,7 +10,9 @@ mod attempts;
 mod commands;
 #[cfg(feature = "connect")]
 mod connect;
+mod insim;
 mod library;
+mod links;
 mod setup;
 
 use std::sync::Arc;
@@ -34,6 +36,8 @@ use tauri_plugin_notification::NotificationExt;
 const QUIT_GRACE: Duration = Duration::from_secs(3);
 /// The notification's payload key naming the flight to open on a click.
 const FLIGHT_ID: &str = "flight_id";
+/// The notification's payload key naming the challenge to open on a click.
+pub(crate) const CHALLENGE_KEY: &str = "challenge_key";
 
 /// The core commands, and those of the optional modules given.
 macro_rules! handler {
@@ -82,15 +86,36 @@ fn main() {
         connect::site_challenge_take,
         connect::site_attempts,
         connect::attempt_upload,
-        connect::site_open
+        connect::site_open,
+        connect::deep_link_pending,
+        connect::deep_link_consent,
+        connect::deep_link_open,
+        connect::deep_link_done,
+        connect::site_settings,
+        connect::site_settings_set
     );
     #[cfg(not(feature = "connect"))]
-    let commands: Commands = handler!();
-    tauri::Builder::default()
-        // First, so a second launch only brings this one's window up.
-        .plugin(tauri_plugin_single_instance::init(|app, _, _| {
-            show(app, None)
-        }))
+    let commands: Commands = handler!(links::deep_link_pending, links::deep_link_done);
+    let builder = tauri::Builder::default()
+        // First, so a second launch only brings this one's window up, and
+        // hands on a link it was started with, as its argument (B2).
+        .plugin(tauri_plugin_single_instance::init(|app, args, _| {
+            show(app, None);
+            #[cfg(feature = "connect")]
+            if let Some(connect) = app.try_state::<Arc<connect::Connect>>() {
+                links::in_args(args).for_each(|link| connect.open_url(&link));
+            }
+            #[cfg(not(feature = "connect"))]
+            links::arrived(app, args);
+        }));
+    // The `foqa-sim` scheme (tauri.conf.json; the installer registers it).
+    // Links themselves are read from the command line, not from this plugin,
+    // which hands them on already parsed (normalised).
+    #[cfg(feature = "connect")]
+    let builder = builder.plugin(tauri_plugin_deep_link::init());
+    #[cfg(not(feature = "connect"))]
+    let builder = builder.manage(links::Disabled::default());
+    builder
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         // Off until the user enables it (`plugin:autostart|enable`).
@@ -103,10 +128,11 @@ fn main() {
             let station = Arc::new(Station::core()?);
             let dir = app.path().document_dir()?.join("FOQA-Sim").join("flights");
             // FOQA_RAW=1 also keeps raw captures, to replay through a changed chain.
-            let service = Service::new(dir.clone(), Arc::clone(&station))?
+            let mut service = Service::new(dir.clone(), Arc::clone(&station))?
                 .raw(std::env::var_os("FOQA_RAW").is_some());
             let (stopper, index, sim) =
                 (service.stopper(), service.index(), service.sim_requests());
+            let (views, view_commands) = (service.views(), service.app_commands());
             let (tx, rx) = mpsc::channel();
             let recorder = thread::Builder::new()
                 .name("recorder".into())
@@ -117,27 +143,45 @@ fn main() {
             let library = Library::new(data.join("challenges"))?;
             let handle = app.handle().clone();
             #[cfg(feature = "connect")]
-            let connect =
-                connect::Connect::start(data.clone(), data.join("attempts"), handle.clone())?;
+            let connect = connect::Connect::start(
+                data.clone(),
+                app.path().app_config_dir()?,
+                data.join("attempts"),
+                handle.clone(),
+            )?;
             #[cfg(feature = "connect")]
             let site = Arc::clone(&connect);
+            let (changed, strip) = mpsc::channel();
             let attempts = Attempts::new(data.join("attempts"))?.on_change(move |record| {
                 if let Err(e) = handle.emit("attempt-changed", record) {
                     eprintln!("event not sent: {e}");
                 }
+                let _ = changed.send(());
                 #[cfg(feature = "connect")]
                 site.attempt_changed(record);
             });
             let shared = Shared::new(
-                station, dir, stopper, index, recorder, setup, sim, library, attempts,
+                station, dir, stopper, index, recorder, setup, sim, library, attempts, views,
             );
             #[cfg(feature = "connect")]
             let shared = shared.with_hooks(Arc::clone(&connect) as Arc<dyn commands::AttemptHooks>);
             let shared = Arc::new(shared);
+            shared.in_sim(strip, view_commands);
             #[cfg(feature = "connect")]
             {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                let links = app.deep_link();
+                // The installer registers the scheme; registering again at
+                // start-up repairs an install that missed it (B2).
+                if let Err(e) = links.register(::connect::deeplink::SCHEME) {
+                    eprintln!("deep links not registered: {e}");
+                }
+                // A link that started the app.
+                links::in_args(std::env::args()).for_each(|link| connect.open_url(&link));
                 app.manage(connect);
             }
+            #[cfg(not(feature = "connect"))]
+            links::arrived(app.handle(), std::env::args());
             app.manage(Arc::clone(&shared));
             let recover = Arc::clone(&shared);
             thread::spawn(move || recover.recover());
@@ -157,11 +201,13 @@ fn main() {
 
             let handle = app.handle().clone();
             app.notification().on_action(move |action| {
-                let flight = action
-                    .notification()
-                    .and_then(|n| n.extra().get(FLIGHT_ID)?.as_str());
-                if action.action_id() == "tap" {
-                    show(&handle, flight);
+                let extra = |key| action.notification()?.extra().get(key)?.as_str();
+                if action.action_id() != "tap" {
+                    return;
+                }
+                show(&handle, extra(FLIGHT_ID));
+                if let Some(key) = extra(CHALLENGE_KEY) {
+                    let _ = handle.emit("open-challenge", OpenChallenge { key });
                 }
             })?;
             let tray = Tray::new(app.handle())?;
@@ -242,7 +288,7 @@ fn notify(app: &AppHandle, notice: &LandingNotice) {
 
 /// Brings the debrief window up, on a flight if one is named: the frontend
 /// opens it on the `open-flight` event.
-fn show(app: &AppHandle, flight_id: Option<&str>) {
+pub(crate) fn show(app: &AppHandle, flight_id: Option<&str>) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.unminimize();
         let _ = window.show();
@@ -256,6 +302,12 @@ fn show(app: &AppHandle, flight_id: Option<&str>) {
 #[derive(Clone, Serialize)]
 struct OpenFlight<'a> {
     flight_id: &'a str,
+}
+
+/// Payload of `open-challenge`: a click on a site's verdict toast.
+#[derive(Clone, Serialize)]
+struct OpenChallenge<'a> {
+    key: &'a str,
 }
 
 /// Stops the recorder, which closes an open flight's files, then exits;

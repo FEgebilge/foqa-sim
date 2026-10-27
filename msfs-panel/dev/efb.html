@@ -4,10 +4,11 @@
 <meta charset="utf-8" />
 <title>FOQA-Sim EFB app dev</title>
 <!-- Serve the repository root over HTTP and open /msfs-panel/dev/efb.html.
-     Loads the EFB app's sources as the built package would (board, history,
-     app) under a stand-in for the EFB OS (EFB_API, msfssdk) and a stubbed
-     Comm Bus that plays the app: list_flights and debrief answered from
-     app/public/mock, chunked and repeated as docs/ingame-panel.md says. -->
+     Loads the EFB app's sources as the built package would (strip, board,
+     challenges, history, app) under a stand-in for the EFB OS (EFB_API,
+     msfssdk) and a stubbed Comm Bus that plays the app: list_flights and
+     debrief answered from app/public/mock, chunked and repeated as
+     docs/ingame-panel.md says; the Challenges tab from a made-up library. -->
 <link rel="stylesheet" href="../PackageSources/html_ui/InGamePanels/FOQASim/FOQASim.css" />
 <link rel="stylesheet" href="../efb/FoqaSimApp.css" />
 <style>
@@ -32,7 +33,9 @@
 </div>
 <div class="row"><div class="frame"><h2>EFB app area, drag the corner to resize</h2><div class="tablet" id="tablet"></div></div></div>
 <div id="log"></div>
+<script src="../PackageSources/html_ui/InGamePanels/FOQASim/foqa-strip.js"></script>
 <script src="../PackageSources/html_ui/InGamePanels/FOQASim/foqa-board.js"></script>
+<script src="../efb/foqa-challenges.js"></script>
 <script src="../efb/foqa-history.js"></script>
 <script src="../efb/foqa-weather.js"></script>
 <script>
@@ -108,7 +111,46 @@ function repeat(messages) {
         if (Date.now() + REPEAT_MS <= until) setTimeout(send, REPEAT_MS);
     })();
 }
-setInterval(function () { emit(FoqaSim.MSG.status, { v: 2, status: { state: "connected" } }); }, 1000);
+setInterval(function () {
+    var msg = { v: 2, status: { state: "connected" } };
+    if (ack) { msg.ack = ack; ack = null; }
+    emit(FoqaSim.MSG.status, msg);
+    if (attempt) emit(FoqaStrip.MSG.attempt, attempt);
+}, 1000);
+
+// Challenges (B9): two cards, a briefing, and one attempt that Place, Fly
+// again and Finish move along; the app's words are made up here.
+var ack = null, attempt = null, n = 0;
+var CARDS = [
+    { key: "ltfj-06-gusty-v1", title: "LTFJ 06 gusty", airport: "LTFJ", runway: "06", source: "Pilot Aptitude (pilotaptitude.example)", state: "open", last: "Attempt 3 · Scored 81.0, #4", rank: 4 },
+    { key: "test-20-v1", title: "Runway 20", airport: "TEST", runway: "20", source: "File", state: "open" }
+];
+function place(key) {
+    n++;
+    attempt = { v: 2, id: "a" + n, key: key, n: n, stage: "flying", text: "Attempt " + n + " · Placed", can_fly_again: true, can_finish: true };
+    setTimeout(function () { if (attempt && attempt.id === "a" + n) { attempt.stage = "gate"; attempt.text = "Attempt " + n + " · Gate"; } }, 8000);
+}
+function challengeCommand(msg) {
+    if (msg.cmd === "list_challenges") repeat([[FoqaChallenges.MSG.challenges, { v: 2, req: msg.req, challenges: CARDS }]]);
+    else if (msg.cmd === "briefing") {
+        repeat([[FoqaChallenges.MSG.briefing, { v: 2, req: msg.req, key: msg.key, title: "LTFJ 06 gusty",
+            lines: ["Start: 8 NM out, 2500 ft, 160 kt, gear up, flaps 0 %; the app places you there.", "Gate: 3 NM; grading starts here.", "Aircraft: B38M or A20N."],
+            preflight: [{ name: "sim", state: "ok", text: "MSFS connected, recording flight-1." },
+                { name: "aircraft", state: "ok", text: "B38M is loaded." },
+                { name: "weather", state: "unknown", text: "Set by the challenge (pending in-flight verification)." },
+                { name: "ranking", state: "ok", text: "Ranked on Pilot Aptitude as ege." }] }]]);
+    } else if (msg.cmd === "place" || msg.cmd === "fly_again") {
+        place(msg.key || (attempt && attempt.key));
+        ack = { cmd: msg.cmd, ok: true };
+    } else if (msg.cmd === "finish" && attempt) {
+        attempt.stage = "graded"; attempt.can_finish = false;
+        attempt.text = "Attempt " + n + " · Landed 142 fpm · Graded 87.4 · Uploading…";
+        attempt.site = { state: "uploading" };
+        setTimeout(function () { attempt.site = { state: "scored", score: 87.4, rank: 3 }; attempt.text = attempt.text.replace("Uploading…", "Scored 87.4, #3"); }, 4000);
+        ack = { cmd: msg.cmd, ok: true };
+    } else return false;
+    return true;
+}
 
 // summary, compact and chunks mirror crates/capture/src/history.rs; change them together.
 function nonzero(c) {
@@ -200,6 +242,7 @@ function chunks(req, id, doc) {
 
 function command(msg) {
     setTimeout(function () {
+        if (challengeCommand(msg)) return;
         if (msg.cmd === "list_flights") {
             fetch(MOCK + "flights.json").then(function (r) { return r.json(); }).then(function (all) {
                 var flights = checked("empty") ? [] : all.slice(0, LIST_MAX).map(summary);

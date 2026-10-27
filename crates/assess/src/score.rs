@@ -8,6 +8,7 @@ use serde::Serialize;
 
 use crate::method::{Context, Criterion, Height, Method};
 use crate::scale::{ell, level, sides};
+use crate::text::{height_text, item_text, list, number, reading_text, with_level};
 
 /// A measured value of one criterion.
 #[derive(Debug, Clone, PartialEq)]
@@ -24,6 +25,8 @@ pub enum Value {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Finding {
     pub rule: String,
+    /// The rule's title, which is what pilots read.
+    pub title: String,
     pub domain: Domain,
     pub level: Level,
     /// Above the aerodrome where it was measured.
@@ -37,7 +40,7 @@ pub struct Finding {
 pub struct Outcome {
     /// Touchdown before the threshold.
     pub undershoot: bool,
-    /// Left the runway or crashed, in words.
+    /// Left the runway or crashed, in words ("Left the side of the runway").
     pub excursion: Option<String>,
 }
 
@@ -84,7 +87,12 @@ pub enum CapKind {
 pub struct Cap {
     pub kind: CapKind,
     pub score: f64,
-    /// What caused it.
+    /// The cap's headline.
+    pub title: String,
+    /// What caused it, to start a sentence.
+    pub cause: String,
+    /// Cause and consequence in one plain sentence: "Bounce (level 2)
+    /// holds this landing below Good (max 84.9)."
     pub reason: String,
     pub source: String,
 }
@@ -326,64 +334,163 @@ impl Method {
         }
     }
 
-    /// The caps that apply (docs/scoring.md §4), with their causes.
+    /// A graded criterion in words with its level: "Bounce (level 2)".
+    fn item(&self, c: &CriterionScore, split: f64) -> String {
+        let def = self.criterion(&c.id).expect("a scored criterion");
+        let value = def
+            .unit
+            .map(|u| reading_text(&c.id, Some(u.symbol()), c.value))
+            .unwrap_or_default();
+        let height = height_text(c.height, split);
+        with_level(&item_text(&def.title, &value, height.as_deref()), c.level)
+    }
+
+    /// The caps that apply (docs/scoring.md §4), with their causes in words.
     fn caps(&self, m: &Measures, scored: &[(Domain, CriterionScore)], split: f64) -> Vec<Cap> {
         let mut caps = Vec::new();
-        let mut cap = |kind, def: &crate::method::CapDef, reason: String| {
-            caps.push(Cap {
-                kind,
-                score: def.score,
-                reason,
-                source: def.source.clone(),
-            })
-        };
-        let material = scored
+        let mut cap =
+            |kind, def: &crate::method::CapDef, title: &str, cause: String, why: String| {
+                let reason = format!("{why} {}.", self.ceiling(def.score));
+                caps.push(Cap {
+                    kind,
+                    score: def.score,
+                    title: title.into(),
+                    cause,
+                    reason,
+                    source: def.source.clone(),
+                })
+            };
+        let material: Vec<String> = scored
             .iter()
-            .map(|(_, c)| (c.ell, height_name(&c.id, c.height)))
+            .filter(|(_, c)| c.ell >= 2.0)
+            .map(|(_, c)| self.item(c, split))
             .chain(
                 m.findings
                     .iter()
-                    .map(|f| (finding_ell(f.level), f.rule.clone())),
+                    .filter(|f| finding_ell(f.level) >= 2.0)
+                    .map(|f| with_level(&f.title, level(finding_ell(f.level)))),
             )
-            .filter(|(ell, _)| *ell >= 2.0)
-            .map(|(_, what)| what)
-            .collect::<Vec<_>>();
+            .collect();
         if !material.is_empty() {
-            let reason = format!("level 2 or more: {}", material.join(", "));
-            cap(CapKind::Material, &self.caps.material, reason);
+            let verb = if material.len() == 1 { "holds" } else { "hold" };
+            let cause = list(&material);
+            let why = format!("{cause} {verb} this landing");
+            let title = "A significant deviation limits the grade";
+            cap(CapKind::Material, &self.caps.material, title, cause, why);
         }
-        if let Some(reason) = unstable(m, scored, split) {
-            cap(CapKind::Unstable, &self.caps.unstable, reason);
+        if let Some(cause) = self.unstable(m, scored, split) {
+            let why = format!("{cause}, and the landing was continued. That holds it");
+            let title = "Unstable approach continued to a landing";
+            cap(CapKind::Unstable, &self.caps.unstable, title, cause, why);
         }
         let inspection = m
             .findings
             .iter()
             .find(|f| f.rule == "hard-landing-inspection");
         let tail_strike = scored.iter().find(|(_, c)| c.id == "E4" && c.value < 0.0);
-        if let Some(f) = inspection {
+        let inspect = inspection
+            .map(|f| f.title.clone())
+            .or_else(|| tail_strike.map(|_| "Tail strike at touchdown".into()));
+        if let Some(cause) = inspect {
+            let why = format!("{cause} calls for an inspection, which holds this landing");
+            let title = "Touchdown severe enough to need an inspection";
             cap(
                 CapKind::Inspection,
                 &self.caps.inspection,
-                format!("{}: hard-landing inspection", f.rule),
-            );
-        } else if tail_strike.is_some() {
-            cap(
-                CapKind::Inspection,
-                &self.caps.inspection,
-                "tail strike at touchdown".into(),
+                title,
+                cause,
+                why,
             );
         }
         if m.outcome.undershoot {
+            let cause = "Touched down before the runway threshold".to_owned();
+            let why = format!("{cause}, which holds this landing");
+            let title = "Touchdown short of the runway";
             cap(
                 CapKind::Undershoot,
                 &self.caps.undershoot,
-                "touchdown before the threshold".into(),
+                title,
+                cause,
+                why,
             );
         }
-        if let Some(reason) = &m.outcome.excursion {
-            cap(CapKind::Excursion, &self.caps.excursion, reason.clone());
+        if let Some(cause) = &m.outcome.excursion {
+            let why = format!("{cause}, which holds this landing");
+            cap(
+                CapKind::Excursion,
+                &self.caps.excursion,
+                "Runway excursion",
+                cause.clone(),
+                why,
+            );
         }
         caps
+    }
+
+    /// A continued unstable approach, Data4Safety's rule (S1): any approach
+    /// criterion at L2/L3 below the split (SL2B/SL3), or three at L1 or more
+    /// above it (SL1/SL2A), the glideslope and localizer counting as one (A5);
+    /// a light aircraft, any at L2 below its split or three at L1 anywhere. A
+    /// finding of the stability domain at medium or above below the split
+    /// counts as an L2 there; a criterion graded for the whole window (late
+    /// configuration) counts at L3 as below the split. In words, without
+    /// the outcome: "The approach was still unstable below 300 ft (...)".
+    fn unstable(
+        &self,
+        m: &Measures,
+        scored: &[(Domain, CriterionScore)],
+        split: f64,
+    ) -> Option<String> {
+        let approach: Vec<&CriterionScore> = scored
+            .iter()
+            .filter(|(d, _)| *d == Domain::Stability)
+            .map(|(_, c)| c)
+            .collect();
+        let low = approach.iter().find(|c| match c.height {
+            Height::Below => c.ell >= 2.0,
+            Height::All => c.ell >= 3.0,
+            Height::Above => false,
+        });
+        let below = |what: String| {
+            format!(
+                "The approach was still unstable below {} ft: {what}",
+                number(split, 0)
+            )
+        };
+        if let Some(c) = low {
+            return Some(below(self.item(c, split)));
+        }
+        let finding = m.findings.iter().find(|f| {
+            f.domain == Domain::Stability
+                && f.level >= Level::Medium
+                && f.height_ft.is_some_and(|h| h < split)
+        });
+        if let Some(f) = finding {
+            return Some(below(f.title.clone()));
+        }
+        let light = m.class == ScoringClass::Light;
+        let mut titles: Vec<String> = Vec::new();
+        for c in approach
+            .iter()
+            .filter(|c| c.ell >= 1.0 && (light || c.height != Height::Below))
+        {
+            // The glideslope and localizer count as one item.
+            let title = if c.id.starts_with("A5") {
+                "Glideslope or localizer deviation".to_owned()
+            } else {
+                self.criterion(&c.id)
+                    .map_or(c.id.clone(), |d| d.title.clone())
+            };
+            if !titles.contains(&title) {
+                titles.push(title);
+            }
+        }
+        (titles.len() >= 3).then(|| {
+            format!(
+                "Three or more approach items were off at level 1 or worse: {}",
+                list(&titles)
+            )
+        })
     }
 }
 
@@ -394,48 +501,6 @@ fn height_name(id: &str, height: Height) -> String {
         Height::Above => format!("{id} above"),
         Height::Below => format!("{id} below"),
     }
-}
-
-/// A continued unstable approach, Data4Safety's rule (S1): any approach
-/// criterion at L2/L3 below the split (SL2B/SL3), or three at L1 or more
-/// above it (SL1/SL2A), the glideslope and localizer counting as one (A5);
-/// a light aircraft, any at L2 below its split or three at L1 anywhere. A finding of the stability domain at medium or
-/// above below the split counts as an L2 there; a criterion graded for the
-/// whole window (late configuration) counts at L3 as below the split.
-fn unstable(m: &Measures, scored: &[(Domain, CriterionScore)], split: f64) -> Option<String> {
-    let approach: Vec<&CriterionScore> = scored
-        .iter()
-        .filter(|(d, _)| *d == Domain::Stability)
-        .map(|(_, c)| c)
-        .collect();
-    let low = approach.iter().find(|c| match c.height {
-        Height::Below => c.ell >= 2.0,
-        Height::All => c.ell >= 3.0,
-        Height::Above => false,
-    });
-    if let Some(c) = low {
-        return Some(format!(
-            "{} at level {} below {split} ft, landing continued",
-            c.id, c.level
-        ));
-    }
-    let finding = m.findings.iter().find(|f| {
-        f.domain == Domain::Stability
-            && f.level >= Level::Medium
-            && f.height_ft.is_some_and(|h| h < split)
-    });
-    if let Some(f) = finding {
-        return Some(format!("{} below {split} ft, landing continued", f.rule));
-    }
-    let light = m.class == ScoringClass::Light;
-    let mut ids: Vec<&str> = approach
-        .iter()
-        .filter(|c| c.ell >= 1.0 && (light || c.height != Height::Below))
-        .map(|c| if c.id.starts_with("A5") { "A5" } else { &c.id })
-        .collect();
-    ids.sort_unstable();
-    ids.dedup();
-    (ids.len() >= 3).then(|| format!("{} at level 1 or more, landing continued", ids.join(", ")))
 }
 
 /// The flight's grade from its landings (Decision 3).
@@ -472,19 +537,30 @@ impl Method {
         let earlier = landings.iter().enumerate().filter(|(i, _)| *i != last);
         for (i, (l, _)) in earlier {
             for c in l.caps.iter().filter(|c| c.kind != CapKind::Material) {
-                cap(c.score, format!("landing {}: {}", i + 1, c.reason));
+                cap(
+                    c.score,
+                    format!(
+                        "Landing {}: {}, which holds the flight {}.",
+                        i + 1,
+                        c.cause,
+                        self.ceiling(c.score)
+                    ),
+                );
             }
         }
         match other_highs {
             0 => {}
-            1 => cap(
-                round1(self.good - 0.1),
-                "a high finding elsewhere in the flight".into(),
-            ),
-            n => cap(
-                round1(self.fair - 0.1),
-                format!("{n} high findings elsewhere in the flight"),
-            ),
+            1 => {
+                let limit = round1(self.good - 0.1);
+                let text = "A high-severity finding outside the landings holds the flight";
+                cap(limit, format!("{text} {}.", self.ceiling(limit)))
+            }
+            n => {
+                let limit = round1(self.fair - 0.1);
+                let text =
+                    format!("{n} high-severity findings outside the landings hold the flight");
+                cap(limit, format!("{text} {}.", self.ceiling(limit)))
+            }
         }
         Some(FlightGrade {
             score,

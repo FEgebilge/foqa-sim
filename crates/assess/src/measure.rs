@@ -188,7 +188,9 @@ impl Method {
         let speeds = self.speeds(profile, selected, headwind, autothrottle, l.ranked);
         if speeds.is_none() {
             let icao = l.selection.icao.as_deref().unwrap_or("this aircraft");
-            partial.push(format!("No Vref for {icao}"));
+            partial.push(format!(
+                "No reference speed (Vref) for {icao}, so speed items were not graded"
+            ));
         }
         let light = class == ScoringClass::Light;
         let reference = speeds
@@ -221,7 +223,8 @@ impl Method {
             }
             if recorded && gap(&w.t, &x) {
                 partial.push(format!(
-                    "{id} n/a: data gap over 1.5 s in the approach window"
+                    "{} was not graded: the recording has a gap of over 1.5 s in the approach",
+                    c.title
                 ));
                 return;
             }
@@ -256,7 +259,10 @@ impl Method {
         let retractable = l.selection.profile.is_some_and(|p| p.vle.is_some());
         let mut crossing = a.threshold.as_ref();
         if crossing.is_some_and(|c| track.ra_ft[track.index_at(c.t)].is_nan()) {
-            partial.push("B1 n/a: no radio height at the threshold".into());
+            partial.push(
+                "Threshold crossing height was not graded: no radio altitude at the threshold"
+                    .into(),
+            );
             crossing = None;
         }
         let tail = profile_value(rules::ProfileField::TailLandingPitch);
@@ -297,9 +303,11 @@ impl Method {
             .enumerate()
             .filter(|(_, e)| (from..=to).contains(&e.start))
             .filter_map(|(i, e)| {
-                let domain = l.rules.iter().find(|r| r.id == e.rule)?.domain;
+                let rule = l.rules.iter().find(|r| r.id == e.rule)?;
+                let domain = rule.domain;
                 (domain != Domain::Other).then(|| Finding {
                     rule: e.rule.clone(),
+                    title: rule.title.clone(),
                     domain,
                     level: e.level,
                     height_ft: Some(track.aal_ft[track.index_at(e.peak)]).filter(|h| h.is_finite()),
@@ -407,12 +415,12 @@ fn bounce(track: &Track, tds: &[Touchdown], index: usize) -> f64 {
 /// Leaving the runway on the rollout, in words.
 fn excursion(a: &Approach, fix: &analyzer::RunwayFix) -> Option<String> {
     if a.rollout_cross_m.is_some_and(|c| c > fix.width_m / 2.0) {
-        return Some("left the side of the runway before 30 kt".into());
+        return Some("Left the side of the runway before slowing to 30 kt".into());
     }
     a.slowed
         .as_ref()
         .filter(|s| s.along_m > fix.lda_m)
-        .map(|_| "overran the runway: not at taxi speed by its end".into())
+        .map(|_| "Overran the runway: still not at taxi speed at its far end".into())
 }
 
 /// The span whose events count toward the landing: from the start of its

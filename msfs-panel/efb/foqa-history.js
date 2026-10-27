@@ -288,7 +288,6 @@ var FoqaHistory = (function () {
 
     // The grading landing's six domains as mini-bars (track as long as the weight, the share of it lost shaded in the
     // level's colour, labelled with the points lost) and the largest deduction in one line.
-    var DOMAIN_SHORT = ["Approach", "Flare", "Point", "Lateral", "Contact", "Rollout"];
     var BAR_LEVEL = ["none", "low", "medium", "high"];
     function barsHtml(f) {
         if (!f.bars || !f.bars.length) return "";
@@ -296,19 +295,19 @@ var FoqaHistory = (function () {
             var weight = b[0], lost = b[1], level = BAR_LEVEL[Math.min(3, b[2])] || "none", share = b[3] || 0;
             var track = '<div class="mtrack' + (lost === null ? " na" : "") + '" style="width:' + (weight / 25 * 100).toFixed(0) + '%">' +
                 (share ? '<div class="mlost lvl-' + level + '" style="width:' + (Math.min(1, share) * 100).toFixed(0) + '%"></div>' : "") + "</div>";
-            return '<div class="mbar"><div class="mname">' + DOMAIN_SHORT[i] + '<span class="mpts">' +
-                (lost === null ? "n/a" : lost ? "−" + lost.toFixed(1) : "0") + "</span></div>" + track + "</div>";
+            return '<div class="mbar"><div class="mname">' + esc(b[4] || "") + '<span class="mpts">' +
+                (lost === null ? "not graded" : lost ? "−" + lost.toFixed(1) : "0") + "</span></div>" + track + "</div>";
         }).join("") + "</div>";
         return html + (f.top ? '<div class="mtop">' + esc(f.top) + "</div>" : "");
     }
 
-    // "landing-2, partial data", or "12 points from 5 findings": what the grade is made of.
+    // "Landing score, partial data", or "12 points from 5 findings": what the grade is made of.
     function assessText(f) {
-        if (f.method === "landing-2") return "landing-2" + (f.confidence === "partial" ? " · partial data, not rankable" : "");
+        if (f.method === "landing-2") return "Landing score" + (f.confidence === "partial" ? " · partial data, not rankable" : "");
         if (!f.findings) return "No findings at low or above";
 
         return f.points + (f.points === 1 ? " point" : " points") + " from " + f.findings +
-            (f.findings === 1 ? " finding" : " findings") + " · each rule counts once, at its worst level";
+            (f.findings === 1 ? " finding" : " findings") + " · each kind of finding counts once, at its worst level";
     }
 
     function eventHtml(e, i, times, open) {

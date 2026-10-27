@@ -50,6 +50,7 @@
       "grade": "poor",
       "confidence": null,
       "caps": [],
+      "partial_note": null,
       "graded_by": null,
       "landings": [
         {
@@ -64,6 +65,8 @@
           "missing": [
             "runway"
           ],
+          "note": "Not scored: runway data not recorded, and a score needs it. Missing data never earns credit, so this landing counts through its findings only (event points).",
+          "facts": [],
           "full_stop": true,
           "caps": [],
           "stable_from_ft": null,

@@ -61,6 +61,25 @@ export interface SiteAttempt {
   log: { at: string; seq: number; event: string; [field: string]: unknown }[];
 }
 
+/** A link from a website (docs/challenge-protocol.md A3, B2), as the backend asks about it. */
+export interface DeepLink {
+  /** `ask`: the site isn't the user's, "Connect to <host>?"; `open`: it is, "Open …?";
+   * `refused`: the link is invalid; `disabled`: a build without sites. `text` says why for the last two. */
+  state: "ask" | "open" | "refused" | "disabled";
+  /** Names the link in every answer; a refused or disabled one has none. */
+  seq?: number;
+  kind?: "challenge" | "connect";
+  origin?: string;
+  /** In ASCII (punycode for an IDN host): shown before any name. */
+  host?: string;
+  /** Self-declared, known sites only. */
+  name?: string;
+  id?: string;
+  v?: number;
+  signed_in: boolean;
+  text?: string;
+}
+
 export interface SitesApi {
   /** Whether this build has the site client; false (or a missing command) hides every site part. */
   connectAvailable(): Promise<boolean>;
@@ -79,6 +98,30 @@ export interface SitesApi {
   attemptUpload(id: string | null): Promise<void>;
   /** Opens a page of a connected site in the browser. */
   siteOpen(url: string): Promise<void>;
+  /** What to ask about next, each link given once: asked while no link is shown (also in builds without sites). */
+  deepLinkPending(): Promise<DeepLink | null>;
+  /** The answer to "Connect to <host>?" for link `seq`; allowed, the site added. */
+  deepLinkConsent(seq: number, allow: boolean): Promise<SiteView | null>;
+  /** The click on Open (or Replace) for link `seq`: its challenge taken, or another copy kept in the library. */
+  deepLinkOpen(seq: number, replace: boolean): Promise<LinkOpened>;
+  /** Link `seq` was acted on or dismissed. */
+  deepLinkDone(seq: number | undefined): Promise<void>;
+  siteSettings(): Promise<SiteSettings>;
+  siteSettingsSet(settings: SiteSettings): Promise<SiteSettings>;
+}
+
+/** What a link's Open did: `entry` taken (or kept unchanged), or `conflict`: another copy of it is in the library. */
+export interface LinkOpened {
+  entry: { key: string; title: string } | null;
+  conflict: { key: string; title: string; version: number } | null;
+}
+
+/** The global settings of Challenges → Sites (B3), kept by the app. */
+export interface SiteSettings {
+  /** "Open challenge links from websites". */
+  links: boolean;
+  /** "Notify when a site scores an attempt". */
+  notify: boolean;
 }
 
 export type Tone = "neutral" | "success" | "info" | "warning" | "danger";

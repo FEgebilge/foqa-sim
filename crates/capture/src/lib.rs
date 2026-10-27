@@ -13,6 +13,7 @@ mod panel;
 mod place;
 mod service;
 mod session;
+mod views;
 
 use std::fs::File;
 use std::io::{self, BufWriter};
@@ -29,6 +30,10 @@ pub use live::LiveSource;
 pub use place::{ASK_TIMEOUT, Ask, InitPosition, Start, flaps_set_data};
 pub use service::{Happening, Service, SimRequests, Stopper};
 use session::{Action, Session};
+pub use views::{
+    AppCommand, AttemptStrip, BriefingMsg, ChallengeCard, Landed, Local, PreflightLine, SiteStrip,
+    Views,
+};
 
 /// What `record` reports as it goes.
 #[derive(Debug, Clone, Copy, PartialEq)]

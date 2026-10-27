@@ -4,7 +4,7 @@
 //! approach speeds are in its profile.
 
 use challenge::{Attempt, Challenge, LANDING_2, evaluate};
-use debrief::Station;
+use debrief::{AssessmentDetail, Station};
 use recorder::SimEvent;
 use testkit::*;
 
@@ -18,6 +18,11 @@ const CHALLENGE: &str = r#"{
 }"#;
 
 fn attempt(change: impl Fn(f64, Pt) -> Pt) -> Attempt {
+    graded(change).0
+}
+
+/// The attempt and the debrief's assessment of the same flight.
+fn graded(change: impl Fn(f64, Pt) -> Pt) -> (Attempt, AssessmentDetail) {
     let challenge = Challenge::parse(CHALLENGE).unwrap();
     let events = [
         identity("C172"),
@@ -27,10 +32,9 @@ fn attempt(change: impl Fn(f64, Pt) -> Pt) -> Attempt {
         change(t, landing(t, TD_S, 1.2))
     });
     let station = Station::core().unwrap();
-    evaluate(
-        &challenge,
-        &station.analyse("flight-1".into(), flight).unwrap(),
-    )
+    let analysis = station.analyse("flight-1".into(), flight).unwrap();
+    let detail = analysis.assessment(&analysis.events());
+    (evaluate(&challenge, &analysis), detail)
 }
 
 fn failed(a: &Attempt) -> Vec<&str> {
@@ -92,4 +96,25 @@ fn a_go_around_is_not_ranked() {
     });
     assert_eq!(failed(&a), ["go_around"], "{:?}", a.checks);
     assert!(!a.valid);
+}
+
+/// The attempt carries the debrief's grade, confidence and caps, and its
+/// score is `score.total`.
+#[test]
+fn the_attempt_carries_the_debriefs_assessment() {
+    let (a, detail) = graded(|_, p| p);
+    let x = a.assessment.unwrap();
+    assert_eq!(x.method, detail.method);
+    assert_eq!(x.method, LANDING_2);
+    assert_eq!(Some(x.score), detail.score);
+    assert_eq!(x.score, a.score.unwrap().total);
+    assert_eq!(x.grade, detail.grade);
+    assert_eq!(Some(x.confidence), detail.confidence);
+    assert!(!x.caps.is_empty());
+    let strip = |caps: &[debrief::CapNote]| -> Vec<_> {
+        caps.iter()
+            .map(|c| (c.kind.clone(), c.score, c.reason.clone()))
+            .collect()
+    };
+    assert_eq!(strip(&x.caps), strip(&detail.caps));
 }

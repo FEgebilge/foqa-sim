@@ -5,7 +5,7 @@ import { listen } from "@tauri-apps/api/event";
 import { mockChallenges } from "./lib/challenges-mock";
 import { mockSetup } from "./lib/setup-mock";
 import { mockSites } from "./lib/sites-mock";
-import type { SiteAttempt, SiteChallenge, SitesApi, SiteView } from "./lib/sites";
+import type { DeepLink, LinkOpened, SiteAttempt, SiteChallenge, SiteSettings, SitesApi, SiteView } from "./lib/sites";
 import type { AttemptRecord, AttemptView, Briefing, ChallengeEntry, Debrief, FlightSummary, LandingNotice, OpenFlight, PreflightLine, RecorderStatus, SetupStatus, StorageUsage } from "./types";
 
 export type Unlisten = () => void;
@@ -18,6 +18,10 @@ export interface BackendEvents {
   "attempt-changed": AttemptRecord;
   /** A site or an attempt's site part changed (connect builds only). */
   "site-changed": { origin?: string; attempt?: string };
+  /** A link from a website arrived; the window is brought up. */
+  "deep-link": null;
+  /** A click on a site's verdict notification asks the app to show that challenge. */
+  "open-challenge": { key: string };
 }
 
 /** Landing challenges, local only: the library, the pre-flight card and the attempts. */
@@ -91,6 +95,12 @@ const tauriApi: Api = {
   siteAttempts: () => invoke<SiteAttempt[]>("site_attempts"),
   attemptUpload: (id) => invoke<void>("attempt_upload", { id }),
   siteOpen: (url) => invoke<void>("site_open", { url }),
+  deepLinkPending: () => invoke<DeepLink | null>("deep_link_pending").catch(() => null),
+  deepLinkConsent: (seq, allow) => invoke<SiteView | null>("deep_link_consent", { seq, allow }),
+  deepLinkOpen: (seq, replace) => invoke<LinkOpened>("deep_link_open", { seq, replace }),
+  deepLinkDone: (seq) => invoke<void>("deep_link_done", { seq }).catch(() => {}),
+  siteSettings: () => invoke<SiteSettings>("site_settings"),
+  siteSettingsSet: (settings) => invoke<SiteSettings>("site_settings_set", { settings }),
   on<K extends keyof BackendEvents>(event: K, handler: (payload: BackendEvents[K]) => void) {
     return listen<BackendEvents[K]>(event, (message) => handler(message.payload));
   },

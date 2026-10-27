@@ -33,6 +33,11 @@ the recording; units are in the field names.
 | `attempt_finish(id)` | `AttemptRecord` | Ends the attempt and grades it from its flight (`challenge::evaluate`) |
 | `attempt_abandon(id)` | `AttemptRecord` | Abandons an open attempt (`cancelled`) |
 | `attempts_list()` | `AttemptView[]` | Every attempt with its local grade and log, newest first |
+| `deep_link_pending()` | `DeepLink \| null` | What to ask about next ([protocol](challenge-protocol.md) A3, B2), asked while no link is shown: a refused link's words or the link waiting, each given once; also in builds without `connect` (`state: "disabled"`) |
+| `deep_link_consent(seq, allow)` | `SiteView \| null` | `connect` only: the answer to "Connect to <host>?" for link `seq`; allowed, the site is added (nothing is fetched from it before) |
+| `deep_link_open(seq, replace)` | `{ entry: ChallengeEntry \| null, conflict: ChallengeEntry \| null }` | `connect` only: the Open click for link `seq` (its site signed in): takes the challenge in the link's version; `conflict` when another copy is in the library (kept until `replace`) |
+| `deep_link_done(seq)` | `void` | Link `seq` was acted on or dismissed; the next one waits |
+| `site_settings()` / `site_settings_set(settings)` | `{ links, notify }` | `connect` only: "Open challenge links from websites" and "Notify when a site scores an attempt" (B3), kept in the config folder |
 
 ## Events (backend → frontend)
 
@@ -43,6 +48,8 @@ the recording; units are in the field names.
 | `landing` | `LandingNotice` | Seconds after a touchdown (also a Windows notification) |
 | `open-flight` | `{ flight_id: string }` | The window was opened on a flight (a landing notification was clicked): show its debrief |
 | `attempt-changed` | `AttemptRecord` | An attempt changed state |
+| `deep-link` | `null` | A link from a website arrived and the window is brought up: ask `deep_link_pending` unless a link is shown |
+| `open-challenge` | `{ key: string }` | A site's verdict notification was clicked: show that challenge |
 
 Challenges and attempts are kept in `%APPDATA%\com.egebilge.foqa-sim`: `challenges\<id>-v<version>.json` (the bytes imported) and `attempts\<uuid>\` with `attempt.json`, `challenge.json`, `result.local.json` and the append-only `log.jsonl` (protocol B5; the types are in `app/src/types.ts`). Until the recording carries the attempt marker, an attempt grades only a landing after the sim time its flight had reached when it was placed (`begin_s`). After a landing the attempt is graded 120 s later, on Finish, or when the flight closes; a flight closed before the landing abandons it. At start-up an attempt left between placing and its grade is graded from its flight (`recovered`) if it landed, else abandoned (`interrupted`).
 
@@ -193,6 +200,7 @@ interface AssessmentDetail {
 interface CapNote {
   kind: "material" | "unstable" | "inspection" | "undershoot" | "excursion" | "flight";
   score: number;             // the most the score can be
+  title: string;             // the headline, e.g. "Unstable approach continued to a landing"
   reason: string;            // what caused it, e.g. "level 2 or more: A2 above, high-sink-light"
   source: string;
   landing?: number;          // index in `landings`
@@ -207,6 +215,9 @@ interface LandingAssessment {
   confidence: "full" | "partial" | null;
   class: "light" | "turboprop" | "jet" | null;   // the scoring class whose bands apply
   partial: string[];         // expected data that was missing, e.g. "No Vref for B738"
+  partial_note: string | null;   // the same in plain words (which items were not graded); null when nothing is missing
+  note: string | null;       // why an insufficient landing is not scored, in plain words
+  facts: string[];           // class, reference speeds and stable height in words, for the line under the title
   missing: string[];         // required data that was missing (insufficient)
   full_stop: boolean;        // false: a touch-and-go, no rollout scored, does not set the flight grade
   caps: CapNote[];
@@ -219,6 +230,8 @@ interface LandingAssessment {
 interface DomainAssessment {
   id: "stability" | "energy" | "point" | "lateral" | "contact" | "rollout";
   title: string;             // "Approach stability", …
+  short: string;             // the title in a word or two, for small bars
+  summary: string;           // what the domain looks at, in one line
   weight: number;            // 25, 10, 20, 15, 20, 10
   loss: number | null;       // 0-1 of the weight, its worst item's; null: n/a, its weight shared out
   points: number;            // points it cost, to 0.1
@@ -234,7 +247,7 @@ interface CriterionAssessment {
   title: string;
   height: "all" | "above" | "below";   // the half of the approach window (split 500 ft, light 300 ft)
   value: number;             // its worst value, in `unit`; offsets (A1, B1, B2, C1) signed
-  value_text: string;        // `value` as shown: "+12 kt" (offsets signed), "1.48 g", "0.8 dot", "1,562 fpm", "L2"
+  value_text: string;        // `value` as shown: "+12 kt" (offsets signed), "1.48 g", "0.8 dot", "1,562 fpm", "L2"; C1 names its side: "46 ft before the target", "558 ft past the target"
   height_text: string | null;   // "at or above 500 ft" / "below 500 ft"; null for "all"
   unit: string | null;       // null: a level 0-3 (A6, E3)
   ell: number;               // continuous level 0-3: 0 ideal, 0.5 tolerance edge, 1-3 the FDM levels

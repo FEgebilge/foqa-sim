@@ -9,7 +9,7 @@
 //! events and landings every few seconds, a reply to a query for a few
 //! seconds.
 
-use std::sync::mpsc::{self, RecvTimeoutError, Sender};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -21,6 +21,7 @@ use sim_link::{Recv, SimConnect};
 use crate::Happening;
 use crate::history::{self, Ask, History, Query, REQUEST_MAX_BYTES, Reply};
 use crate::monitor::Live;
+use crate::views::{ATTEMPT, AppCommand};
 
 pub const STATUS: &str = "FOQA_SIM_STATUS";
 pub const LIVE: &str = "FOQA_SIM_LIVE";
@@ -50,6 +51,8 @@ const NOTE_MAX_BYTES: usize = 1000;
 /// Wait between attempts to open the feed's own SimConnect connection.
 const RECONNECT: Duration = Duration::from_secs(5);
 const TICK: Duration = Duration::from_millis(250);
+/// The strip of an attempt nothing more will happen to goes on this long.
+const ATTEMPT_LINGER: Duration = Duration::from_secs(10 * 60);
 
 /// What the feed shows.
 #[derive(Debug, Clone, PartialEq)]
@@ -60,6 +63,13 @@ pub enum Msg {
     Snapshot(Snapshot),
     /// The answer to a view's command.
     Ack(Ack),
+    /// The app's attempt strip (`FOQA_SIM_ATTEMPT`); `done`: final.
+    Attempt {
+        json: String,
+        done: bool,
+    },
+    /// The app's answer to a view's query, repeated like the history's.
+    Reply(Reply),
 }
 
 impl From<Happening> for Msg {
@@ -122,6 +132,8 @@ enum Request {
     Command(ViewCommand),
     /// Answered on its own event, not in `Status.ack`.
     Query(Query),
+    /// For the app (challenge attempts).
+    App(AppCommand),
 }
 
 impl Request {
@@ -139,6 +151,9 @@ impl Request {
             "debrief" => Some(Ask::Debrief(text("id"))),
             _ => None,
         };
+        if let Some(app) = AppCommand::parse(&v) {
+            return app.map(Self::App).map_err(fail);
+        }
         if let Some(ask) = ask {
             let req = text("req");
             if req.len() + text("id").len() > REQUEST_MAX_BYTES {
@@ -291,16 +306,26 @@ impl WeatherResult {
     }
 }
 
+/// The feed's channels: what it shows comes in on `rx`; happenings go on
+/// to `out`, recorder commands to `commands`, attempt commands to `app`.
+pub(crate) struct Tee {
+    pub rx: Receiver<Msg>,
+    pub out: Sender<Happening>,
+    pub commands: Sender<ViewCommand>,
+    pub app: Sender<AppCommand>,
+}
+
 /// Forwards happenings to `out`, mirrors them into the sim panel on its own
-/// thread and SimConnect connection, passes view commands to `commands` and
-/// has `history` answer the views' queries. Ends when every sender of the
-/// returned channel is gone.
-pub(crate) fn tee(
-    out: Sender<Happening>,
-    commands: Sender<ViewCommand>,
-    mut history: History,
-) -> Sender<Msg> {
-    let (tx, rx) = mpsc::channel();
+/// thread and SimConnect connection, passes view commands on and has
+/// `history` answer the views' queries. Ends when every sender of `rx` is
+/// gone.
+pub(crate) fn tee(tee: Tee, mut history: History) {
+    let Tee {
+        rx,
+        out,
+        commands,
+        app,
+    } = tee;
     thread::spawn(move || {
         let (mut board, mut link) = (Board::default(), Link::default());
         loop {
@@ -322,6 +347,12 @@ pub(crate) fn tee(
             for data in link.send(board.due(now), board.sim_up(), now) {
                 match Request::parse(&data) {
                     Ok(Request::Query(query)) => history.ask(query),
+                    Ok(Request::App(cmd)) => {
+                        if let Err(e) = app.send(cmd) {
+                            let ack = Ack::new(e.0.name(), Err("the app isn't listening".into()));
+                            board.take(&Msg::Ack(ack), now);
+                        }
+                    }
                     Ok(Request::Command(cmd))
                         if for_recorder(&cmd, board.recording().is_some()) =>
                     {
@@ -336,7 +367,6 @@ pub(crate) fn tee(
             }
         }
     });
-    tx
 }
 
 /// Whether a view command goes to the recorder: with a flight open any
@@ -373,6 +403,9 @@ struct Board {
     ack: Option<Ack>,
     /// The latest reply on each event, while it repeats.
     replies: Vec<Repeat>,
+    /// The app's attempt strip, and until when it goes out once final.
+    attempt: Option<(String, Option<Instant>)>,
+    next_attempt: Option<Instant>,
     /// `None`: due now.
     next_status: Option<Instant>,
     next_landing: Option<Instant>,
@@ -432,6 +465,18 @@ impl Board {
                 self.ack = Some(ack.clone());
                 self.next_status = None;
             }
+            Msg::Attempt { json, done } => {
+                let until = match &self.attempt {
+                    Some((old, until)) if old == json => until.filter(|_| *done),
+                    _ => None,
+                };
+                if self.attempt.as_ref().is_none_or(|(old, _)| old != json) {
+                    self.next_attempt = None;
+                }
+                let until = until.or_else(|| done.then(|| now + ATTEMPT_LINGER));
+                self.attempt = Some((json.clone(), until));
+            }
+            Msg::Reply(reply) => self.reply(reply.clone(), now),
         }
     }
 
@@ -516,6 +561,12 @@ impl Board {
             let age_s = now.duration_since(*at).as_secs();
             let msg = json!({ "v": VERSION, "age_s": age_s, "notice": notice });
             due.push((LANDING, msg.to_string()));
+        }
+        if let Some((json, until)) = &self.attempt
+            && until.is_none_or(|t| now < t)
+            && is_due(&mut self.next_attempt, STATUS_EVERY)
+        {
+            due.push((ATTEMPT, json.clone()));
         }
         for r in self.replies.iter_mut().filter(|r| now >= r.next) {
             (r.left, r.next) = (r.left - 1, now + REPLY_EVERY);
@@ -810,7 +861,7 @@ mod tests {
         let parse = |data: &str| {
             Request::parse(data).map(|r| match r {
                 Request::Command(cmd) => cmd,
-                Request::Query(q) => panic!("{q:?}"),
+                other => panic!("{other:?}"),
             })
         };
         assert_eq!(parse(r#"{"v":2,"cmd":"end_flight"}"#), Ok(EndFlight));
@@ -837,6 +888,54 @@ mod tests {
         let unknown = failed(r#"{"v":2,"cmd":"eject"}"#);
         assert_eq!((unknown.cmd.as_str(), unknown.ok), ("eject", false));
         assert_eq!(failed("mark").cmd, "?");
+    }
+
+    #[test]
+    fn the_attempt_strip_goes_out_each_second_and_ten_minutes_once_final() {
+        let (mut board, t0) = (Board::default(), Instant::now());
+        let strip = |json: &str, done| Msg::Attempt {
+            json: json.into(),
+            done,
+        };
+        board.take(&strip("a", false), t0);
+        assert_eq!(board.due(t0), [(ATTEMPT, "a".to_owned())]);
+        assert!(board.due(t0 + Duration::from_millis(500)).is_empty());
+        // A change goes out at once.
+        let t1 = t0 + Duration::from_millis(600);
+        board.take(&strip("b", true), t1);
+        assert_eq!(board.due(t1), [(ATTEMPT, "b".to_owned())]);
+        // The same final strip again keeps its deadline.
+        let later = t1 + Duration::from_secs(300);
+        board.take(&strip("b", true), later);
+        assert_eq!(board.due(later).len(), 1);
+        assert!(
+            board.due(t1 + ATTEMPT_LINGER).is_empty(),
+            "stops after ten minutes"
+        );
+        // A new attempt starts it again.
+        let t2 = t1 + ATTEMPT_LINGER + Duration::from_secs(5);
+        board.take(&strip("c", false), t2);
+        assert_eq!(board.due(t2).len(), 1);
+    }
+
+    #[test]
+    fn attempt_commands_go_to_the_app_and_bad_ones_are_acked() {
+        match Request::parse(r#"{"v":2,"cmd":"fly_again","id":"a1"}"#) {
+            Ok(Request::App(AppCommand::FlyAgain { id })) if id == "a1" => {}
+            other => panic!("{other:?}"),
+        }
+        let bad = Request::parse(r#"{"v":2,"cmd":"place","key":"../x"}"#).unwrap_err();
+        assert_eq!(
+            (bad.cmd.as_str(), bad.message.as_deref()),
+            ("place", Some("no such challenge"))
+        );
+        let reply = Reply {
+            event: crate::views::CHALLENGES,
+            msgs: vec!["c".into()],
+        };
+        let (mut board, t0) = (Board::default(), Instant::now());
+        board.take(&Msg::Reply(reply), t0);
+        assert_eq!(board.due(t0), [(crate::views::CHALLENGES, "c".to_owned())]);
     }
 
     #[test]

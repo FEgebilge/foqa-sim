@@ -79,11 +79,13 @@
         {
           "kind": "material",
           "score": 84.9,
-          "reason": "level 2 or more: A2 above, high-sink-light",
+          "title": "A significant deviation limits the grade",
+          "reason": "Descent rate 1,565 fpm above 300 ft (level 2) and High descent rate below 500 ft (light aircraft) (level 2) hold this landing below Good (max 84.9).",
           "source": "A material FDM event (level 2 or more); docs/scoring.md 4",
           "landing": 0
         }
       ],
+      "partial_note": null,
       "graded_by": 0,
       "landings": [
         {
@@ -96,12 +98,19 @@
           "class": "light",
           "partial": [],
           "missing": [],
+          "note": null,
+          "facts": [
+            "Graded with light-aircraft limits",
+            "Reference speed 60 kt, approach speed 65 kt",
+            "Approach stable from 179 ft down"
+          ],
           "full_stop": true,
           "caps": [
             {
               "kind": "material",
               "score": 84.9,
-              "reason": "level 2 or more: A2 above, high-sink-light",
+              "title": "A significant deviation limits the grade",
+              "reason": "Descent rate 1,565 fpm above 300 ft (level 2) and High descent rate below 500 ft (light aircraft) (level 2) hold this landing below Good (max 84.9).",
               "source": "A material FDM event (level 2 or more); docs/scoring.md 4"
             }
           ],
@@ -118,6 +127,8 @@
             {
               "id": "stability",
               "title": "Approach stability",
+              "short": "Approach",
+              "summary": "Speed, descent rate, bank, pitch, glideslope and configuration on final",
               "weight": 25.0,
               "loss": 0.695674071595807,
               "points": 17.4,
@@ -129,7 +140,7 @@
                   "height": "above",
                   "value": 14.09610662027535,
                   "value_text": "+14 kt",
-                  "height_text": "at or above 300 ft",
+                  "height_text": "above 300 ft",
                   "unit": "kt",
                   "ell": 0.909610662027535,
                   "level": 0,
@@ -221,7 +232,7 @@
                   "height": "above",
                   "value": 1565.2486737082957,
                   "value_text": "1,565 fpm",
-                  "height_text": "at or above 300 ft",
+                  "height_text": "above 300 ft",
                   "unit": "fpm",
                   "ell": 2.130497347416591,
                   "level": 2,
@@ -419,11 +430,13 @@
                 }
               ],
               "sets_by": "A2 above",
-              "set_by_text": "Descent rate 1,565 fpm at or above 300 ft"
+              "set_by_text": "Descent rate 1,565 fpm above 300 ft"
             },
             {
               "id": "energy",
               "title": "Threshold and flare",
+              "short": "Flare",
+              "summary": "Height over the threshold, touchdown speed and float down the runway",
               "weight": 10.0,
               "loss": 0.04770683089837871,
               "points": 0.5,
@@ -575,6 +588,8 @@
             {
               "id": "point",
               "title": "Touchdown point",
+              "short": "Landing spot",
+              "summary": "How far from the aiming point the wheels touched down",
               "weight": 20.0,
               "loss": 0.04615221789752202,
               "points": 0.9,
@@ -582,10 +597,10 @@
               "criteria": [
                 {
                   "id": "C1",
-                  "title": "Touchdown past the target",
+                  "title": "Touchdown",
                   "height": "all",
                   "value": -46.152217897522014,
-                  "value_text": "-46 ft",
+                  "value_text": "46 ft before the target",
                   "height_text": null,
                   "unit": "ft",
                   "ell": 0.23076108948761007,
@@ -629,11 +644,13 @@
               ],
               "findings": [],
               "sets_by": "C1",
-              "set_by_text": "Touchdown past the target -46 ft"
+              "set_by_text": "Touchdown 46 ft before the target"
             },
             {
               "id": "lateral",
               "title": "Lateral control",
+              "short": "Centreline",
+              "summary": "Offset from the centreline, crab and drift at touchdown, then on the rollout",
               "weight": 15.0,
               "loss": 0.2552389756396695,
               "points": 3.8,
@@ -831,6 +848,8 @@
             {
               "id": "contact",
               "title": "Touchdown contact",
+              "short": "Touchdown",
+              "summary": "Load, sink rate, bounce, tail clearance and bank at touchdown",
               "weight": 20.0,
               "loss": 0.0,
               "points": 0.0,
@@ -1074,6 +1093,8 @@
             {
               "id": "rollout",
               "title": "Rollout and stopping",
+              "short": "Rollout",
+              "summary": "How soon braking began and how hard it had to be to stop",
               "weight": 10.0,
               "loss": 0.0,
               "points": 0.0,

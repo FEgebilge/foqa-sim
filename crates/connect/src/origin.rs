@@ -24,8 +24,12 @@ impl Origin {
             return Err("Give the site's address only, like https://example.org.".into());
         }
         let local = match url.host() {
-            Some(Host::Domain(d)) if d.eq_ignore_ascii_case("localhost") => true,
-            Some(Host::Domain(_)) => false,
+            // `a.example.` is another origin than `a.example`, and
+            // `localhost.` or `x.localhost` is loopback all the same.
+            Some(Host::Domain(d)) if d.ends_with('.') => {
+                return Err(format!("“{input}” ends its host with a dot."));
+            }
+            Some(Host::Domain(d)) => is_localhost(d),
             Some(Host::Ipv4(ip)) if ip.is_loopback() => true,
             Some(Host::Ipv6(ip)) if ip.is_loopback() => true,
             Some(_) => return Err("A site needs a host name, not an IP address.".into()),
@@ -55,6 +59,13 @@ impl Origin {
     pub fn owns(&self, url: &str) -> bool {
         Url::parse(url).is_ok_and(|u| u.origin().ascii_serialization() == self.0)
     }
+}
+
+/// `localhost` and every name under it (RFC 6761), any case (the parser
+/// lower-cases a domain already).
+fn is_localhost(domain: &str) -> bool {
+    let d = domain.to_ascii_lowercase();
+    d == "localhost" || d.ends_with(".localhost")
 }
 
 impl fmt::Display for Origin {
@@ -106,5 +117,22 @@ mod tests {
         assert!(Origin::parse("http://localhost:3000", true).is_ok());
         assert!(Origin::parse("http://example.org", true).is_err());
         assert!(Origin::parse("https://10.0.0.1", true).is_err());
+    }
+
+    #[test]
+    fn trailing_dots_and_names_under_localhost_are_not_public() {
+        for bad in [
+            "https://localhost.",
+            "https://LOCALHOST.",
+            "https://foo.localhost",
+            "https://FOO.LocalHost:8443",
+            "https://a.example.",
+        ] {
+            assert!(Origin::parse(bad, false).is_err(), "{bad}");
+        }
+        assert!(Origin::parse("https://foo.localhost", true).is_ok());
+        assert!(Origin::parse("https://localhost.", true).is_err());
+        assert!(Origin::parse("https://a.example.", true).is_err());
+        assert!(Origin::parse("https://localhost.example", false).is_ok());
     }
 }

@@ -198,6 +198,7 @@ fn each_safety_cap_names_its_cause() {
     assert_eq!(caps(base()), (vec![], caps(base()).1));
     let finding = |rule: &str, domain, level| Finding {
         rule: rule.into(),
+        title: format!("Title of {rule}"),
         domain,
         level,
         height_ft: None,
@@ -225,10 +226,13 @@ fn each_safety_cap_names_its_cause() {
     x.outcome.undershoot = true;
     assert_eq!(caps(x), (vec![(CapKind::Undershoot, 39.0)], 39.0));
     let mut x = base();
-    x.outcome.excursion = Some("left the side of the runway before 30 kt".into());
+    x.outcome.excursion = Some("Left the side of the runway".into());
     let s = m.score(&x);
     assert_eq!((s.score, s.grade), (0.0, Grade::Poor));
-    assert_eq!(s.caps[0].reason, "left the side of the runway before 30 kt");
+    assert_eq!(
+        s.caps[0].reason,
+        "Left the side of the runway, which holds this landing at zero."
+    );
     // A stability finding at medium below 500 ft is SL2B: unstable.
     let mut x = base();
     x.findings.push(Finding {
@@ -255,6 +259,7 @@ fn n_a_domains_redistribute_their_weight() {
     let mut with_e = only_a;
     with_e.findings.push(Finding {
         rule: "x".into(),
+        title: "X".into(),
         domain: Domain::Contact,
         level: Level::Advisory,
         height_ft: None,
@@ -311,7 +316,12 @@ fn the_last_full_stop_landing_sets_the_flight_grade() {
         .flight_grade(&[(&good, true), (&short, false)], 0)
         .unwrap();
     assert_eq!((g.score, g.grade), (39.0, Grade::Poor));
-    assert_eq!(g.reasons, ["landing 2: touchdown before the threshold"]);
+    assert_eq!(
+        g.reasons,
+        [
+            "Landing 2: Touched down before the runway threshold, which holds the flight below Fair (max 39.0)."
+        ]
+    );
     let g = m.flight_grade(&[(&good, false), (&good, true)], 0).unwrap();
     assert_eq!((g.score, g.grade, g.reasons.len()), (86.5, Grade::Good, 0));
     let g = m.flight_grade(&[(&good, true)], 1).unwrap();
