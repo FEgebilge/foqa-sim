@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>FOQA-Sim EFB app dev</title>
+<!-- Serve the repository root over HTTP and open /msfs-panel/dev/efb.html.
+     Loads the EFB app's sources as the built package would (board, history,
+     app) under a stand-in for the EFB OS (EFB_API, msfssdk) and a stubbed
+     Comm Bus that plays the app: list_flights and debrief answered from
+     app/public/mock, chunked and repeated as docs/ingame-panel.md says. -->
+<link rel="stylesheet" href="../PackageSources/html_ui/InGamePanels/FOQASim/FOQASim.css" />
+<link rel="stylesheet" href="../efb/FoqaSimApp.css" />
+<style>
+    body { margin: 0; padding: 20px; background: #2a3442; font: 13px system-ui, sans-serif; color: #fff; }
+    .controls { margin-bottom: 14px; }
+    .controls label, .controls button { margin-right: 12px; }
+    .row { display: flex; flex-wrap: wrap; align-items: flex-start; }
+    .frame { margin: 0 24px 24px 0; }
+    .frame h2 { margin: 0 0 6px; font-size: 12px; font-weight: 600; opacity: .85; }
+    .tablet { position: relative; overflow: hidden; resize: both; border: 14px solid #111; border-radius: 18px; }
+    #tablet { width: 1000px; height: 680px; }
+    #log { font: 12px monospace; white-space: pre; opacity: .8; max-height: 160px; overflow: auto; }
+</style>
+</head>
+<body>
+<div class="controls">
+    <label><input type="checkbox" id="silent" /> App silent</label>
+    <label><input type="checkbox" id="drop" /> Drop 40% of messages</label>
+    <label><input type="checkbox" id="empty" /> No flights</label>
+    <label>Message cap <select id="cap"><option value="6144">6 KB</option><option value="400">400 B (many parts)</option></select></label>
+    <button id="pause">Pause app (switch away)</button>
+</div>
+<div class="row"><div class="frame"><h2>EFB app area, drag the corner to resize</h2><div class="tablet" id="tablet"></div></div></div>
+<div id="log"></div>
+<script src="../PackageSources/html_ui/InGamePanels/FOQASim/foqa-board.js"></script>
+<script src="../efb/foqa-history.js"></script>
+<script>
+var MOCK = "../../app/public/mock/", REPEAT_MS = 1000, REPEAT_FOR_MS = 5000, LIST_MAX = 30;
+
+function log(s) { var el = document.getElementById("log"); el.textContent = new Date().toISOString().slice(11, 19) + " " + s + "\n" + el.textContent; }
+function bytes(s) { return new TextEncoder().encode(s).length; }
+function checked(id) { return document.getElementById(id).checked; }
+function cap() { return +document.getElementById("cap").value; }
+
+// --- EFB OS stand-in: the parts of msfssdk and EFB_API the app uses ---
+function Subject(v) { this.v = v; }
+Subject.prototype.get = function () { return this.v; };
+Subject.prototype.set = function (v) { this.v = v; };
+class DisplayComponent { constructor(props) { this.props = props; } onAfterRender() {} destroy() {} }
+var FSComponent = {
+    createRef: function () { return { instance: null }; },
+    buildComponent: function (type, props) {
+        props = props || {};
+        var instance = typeof type === "string" ? document.createElement(type) : new type(props);
+        if (typeof type === "string" && props.class) instance.className = props.class;
+        if (props.ref) props.ref.instance = instance;
+        return { instance: instance, props: props, children: [] };
+    },
+    render: function (vnode, parent) {
+        var c = vnode.instance;
+        if (c instanceof DisplayComponent) { var node = c.render(); FSComponent.render(node, parent); c.onAfterRender(node); }
+        else parent.appendChild(c);
+    }
+};
+window.msfssdk = { DisplayComponent: DisplayComponent, FSComponent: FSComponent, Subject: { create: function (v) { return new Subject(v); } } };
+window.Coherent = { trigger: function (name, a, b) { log(name + " " + a + " " + b); } };
+window.Include = { addScript: function (path, cb) { log("Include.addScript " + path); cb(); } };
+window.EFB_API = {
+    bus: {},
+    loadCss: function (uri) { log("loadCss " + uri); return Promise.resolve(); },
+    use: function (App) {
+        var app = new App();
+        log("use " + app.internalName + " name=" + app.name + " icon=" + app.icon);
+        app._install({ bus: this.bus, options: {} }).then(function () {
+            var vnode = app.render(), view = vnode.instance;     // what the OS keeps as the app's ref
+            FSComponent.render(vnode, document.getElementById("tablet"));
+            view.onOpen(); view.onResume();
+            setInterval(function () { view.onUpdate(Date.now()); }, 1000);
+            var paused = false;
+            document.getElementById("pause").onclick = function (e) {
+                paused = !paused;
+                if (paused) view.onPause(); else view.onResume();
+                e.target.textContent = paused ? "Resume app" : "Pause app (switch away)";
+            };
+        });
+        return this;
+    }
+};
+
+// --- Comm Bus stand-in, playing the FOQA-Sim app ---
+var handlers = {};
+window.RegisterCommBusListener = function () {
+    return {
+        on: function (name, cb) { handlers[name] = cb; },
+        callSimConnect: function (name, json) { log("view → app " + name + " " + json); command(JSON.parse(json)); }
+    };
+};
+function emit(name, payload) {
+    if (checked("silent") || (checked("drop") && Math.random() < 0.4)) return;
+    if (handlers[name]) handlers[name](JSON.stringify(payload));
+}
+// Every reply is repeated for ~5 s: a view only hears what is sent while it is open.
+function repeat(messages) {
+    var until = Date.now() + REPEAT_FOR_MS;
+    (function send() {
+        messages.forEach(function (m) { emit(m[0], m[1]); });
+        if (Date.now() + REPEAT_MS <= until) setTimeout(send, REPEAT_MS);
+    })();
+}
+setInterval(function () { emit(FoqaSim.MSG.status, { v: 2, status: { state: "connected" } }); }, 1000);
+
+// summary, compact and chunks mirror crates/capture/src/history.rs; change them together.
+function summary(f) {
+    return {
+        id: f.id, started_utc: f.started_utc, aircraft: f.aircraft && (f.aircraft.icao || f.aircraft.title),
+        departure: f.departure, arrival: f.arrival, duration_s: Math.round(f.duration_s), landings: f.landings,
+        worst_level: f.worst_level, event_counts: f.event_counts
+    };
+}
+var EVENT_KEYS = ["rule", "level", "start_s", "peak_s", "title", "measure", "value", "threshold", "unit", "detail", "why_it_matters", "advice"];
+function compact(d) {
+    var flight = summary(d.flight);
+    flight.profile = d.flight.profile;
+    return {
+        flight: flight, touchdowns: d.touchdowns,
+        events: d.events.map(function (e) {
+            var o = {};
+            EVENT_KEYS.forEach(function (k) { if (e[k] !== undefined) o[k] = e[k]; });
+            if (e.rule === "pilot-report") o.note = e.description;
+            return o;
+        })
+    };
+}
+// Parts of one JSON document, each message at most cap() bytes as sent.
+function chunks(req, id, doc) {
+    var parts = [], i = 0;
+    while (i < doc.length) {
+        var n = Math.min(doc.length - i, cap());
+        while (bytes(JSON.stringify({ v: 2, req: req, id: id, seq: 9999, total: 9999, part: doc.substr(i, n) })) > cap()) n = Math.floor(n * 0.9);
+        parts.push(doc.substr(i, n));
+        i += n;
+    }
+    return parts.map(function (p, seq) {
+        return [FoqaHistory.MSG.debrief, { v: 2, req: req, id: id, seq: seq, total: parts.length, part: p }];
+    });
+}
+
+function command(msg) {
+    setTimeout(function () {
+        if (msg.cmd === "list_flights") {
+            fetch(MOCK + "flights.json").then(function (r) { return r.json(); }).then(function (all) {
+                var flights = checked("empty") ? [] : all.slice(0, LIST_MAX).map(summary);
+                while (bytes(JSON.stringify({ v: 2, req: msg.req, flights: flights })) > cap()) flights.pop();
+                repeat([[FoqaHistory.MSG.flights, { v: 2, req: msg.req, flights: flights }]]);
+            });
+        } else if (msg.cmd === "debrief") {
+            fetch(MOCK + "debrief-" + msg.id + ".json").then(function (r) { if (!r.ok) throw r.status; return r.json(); }).then(function (d) {
+                var doc = JSON.stringify(compact(d)), list = chunks(msg.req, msg.id, doc);
+                log("debrief " + msg.id + ": " + bytes(doc) + " bytes in " + list.length + " parts");
+                repeat(list);
+            }).catch(function () {
+                repeat([[FoqaHistory.MSG.debrief, { v: 2, req: msg.req, id: msg.id, error: "No such flight" }]]);
+            });
+        }
+    }, 300);
+}
+</script>
+<script src="../efb/FoqaSimApp.js"></script>
+</body>
+</html>

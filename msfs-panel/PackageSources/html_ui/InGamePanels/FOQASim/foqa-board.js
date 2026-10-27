@@ -1,5 +1,5 @@
 // FOQA-Sim board: renders what the FOQA-Sim app sends over the Comm Bus
-// (docs/ingame-panel-v2.md) into one element and sends the pilot's commands
+// (docs/ingame-panel.md) into one element and sends the pilot's commands
 // back. Plain ES2015 and DOM only, no sim APIs: the toolbar panel, a later
 // EFB app and the dev page share it through a bus { on(name, cb), send(name, json) }.
 var FoqaSim = (function () {
@@ -17,8 +17,7 @@ var FoqaSim = (function () {
     var CONFIRM_MS = 6000;      // a discard waits this long for its second click
     var ACK_WAIT_MS = 8000;
     var TOP_EVENTS = 3;
-    var LEVELS = ["high", "medium", "low", "advisory"];
-    var RANK = { advisory: 1, low: 2, medium: 3, high: 4 };
+    var LEVELS = ["high", "medium", "low", "advisory"]; // most severe first
     var PHASE_NAMES = { InitialClimb: "Initial climb", EnRoute: "En route" };
     var APPROACH = { Approach: true, Landing: true };
     var TABS = [["now", "Now"], ["events", "Events"], ["landings", "Landings"], ["flight", "Flight"]];
@@ -54,32 +53,10 @@ var FoqaSim = (function () {
     }
 
     // Most severe first, then latest.
-    function bySeverity(a, b) { return RANK[b.level] - RANK[a.level] || b.start_s - a.start_s; }
+    function bySeverity(a, b) { return LEVELS.indexOf(a.level) - LEVELS.indexOf(b.level) || b.start_s - a.start_s; }
 
     function worstOf(events) {
-        return events.reduce(function (w, e) { return !w || RANK[e.level] > RANK[w] ? e.level : w; }, null);
-    }
-
-    // An event's value in words, "value vs limit". The event's own context
-    // (ias/flap/vfe at its peak) wins over `s`, the Live sample at the peak
-    // when the board heard it.
-    function eventDetail(e, s) {
-        var m = e.measure || "", u = e.unit;
-        if (isNum(e.ias_kt) && isNum(e.vfe_kt)) s = e;
-        if (!isNum(e.value) || /[<>]|^true$|^td\.(bounce|long_landing|short_landing)$|^stall\./.test(m)) return "";
-        var limit = isNum(e.threshold) ? ", limit " + qty(e.threshold, u) : "";
-        if (/profile\.vfe/.test(m)) {
-            return s && isNum(s.ias_kt) && isNum(s.vfe_kt)
-                ? qty(s.ias_kt, "kt") + " at flaps " + qty(s.flap_deg, "deg") + ", limit " + qty(s.vfe_kt, "kt")
-                : qty(e.value, u) + " over the flap limit";
-        }
-        if (/sel\.speed/.test(m)) return (e.value > 0 ? "+" : "") + qty(e.value, u) + " from the selected speed";
-        if (/^profile\.tail_/.test(m)) return qty(e.value, u) + " pitch margin to a tailstrike" + limit;
-        if (/profile\.hard_landing_g/.test(m)) return qty(e.value, u) + " above the inspection limit";
-        if (m === "-vs" || m === "td.sink") return qty(e.value, u) + " sink" + limit;
-        if (/roll/.test(m)) return qty(e.value, u) + " bank" + limit;
-        if (/td\.cross/.test(m)) return qty(e.value, u) + " off the centreline" + limit;
-        return qty(e.value, u) + limit;
+        return events.reduce(function (w, e) { return !w || LEVELS.indexOf(e.level) < LEVELS.indexOf(w) ? e.level : w; }, null);
     }
 
     function checkText(c) {
@@ -87,31 +64,8 @@ var FoqaSim = (function () {
             (isNum(c.limit) ? ", limit " + qty(c.limit, c.unit) : "");
     }
 
-    // Live samples of this recording, for the values behind an event.
-    function Samples() { this.list = []; }
-
-    Samples.prototype.add = function (live) {
-        var l = this.list, last = l[l.length - 1];
-        if (last && live.t_s < last.t_s) l.length = 0;        // a new recording
-        else if (last && live.t_s - last.t_s < 0.5) return;
-        l.push(live);
-        if (l.length > 4000) l.splice(0, 1000);
-    };
-
-    // The sample nearest to t, if one is within 2 s.
-    Samples.prototype.at = function (t) {
-        var l = this.list, lo = 0, hi = l.length - 1;
-        if (hi < 0) return null;
-        while (lo < hi) {
-            var mid = (lo + hi) >> 1;
-            if (l[mid].t_s < t) lo = mid + 1; else hi = mid;
-        }
-        var best = lo > 0 && Math.abs(l[lo - 1].t_s - t) < Math.abs(l[lo].t_s - t) ? l[lo - 1] : l[lo];
-        return Math.abs(best.t_s - t) <= 2 ? best : null;
-    };
-
     // What the Landings tab shows of a LandingNotice.
-    function landingView(notice, samples) {
+    function landingView(notice) {
         var td = notice.touchdown, rw = td.runway;
         var events = notice.events.slice().sort(bySeverity);
         return {
@@ -125,14 +79,30 @@ var FoqaSim = (function () {
             runway: rw ? rw.icao + " " + rw.runway : null,
             along: rw ? num(rw.along_m, 0) + " m" : null,
             cross: rw ? num(Math.abs(rw.cross_m), 1) + " m " + (rw.cross_m < 0 ? "left" : "right") : null,
-            zone: rw ? (rw.in_tdz ? "In TDZ" : rw.long_landing ? "Long" : rw.short_landing ? "Short" : "Past TDZ") : null,
+            zone: rw ? rw.zone : null,
             zoneOk: rw ? rw.in_tdz : null,
             worst: worstOf(events),
             events: events.slice(0, TOP_EVENTS).map(function (e) {
-                return { level: e.level, title: e.title, detail: eventDetail(e, samples && samples.at(e.peak_s)) };
+                return { level: e.level, title: e.title, detail: e.detail };
             }),
             more: Math.max(0, events.length - TOP_EVENTS)
         };
+    }
+
+    // A section redrawn between press and release loses the click, so
+    // view.render() draws nothing while a button is held on root
+    // (view.pressing). A release anywhere, or the mouse leaving root, ends
+    // the hold.
+    function holdRedraws(root, view) {
+        function release() {
+            if (!view.pressing) return;
+            view.pressing = false;
+            setTimeout(function () { view.render(); }, 0);
+        }
+        view.pressing = false;
+        root.addEventListener("mousedown", function () { view.pressing = true; });
+        root.addEventListener("mouseleave", release);
+        document.addEventListener("mouseup", release);
     }
 
     function Board(root, bus, now) {
@@ -143,7 +113,6 @@ var FoqaSim = (function () {
         this.statusAt = 0;
         this.live = null;
         this.liveAt = 0;
-        this.samples = new Samples();
         this.events = null;      // last Events message
         this.seen = null;        // event keys already heard; null until the first Events
         this.flashes = [];       // { event, at }
@@ -153,7 +122,6 @@ var FoqaSim = (function () {
         this.pending = null;     // { cmd, at }: sent, no ack yet
         this.confirmAt = 0;      // first click on Discard
         this.toast = null;       // { ok, text, at }
-        this.pressing = false;
         this.cache = {};
         root.classList.add("foqa");
         root.innerHTML = '<div class="top"></div><div class="flash-slot"></div><div class="tabs"></div>' +
@@ -161,10 +129,7 @@ var FoqaSim = (function () {
         this.slots = {};
         var self = this;
         ["top", "flash-slot", "tabs", "body", "toast-slot"].forEach(function (c) { self.slots[c] = root.querySelector("." + c); });
-        // A section redrawn between press and release loses the click, so
-        // nothing is redrawn while a button is held.
-        root.addEventListener("mousedown", function () { self.pressing = true; });
-        root.addEventListener("mouseup", function () { self.pressing = false; setTimeout(function () { self.render(); }, 0); });
+        holdRedraws(root, this);
         root.addEventListener("click", function (e) {
             var el = e.target;
             while (el && el !== root && !el.getAttribute("data-act")) el = el.parentNode;
@@ -202,7 +167,6 @@ var FoqaSim = (function () {
         var live = JSON.parse(json), was = this.live && this.live.phase;
         this.live = live;
         this.liveAt = this.now();
-        this.samples.add(live);
         // Into the approach: show the approach monitor.
         if (APPROACH[live.phase] && !APPROACH[was] && this.tab !== "now") { this.tab = "now"; this.backTab = null; }
         this.render();
@@ -223,7 +187,7 @@ var FoqaSim = (function () {
     };
 
     Board.prototype.onLanding = function (json) {
-        var msg = JSON.parse(json), view = landingView(msg.notice, this.samples);
+        var msg = JSON.parse(json), view = landingView(msg.notice);
         var isNew = !this.landings.some(function (l) { return l.key === view.key; });
         this.mergeLandings([view]);
         if (isNew && msg.age_s <= FRESH_S) {
@@ -234,8 +198,7 @@ var FoqaSim = (function () {
     };
 
     Board.prototype.onLandings = function (json) {
-        var self = this;
-        this.mergeLandings(JSON.parse(json).landings.map(function (n) { return landingView(n, self.samples); }));
+        this.mergeLandings(JSON.parse(json).landings.map(landingView));
         this.render();
     };
 
@@ -270,7 +233,6 @@ var FoqaSim = (function () {
     };
 
     Board.prototype.render = function () {
-        if (this.pressing) return;
         var t = this.now();
         if (this.pending && t - this.pending.at > ACK_WAIT_MS) {
             this.pending = null;
@@ -278,6 +240,7 @@ var FoqaSim = (function () {
         }
         if (this.toast && t - this.toast.at > TOAST_MS) this.toast = null;
         this.flashes = this.flashes.filter(function (f) { return t - f.at <= FLASH_MS; });
+        if (this.pressing) return;
         var w = this.root.clientWidth, h = this.root.clientHeight;
         this.root.classList.toggle("narrow", w > 0 && w < 360);
         this.root.classList.toggle("short", h > 0 && h < 320);
@@ -327,10 +290,9 @@ var FoqaSim = (function () {
     Board.prototype.flashHtml = function () {
         if (!this.flashes.length) return "";
         var f = this.flashes.slice().sort(function (a, b) { return bySeverity(a.event, b.event); })[0], e = f.event;
-        var detail = eventDetail(e, this.samples.at(e.peak_s));
         return '<div class="flash lvl-' + e.level + '" data-act="tab:events"><span class="lvl">' + e.level + "</span>" +
             '<span class="name">' + esc(e.title) + "</span>" +
-            (detail ? '<span class="detail">' + esc(detail) + "</span>" : "") +
+            (e.detail ? '<span class="detail">' + esc(e.detail) + "</span>" : "") +
             (this.flashes.length > 1 ? '<span class="more">+' + (this.flashes.length - 1) + " new</span>" : "") + "</div>";
     };
 
@@ -384,10 +346,9 @@ var FoqaSim = (function () {
     };
 
     Board.prototype.eventHtml = function (e) {
-        var detail = eventDetail(e, this.samples.at(e.peak_s));
         return '<div class="event lvl-' + e.level + '"><div class="erow"><span class="name">' + esc(e.title) + "</span>" +
             '<span class="time">' + clock(e.start_s) + "</span></div>" +
-            (detail ? '<div class="detail">' + esc(detail) + "</div>" : "") + "</div>";
+            (e.detail ? '<div class="detail">' + esc(e.detail) + "</div>" : "") + "</div>";
     };
 
     Board.prototype.eventsHtml = function () {
@@ -507,5 +468,5 @@ var FoqaSim = (function () {
         return board;
     }
 
-    return { MSG: MSG, attach: attach, Board: Board, landingView: landingView, eventDetail: eventDetail };
+    return { MSG: MSG, attach: attach, Board: Board, landingView: landingView, holdRedraws: holdRedraws };
 })();

@@ -18,8 +18,7 @@ Start-Sleep -Seconds 5
 if (-not $tool.HasExited) { Stop-Process -Id $tool.Id }
 if (-not (Test-Path $spb)) { throw "no panel definition in $package (see out\_PackageInt\_RPTErrors.xml)" }
 
-$content = Get-ChildItem $package -Recurse -File | Where-Object { $_.Name -notin 'layout.json', 'manifest.json' } | Sort-Object FullName | ForEach-Object {
-    [ordered]@{ path = $_.FullName.Substring($package.Length + 1).Replace('\', '/'); size = $_.Length; date = $_.LastWriteTimeUtc.ToFileTimeUtc() }
-}
-[IO.File]::WriteAllText((Join-Path $package 'layout.json'), (ConvertTo-Json @{ content = @($content) } -Depth 4))
+. (Join-Path $PSScriptRoot 'layout.ps1')
+Copy-Item $spb (Join-Path $PSScriptRoot 'prebuilt') -Force  # keep the prebuilt copy (used by assemble.ps1) current
+$null = Write-Layout $package
 Write-Output "built $package"

@@ -5,7 +5,7 @@
 <title>FOQA-Sim panel dev</title>
 <!-- Serve the repository root over HTTP (e.g. `python -m http.server` in it)
      and open /msfs-panel/dev/. The sim's Comm Bus is stubbed and this page
-     plays the app (docs/ingame-panel-v2.md): it replays the series of
+     plays the app (docs/ingame-panel.md): it replays the series of
      app/public/mock/debrief-flight-1793037932.json as Live, its events as
      Events and its touchdown as a LandingNotice, and acks commands. -->
 <link rel="stylesheet" href="../PackageSources/html_ui/InGamePanels/FOQASim/FOQASim.css" />
@@ -122,7 +122,7 @@ fetch("../../app/public/mock/debrief-flight-1793037932.json").then(function (r) 
     }
     var earlier = [
         notice(60, { sink_fpm: 512, peak_g: 1.71, bounce: true, runway: { along_m: 620, cross_m: 3.1 } }),
-        notice(120, { sink_fpm: 344, peak_g: 1.38, runway: { along_m: 1104, in_tdz: false, long_landing: true } })
+        notice(120, { sink_fpm: 344, peak_g: 1.38, runway: { along_m: 1104, in_tdz: false, long_landing: true, zone: "Long" } })
     ];
     var real = notice(td.t_s);
 
