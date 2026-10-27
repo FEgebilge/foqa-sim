@@ -875,12 +875,14 @@ name = "debrief"
 version = "0.2.0"
 dependencies = [
  "analyzer",
+ "assess",
  "fdm-core",
  "recorder",
  "rules",
  "serde",
  "serde_json",
  "tempfile",
+ "testkit",
 ]
 
 [[package]]

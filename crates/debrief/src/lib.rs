@@ -6,6 +6,7 @@
 
 #![forbid(unsafe_code)]
 
+mod assessment;
 mod index;
 mod wire;
 
@@ -16,13 +17,13 @@ use std::io::{self, BufReader};
 use std::path::{Path, PathBuf};
 
 use analyzer::{Basis, Cause, Flight, Phase, Span, Track, phases, thresholds, touchdowns};
+use assess::Method;
 use fdm_core::geo::distance_m;
 use fdm_core::{Lfl, SimTime};
 use recorder::{COMPACT_EXT, Recorder, ReplaySource, SimEvent, TOUCHDOWN_WINDOW_US};
-use rules::{
-    LoadError, PhaseField, ProfileError, ProfileField, ProfileSet, Rule, Selection, Sourced,
-};
+use rules::{LoadError, PhaseField, ProfileField, ProfileSet, Rule, Selection, Sourced};
 
+pub use assessment::{POINTS, domain_title};
 pub use index::{INDEX_FILE, Index};
 pub use wire::*;
 
@@ -175,26 +176,34 @@ pub fn delete_flight(dir: &Path, id: &str) -> io::Result<usize> {
 pub struct Station {
     rules: Vec<Rule>,
     profiles: ProfileSet,
-    /// Hash of the rules, the profiles and the analysis code (`build.rs`):
-    /// a summary made by another station is stale.
+    /// The landing assessment (`scoring/landing-2.yaml`).
+    method: Method,
+    /// Hash of the rules, the profiles, the scoring method and the analysis
+    /// code (`build.rs`): a summary made by another station is stale.
     version: String,
 }
 
 impl Station {
-    pub fn new(rules: Vec<Rule>) -> Result<Self, ProfileError> {
+    pub fn new(rules: Vec<Rule>) -> Result<Self, Error> {
         let profiles = ProfileSet::shipped()?;
+        let method = Method::landing_2()?;
         let mut h = DefaultHasher::new();
-        format!("{rules:?}{profiles:?}{}", env!("SOURCE_HASH")).hash(&mut h);
+        format!("{rules:?}{profiles:?}{method:?}{}", env!("SOURCE_HASH")).hash(&mut h);
         Ok(Self {
             rules,
             profiles,
+            method,
             version: format!("{:016x}", h.finish()),
         })
     }
 
     /// The core rules and the shipped profiles.
     pub fn core() -> Result<Self, Error> {
-        Ok(Self::new(core_rules()?)?)
+        Self::new(core_rules()?)
+    }
+
+    pub fn method(&self) -> &Method {
+        &self.method
     }
 
     pub fn rules(&self) -> &[Rule] {
@@ -215,6 +224,7 @@ impl Station {
             phases: phases(&track, &selection.phases),
             id,
             rules: &self.rules,
+            method: &self.method,
             selection,
             flight,
             track,
@@ -240,14 +250,19 @@ pub struct Analysis<'a> {
     /// In time order, the most severe first at equal times.
     pub events: Vec<rules::Event>,
     rules: &'a [Rule],
+    method: &'a Method,
 }
 
 impl Analysis<'_> {
     pub fn summary(&self) -> FlightSummary {
-        let t = &self.track.t;
         let events = self.events();
+        self.summary_of(&events, &self.assessment(&events))
+    }
+
+    fn summary_of(&self, events: &[Event], detail: &AssessmentDetail) -> FlightSummary {
+        let t = &self.track.t;
         let mut event_counts: BTreeMap<_, usize> = Level::ALL.map(|l| (l, 0)).into();
-        for e in &events {
+        for e in events {
             *event_counts.entry(e.level).or_default() += 1;
         }
         FlightSummary {
@@ -269,14 +284,16 @@ impl Analysis<'_> {
             landings: self.touchdowns.iter().filter(|td| !td.bounce).count(),
             worst_level: events.iter().map(|e| e.level).max(),
             event_counts,
-            assessment: Assessment::of(&events),
+            assessment: detail.into(),
         }
     }
 
     pub fn debrief(&self) -> Debrief {
+        let events = self.events();
+        let assessment_detail = self.assessment(&events);
         Debrief {
             flight: FlightHeader {
-                summary: self.summary(),
+                summary: self.summary_of(&events, &assessment_detail),
                 lfl_version: self.flight.lfl_version(),
                 profile: self.selection.to_string(),
                 class: self.selection.class.map(|c| c.to_string()),
@@ -284,7 +301,7 @@ impl Analysis<'_> {
                 phase_values: PhaseField::ALL
                     .map(|f| (f.name(), self.selection.phase_value(f)))
                     .into(),
-                assessment_detail: AssessmentDetail::of(&self.events()),
+                assessment_detail,
                 damaged_at: self.flight.damaged_at,
             },
             phases: self
@@ -302,8 +319,9 @@ impl Analysis<'_> {
                 .iter()
                 .map(|td| Touchdown::new(td, &self.flight))
                 .collect(),
-            events: self.events(),
+            events,
             series: self.series(),
+
             airports: self.airports(),
         }
     }

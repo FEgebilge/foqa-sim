@@ -15,13 +15,23 @@ export interface Aircraft {
 
 export type Grade = "good" | "fair" | "poor";
 
-/** The flight graded as a whole: each rule broken counts once at its worst level (high 4 points, medium 2, low 1, advisory 0). */
+/**
+ * The flight graded as a whole: by landing-2 (docs/scoring.md) when a landing was scored (`score` 0-100), else by the
+ * points method. `points` and `findings` are the points method's (each rule broken counts once at its worst level: high 4,
+ * medium 2, low 1, advisory 0), kept for one release; older summaries have no `method`.
+ */
 export interface Assessment {
   grade: Grade;
   points: number;
   /** Rules broken at low or above. */
   findings: number;
+  method?: "landing-2" | "points";
+  score?: number;
+  confidence?: Confidence;
 }
+
+export type Confidence = "full" | "partial";
+
 
 /** One rule's share of the assessment: its worst level in the flight alone counts. */
 export interface AssessmentPart {

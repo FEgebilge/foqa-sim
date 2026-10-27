@@ -28,6 +28,8 @@ pub struct Finding {
     pub level: Level,
     /// Above the aerodrome where it was measured.
     pub height_ft: Option<f64>,
+    /// Its index in the events the landing was assessed with.
+    pub event: Option<usize>,
 }
 
 /// How the landing ended, for the caps.
@@ -102,6 +104,7 @@ pub struct CriterionScore {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct FindingScore {
     pub rule: String,
+    pub event: Option<usize>,
     pub level: Level,
     pub ell: f64,
     pub loss: f64,
@@ -298,6 +301,8 @@ impl Method {
                 let ell = finding_ell(f.level);
                 FindingScore {
                     rule: f.rule.clone(),
+                    event: f.event,
+
                     level: f.level,
                     ell,
                     loss: self.loss(ell),

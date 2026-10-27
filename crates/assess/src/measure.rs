@@ -280,14 +280,16 @@ impl Method {
         let findings = l
             .events
             .iter()
-            .filter(|e| (from..=to).contains(&e.start))
-            .filter_map(|e| {
+            .enumerate()
+            .filter(|(_, e)| (from..=to).contains(&e.start))
+            .filter_map(|(i, e)| {
                 let domain = l.rules.iter().find(|r| r.id == e.rule)?.domain;
                 (domain != Domain::Other).then(|| Finding {
                     rule: e.rule.clone(),
                     domain,
                     level: e.level,
                     height_ft: Some(track.aal_ft[track.index_at(e.peak)]).filter(|h| h.is_finite()),
+                    event: Some(i),
                 })
             })
             .collect();

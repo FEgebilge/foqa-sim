@@ -194,6 +194,7 @@ fn each_safety_cap_names_its_cause() {
         domain,
         level,
         height_ft: None,
+        event: None,
     };
     let mut x = base();
     x.findings
@@ -250,6 +251,7 @@ fn n_a_domains_redistribute_their_weight() {
         domain: Domain::Contact,
         level: Level::Advisory,
         height_ft: None,
+        event: None,
     });
     // 100 - 25 x 0.35 x 100 / 45.
     assert_eq!(m.score(&with_e).raw, 80.6);
