@@ -1,0 +1,127 @@
+{
+  "attempt": {
+    "id": "0b7f3c52-9a1e-4d68-b2c4-7e5f9a0d1c83",
+    "challenge_id": "test-20",
+    "challenge_version": 1,
+    "issued_at": "2026-10-28T17:02:11Z",
+    "uploaded_at": "2026-10-28T17:20:40Z",
+    "scored_at": "2026-10-28T17:20:52Z",
+    "result": {
+      "challenge": "test-20",
+      "challenge_version": 1,
+      "aircraft": {
+        "icao": "C172",
+        "class": "light"
+      },
+      "marker": {
+        "ref": "Qe3v1hJ0dEa9fP2kLm7xRw",
+        "begin_s": 19.983333,
+        "end_s": 163.983333
+      },
+      "valid": true,
+      "checks": [
+        {
+          "name": "aircraft",
+          "ok": true,
+          "detail": "C172 (light)"
+        },
+        {
+          "name": "runway",
+          "ok": true,
+          "detail": "landed on TEST 20"
+        },
+        {
+          "name": "gate",
+          "ok": true,
+          "detail": "3 NM out at 984 ft"
+        },
+        {
+          "name": "sim_rate",
+          "ok": true,
+          "detail": "up to 1x"
+        },
+        {
+          "name": "slew",
+          "ok": true,
+          "detail": "no slew"
+        },
+        {
+          "name": "pause",
+          "ok": true,
+          "detail": "no pause"
+        },
+        {
+          "name": "continuity",
+          "ok": true,
+          "detail": "continuous"
+        },
+        {
+          "name": "go_around",
+          "ok": true,
+          "detail": "no go-around"
+        },
+        {
+          "name": "data",
+          "ok": true,
+          "detail": "every value recorded"
+        }
+      ],
+      "gate_s": 41.25,
+      "touchdown_s": 124.0,
+      "score": {
+        "version": "landing-2",
+        "total": 59.0,
+        "parts": [
+          {
+            "name": "stability",
+            "weight": 25.0,
+            "score": 0.0,
+            "value": null,
+            "unit": ""
+          },
+          {
+            "name": "energy",
+            "weight": 10.0,
+            "score": 0.0,
+            "value": null,
+            "unit": ""
+          },
+          {
+            "name": "point",
+            "weight": 20.0,
+            "score": 1.0,
+            "value": null,
+            "unit": ""
+          },
+          {
+            "name": "lateral",
+            "weight": 15.0,
+            "score": 1.0,
+            "value": null,
+            "unit": ""
+          },
+          {
+            "name": "contact",
+            "weight": 20.0,
+            "score": 0.8999994827582626,
+            "value": null,
+            "unit": ""
+          },
+          {
+            "name": "rollout",
+            "weight": 10.0,
+            "score": 0.9965587521721833,
+            "value": null,
+            "unit": ""
+          }
+        ]
+      }
+    },
+    "verified": true,
+    "unverified": [],
+    "reject": null,
+    "rank": 12,
+    "url": "https://landings.example/#/challenges/test-20/attempts/0b7f3c52-9a1e-4d68-b2c4-7e5f9a0d1c83",
+    "status": "scored"
+  }
+}

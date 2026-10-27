@@ -466,12 +466,16 @@ marker** ([format.md](format.md) event table), text a JSON object:
   separately, by `crates/challenge` (`Challenge` fields, `scoring.version`).
   A site serves only definitions its pinned `fdm` accepts (`--check`); a
   client refuses definitions it cannot parse.
-- **Fixtures:** `docs/protocol/examples/` holds one JSON example per
-  type and case (well-known, token response, each A6 error body, a
-  `ChallengeEntry`, an `IssuedAttempt`, an `AttemptStatus` per status).
-  `crates/connect/tests` runs the client against a mock server built from
-  them; a site copies them into its tests and validates its own schemas
-  against them. `fixtures/challenge/` holds a golden `challenge.json`, the
+- **Fixtures:** `fixtures/protocol/` holds one JSON example per type and
+  case, for the example site `https://landings.example`: the well-known
+  document, token responses (one with `handle: null`), `/me`, a device
+  code, `ChallengeEntry` lists, the issue response, an `AttemptStatus` per
+  status (plus scored-unverified and an unknown status), a `/me/attempts`
+  page and each A6 error body as `errors/<http>-<code>.json`. Definitions
+  are embedded byte for byte under their `definition_sha256`.
+  `crates/connect/tests/protocol_fixtures.rs` reads every one with the
+  client's types; a site copies them into its tests and validates its own
+  schemas against them. `fixtures/challenge/` holds a golden `challenge.json`, the
   synthetic `flight.fqz` it was flown in, that flight's `slice.fqz` and the
   expected `fdm challenge` output `attempt.json`, for a site's scorer CI:
   `fdm slice flight.fqz --ref Qe3v1hJ0dEa9fP2kLm7xRw` gives `slice.fqz`
@@ -831,8 +835,7 @@ Each slice keeps the app fully usable with no site configured.
 - **Decode cap:** `fdm challenge` and `fdm slice` refuse a compact
   flight whose body decompresses past 32 MiB
   (`recorder::CHALLENGE_MAX_BODY`); the app's own flights keep 256 MiB.
-- **Not in F1 yet:** the protocol example fixtures (A11, under
-  `crates/connect`), the live `[begin, now]` grading during the rollout
+- **Not in F1 yet:** the live `[begin, now]` grading during the rollout
   (B5).
 - "Allow local sites" is the environment variable
   `FOQA_ALLOW_LOCAL_SITES=1` until the app has a settings screen; the
