@@ -4,7 +4,7 @@
 
 use challenge::{Attempt, Challenge, evaluate};
 use debrief::Station;
-use recorder::SimEvent;
+use recorder::{AttemptMarker, AttemptPhase, SimEvent};
 use testkit::*;
 
 const CHALLENGE: &str = r#"{
@@ -169,4 +169,56 @@ fn a_position_dropout_on_the_rollout_stays_on_the_runway() {
     let parts = a.score.unwrap().parts;
     let rollout = parts.iter().find(|p| p.name == "rollout").unwrap();
     assert_eq!(rollout.score, 1.0, "{rollout:?}");
+}
+
+fn marker(phase: AttemptPhase, at_s: f64) -> (f64, SimEvent) {
+    let m = AttemptMarker {
+        phase,
+        challenge: "test-20".into(),
+        version: 3,
+        reference: Some("Qe3v1hJ0dEa9fP2kLm7xRw".into()),
+        reason: (phase == AttemptPhase::End).then(|| "stopped".into()),
+    };
+    (at_s, SimEvent::Attempt(m))
+}
+
+/// The stable landing with an attempt begun at `begin_s`, graded.
+fn marked(begin_s: f64) -> Attempt {
+    let events = [
+        (0.0, SimEvent::Airport(runway_behind_touchdown(400.0))),
+        (0.0, identity("B738")),
+        marker(AttemptPhase::Begin, begin_s),
+        marker(AttemptPhase::End, TD_S + 40.0),
+    ];
+    let journal = journal(&events, AIRLINER_LB, TD_S + ROLLOUT_S, |t| {
+        landing(t, TD_S, 1.2)
+    });
+    let flight = analyzer::Flight::read(&journal[..]).unwrap();
+    let station = Station::core().unwrap();
+    let analysis = station.analyse("flight-1".into(), flight).unwrap();
+    evaluate(&Challenge::parse(CHALLENGE).unwrap(), &analysis)
+}
+
+/// Only a touchdown after the latest begin marker is the attempt's; the
+/// marker and the aircraft graded are reported for the site to compare.
+#[test]
+fn the_attempt_is_graded_after_its_begin_marker() {
+    let a = marked(10.0);
+    assert!(a.valid, "{:?}", a.checks);
+    let m = a.marker.as_ref().unwrap();
+    assert_eq!(m.reference.as_deref(), Some("Qe3v1hJ0dEa9fP2kLm7xRw"));
+    // Events take the last frame's time: within a frame of the script's.
+    assert!((m.begin_s - 10.0).abs() < 0.05 && (m.end_s.unwrap() - TD_S - 40.0).abs() < 0.05);
+    assert_eq!(a.aircraft.icao.as_deref(), Some("B738"));
+    assert_eq!(a.aircraft.class.as_deref(), Some("transport"));
+    let json = serde_json::to_value(&a).unwrap();
+    assert_eq!(json["marker"]["ref"], "Qe3v1hJ0dEa9fP2kLm7xRw");
+
+    let late = marked(TD_S + 5.0);
+    assert!(!late.valid);
+    assert_eq!(
+        failed(&late),
+        ["runway"],
+        "the landing came before the start"
+    );
 }

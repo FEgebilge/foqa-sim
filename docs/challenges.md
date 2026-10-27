@@ -6,10 +6,10 @@ the start, records the attempt and grades it locally; that works with no
 site at all. A site is optional: through the
 [FOQA Challenge Protocol](challenge-protocol.md) it can publish challenges,
 receive attempts, re-score them and keep a leaderboard (the first one is
-Pilot Aptitude). Status: the definition, the start and the grading are
-implemented (`crates/challenge`, `fdm challenge`, the app's
-`place_challenge`); the challenge screen, the marker and slice, and the
-site client are not.
+Pilot Aptitude). Status: the definition, the start, the grading, the
+attempt marker and the recording slice are implemented
+(`crates/challenge`, `fdm challenge`, `fdm slice`, the app's Challenges
+screen) and the site client (`crates/connect`); deep links are not.
 
 Research behind it (2026-10-27): SimConnect, MSFS 2024 SDK, DevSupport
 threads, BeatMyLanding, OnAir and others; sources are linked inline.
@@ -245,8 +245,12 @@ Leaderboards are the site's business, not part of the protocol.
 
 3. **Server analysis:** the Rust analysis on the home server:
    `fdm challenge <challenge.json> <flight.fqz>` prints the `Attempt`
-   (checks, validity, score) as JSON, the same `challenge::evaluate` the app
-   runs. It takes a compact flight only, whose decompressed body is capped
+   (checks, validity, score, the `aircraft` type and class graded, the
+   `marker` it graded after) as JSON, the same `challenge::evaluate` the
+   app runs. Only a touchdown after the latest `begin` marker is graded.
+   `fdm slice <flight> --ref <ref> [-o out.fqz]` cuts the attempt's slice
+   the app uploads ([format.md](format.md), Recording slice); the golden
+   example a site's CI checks is in `fixtures/challenge/`. It takes a compact flight only, whose decompressed body is capped
    (256 MiB); a journal or a raw capture is refused by its extension, since
    a raw capture's gzip lets a small upload expand. The raw replay is capped
    too (1 GiB decompressed, 64 KiB a line) for local use.

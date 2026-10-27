@@ -13,7 +13,7 @@ use rules::{Aircraft, ProfileSet};
 
 use serde::{Deserialize, Serialize};
 
-pub use attempt::{Attempt, Check, aircraft_check, evaluate};
+pub use attempt::{Attempt, Check, Flown, Marker, aircraft_check, evaluate};
 pub use score::{LANDING_2, Part, SCORING, Score};
 
 const M_PER_NM: f64 = 1852.0;

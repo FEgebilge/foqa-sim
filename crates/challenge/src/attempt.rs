@@ -6,6 +6,7 @@ use analyzer::{Phase, locate, wind_components};
 use debrief::Analysis;
 use fdm_core::SimTime;
 use fdm_core::geo::distance_m;
+use recorder::{AttemptPhase, SimEvent};
 use rules::{Aircraft, Domain};
 use serde::Serialize;
 
@@ -27,6 +28,11 @@ const MAX_GS_KT: f64 = 600.0;
 pub struct Attempt {
     pub challenge: String,
     pub challenge_version: u32,
+    /// The aircraft graded, from the recorded identity and weight.
+    pub aircraft: Flown,
+    /// The attempt marker graded after, when the flight has one: the
+    /// latest begin (docs/challenge-protocol.md A7).
+    pub marker: Option<Marker>,
     /// Every check passed: the attempt counts.
     pub valid: bool,
     pub checks: Vec<Check>,
@@ -35,6 +41,24 @@ pub struct Attempt {
     pub touchdown_s: Option<f64>,
     /// `None` without a landing on the challenge's runway past its gate.
     pub score: Option<Score>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Flown {
+    /// ICAO type designator; `None` without an identity.
+    pub icao: Option<String>,
+    /// `light` or `transport`.
+    pub class: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Marker {
+    /// The opaque reference the begin marker carries; `None` for a local attempt.
+    #[serde(rename = "ref")]
+    pub reference: Option<String>,
+    /// Sim time of the begin marker and of the end marker after it, s.
+    pub begin_s: f64,
+    pub end_s: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -57,12 +81,21 @@ struct Graded {
 }
 
 /// Grades the analysed flight as an attempt at `challenge`.
+/// Only a touchdown after the latest begin marker is graded, when the
+/// flight has one.
 pub fn evaluate(challenge: &Challenge, a: &Analysis) -> Attempt {
     let mut checks = vec![aircraft_check(challenge, a)];
-    let graded = landing(challenge, a, &mut checks);
+    let marker = marker(a);
+    let after = marker.as_ref().map(|m| SimTime::from_secs_f64(m.begin_s));
+    let graded = landing(challenge, a, after, &mut checks);
     Attempt {
         challenge: challenge.id.clone(),
         challenge_version: challenge.version,
+        aircraft: Flown {
+            icao: a.selection.icao.clone(),
+            class: a.selection.class.map(|k| k.to_string()),
+        },
+        marker,
         valid: graded.is_some() && checks.iter().all(|k| k.ok),
         checks,
         gate_s: graded.as_ref().map(|g| g.gate.as_secs_f64()),
@@ -84,14 +117,41 @@ pub fn aircraft_check(c: &Challenge, a: &Analysis) -> Check {
     check("aircraft", class_ok && type_ok, detail)
 }
 
-/// Finds the landing, adds the checks on it and scores it.
-fn landing(c: &Challenge, a: &Analysis, checks: &mut Vec<Check>) -> Option<Graded> {
+/// The latest begin marker (events are in time order) and the first end
+/// marker of the same attempt after it.
+fn marker(a: &Analysis) -> Option<Marker> {
+    let markers = a.flight.events.iter().filter_map(|(t, e)| match e {
+        SimEvent::Attempt(m) => Some((*t, m)),
+        _ => None,
+    });
+    let (begin, m) = markers
+        .clone()
+        .rfind(|(_, m)| m.phase == AttemptPhase::Begin)?;
+    let end = markers
+        .filter(|(t, e)| *t >= begin && e.phase == AttemptPhase::End && e.reference == m.reference)
+        .map(|(t, _)| t)
+        .next();
+    Some(Marker {
+        reference: m.reference.clone(),
+        begin_s: begin.as_secs_f64(),
+        end_s: end.map(SimTime::as_secs_f64),
+    })
+}
+
+/// Finds the landing after `after`, adds the checks on it and scores it.
+fn landing(
+    c: &Challenge,
+    a: &Analysis,
+    after: Option<SimTime>,
+    checks: &mut Vec<Check>,
+) -> Option<Graded> {
     let (flight, track) = (&a.flight, &a.track);
     let on_runway = |icao: &str, runway: &str| {
         icao.eq_ignore_ascii_case(&c.airport) && runway.eq_ignore_ascii_case(&c.runway)
     };
     let found = a.touchdowns.iter().enumerate().find(|(_, td)| {
         !td.bounce
+            && after.is_none_or(|t| td.t >= t)
             && td
                 .runway
                 .as_ref()

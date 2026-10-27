@@ -121,6 +121,21 @@ pub fn fly_to(
     duration_s: f64,
     script: impl Fn(f64) -> Pt,
 ) -> (Flight, Track) {
+    let at_start: Vec<_> = events.iter().map(|e| (0.0, e.clone())).collect();
+    let journal = journal(&at_start, weight_lb, duration_s, script);
+    let flight = Flight::read(&journal[..]).unwrap();
+    let track = Track::new(&flight).unwrap();
+    (flight, track)
+}
+
+/// The journal `fly_to` analyses, with each event recorded before the
+/// first frame at or after its time (s from the start).
+pub fn journal(
+    events: &[(f64, SimEvent)],
+    weight_lb: f64,
+    duration_s: f64,
+    script: impl Fn(f64) -> Pt,
+) -> Vec<u8> {
     let mut recorder = Recorder::new(&Lfl::V1, Vec::new()).unwrap();
     let columns: HashMap<_, _> = recorder
         .acquisition()
@@ -129,13 +144,14 @@ pub fn fly_to(
         .enumerate()
         .map(|(i, c)| (c.simvar, i))
         .collect();
-    for e in events {
-        recorder.record(&Telemetry::Event(e.clone())).unwrap();
-    }
+    let mut events = events.iter().peekable();
     let frame = LocalFrame::new(START.0, START.1);
     let (mut east, mut north) = (0.0, 0.0);
     for k in 0..=(duration_s * FRAME_HZ) as usize {
         let t = k as f64 / FRAME_HZ;
+        while let Some((_, e)) = events.next_if(|(at, _)| *at <= t) {
+            recorder.record(&Telemetry::Event(e.clone())).unwrap();
+        }
         let p = script(t);
         let (sin, cos) = p.track.to_radians().sin_cos();
         let step_m = p.speed * KT_MS / FRAME_HZ;
@@ -176,9 +192,7 @@ pub fn fly_to(
         }
         recorder.record(&Telemetry::Frame(raw)).unwrap();
     }
-    let flight = Flight::read(&recorder.into_inner()[..]).unwrap();
-    let track = Track::new(&flight).unwrap();
-    (flight, track)
+    recorder.into_inner()
 }
 
 /// Runway 20 whose threshold lies `along_m` behind where the stable
