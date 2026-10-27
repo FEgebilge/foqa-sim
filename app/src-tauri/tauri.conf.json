@@ -22,17 +22,50 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": {
+        "default-src": "'self'",
+        "script-src": "'self'",
+        "style-src": "'self' 'unsafe-inline'",
+        "img-src": "'self' data: blob: https://tiles.openfreemap.org",
+        "font-src": "'self' data:",
+        "worker-src": "'self' blob:",
+        "child-src": "blob:",
+        "connect-src": "'self' ipc: http://ipc.localhost https://tiles.openfreemap.org"
+      }
     }
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": [
+      "nsis"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.ico"
-    ]
+    ],
+    "resources": {
+      "../../msfs-panel/out/Packages/foqa-sim-panel": "packages/foqa-sim-panel",
+      "../../msfs-panel/out/Packages/foqa-sim-efb": "packages/foqa-sim-efb"
+    },
+    "publisher": "Ege Bilge",
+    "copyright": "Copyright (c) 2026 Ege Bilge",
+    "license": "Apache-2.0",
+    "shortDescription": "Flight-data debrief for MSFS flights",
+    "category": "Utility",
+    "windows": {
+      "webviewInstallMode": {
+        "type": "embedBootstrapper"
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "installerHooks": "./windows/hooks.nsh",
+        "displayLanguageSelector": false,
+        "languages": [
+          "English"
+        ]
+      }
+    }
   }
 }

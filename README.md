@@ -16,7 +16,7 @@ recording, never on live sim state). Everything runs locally; nothing leaves you
 ## What you get
 
 - **Recording**: automatic, starts and stops with the sim's flights. A 1 h flight is about 1.8 MB.
-- **Debrief**: phase timeline, charts with reference lines, landing card with reference bands,
+- **Debrief**: phase timeline, charts with reference lines, landing card with references and sim comfort bands,
   runway diagram, map synced to the charts, events in plain language with what to do about them.
 - **Rules**: 21 rules in YAML (`rules/core.yaml`), per-aircraft limits in `profiles/*.yaml`
   (C172, 737-8, 737-800, CJ4, Longitude so far).
@@ -25,10 +25,11 @@ recording, never on live sim state). Everything runs locally; nothing leaves you
 
 ## Requirements
 
-- Windows 10/11, MSFS 2024
-- [MSFS 2024 SDK](https://docs.flightsimulator.com/msfs2024/html/1_Introduction/SDK_Overview.htm)
-  (for `SimConnect.dll`; looked up in `MSFS2024_SDK`, else `C:\MSFS 2024 SDK`)
-- Rust (stable, MSVC toolchain), Node.js 22+
+- Windows 10/11, MSFS 2024,
+  [VC++ 2015-2022 x64 redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe)
+- To build: [MSFS 2024 SDK](https://docs.flightsimulator.com/msfs2024/html/1_Introduction/SDK_Overview.htm)
+  (its static `SimConnect.lib` is linked in; looked up in `MSFS2024_SDK`, else `C:\MSFS 2024 SDK`),
+  Rust (stable, MSVC toolchain), Node.js 22+
 
 ## Run it
 
@@ -52,6 +53,7 @@ cargo run -p cli --bin fdm -- debrief <flight.fqz> --json  # the app's Debrief J
 cargo run -p cli --bin fdm -- analyze <flight> [--rules my.yaml]
 cargo run -p cli --bin fdm -- export <flight> [out_dir]    # Parquet
 cargo run -p cli --bin fdm -- compact <file|dir>           # .fqj -> .fqz
+cargo run -p cli --bin fdm -- list <dir>                   # the app's flight list (index.json)
 cargo run -p capture --bin foqa-rec                        # headless recorder
 ```
 
@@ -60,7 +62,7 @@ cargo run -p capture --bin foqa-rec                        # headless recorder
 ```
 crates/
   fdm-core    parameter list (LFL), units, signals, geo
-  sim-link    SimConnect bindings (hand-written FFI, DLL loaded at runtime)
+  sim-link    SimConnect bindings (hand-written FFI, statically linked)
   recorder    acquisition, journal (.fqj) and compact (.fqz) formats
   analyzer    phases, derived VS, touchdowns, runway matching, live tracking
   rules       rule language, engine, aircraft profiles
@@ -77,13 +79,13 @@ docs/         formats and contracts
 
 Docs worth reading first: [format.md](docs/format.md) (recording formats),
 [rules.md](docs/rules.md) (rule language), [debrief-api.md](docs/debrief-api.md)
-(backend ↔ UI contract), [ingame-panel-v2.md](docs/ingame-panel-v2.md) (app ↔ sim panel).
+(backend ↔ UI contract), [ingame-panel.md](docs/ingame-panel.md) (app ↔ sim panel).
 
 ## Development
 
 ```powershell
 cargo fmt --all --check
-cargo clippy --workspace --all-targets -- -D warnings
+cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace
 npm --prefix app run lint
 npm --prefix app run build

@@ -1,9 +1,10 @@
 import { useSyncExternalStore } from "react";
 
-export type Route = { screen: "flights" } | { screen: "debrief"; id: string };
+export type Route = { screen: "flights" } | { screen: "setup" } | { screen: "debrief"; id: string };
 
-/** Hash routes, so the Tauri webview and a static build need no server rewrites: #/ and #/flight/<id>. */
+/** Hash routes, so the Tauri webview and a static build need no server rewrites: #/, #/setup and #/flight/<id>. */
 function parse(hash: string): Route {
+  if (hash === SETUP_HREF) return { screen: "setup" };
   const match = /^#\/flight\/(.+)$/.exec(hash);
   return match ? { screen: "debrief", id: decodeURIComponent(match[1]!) } : { screen: "flights" };
 }
@@ -18,6 +19,8 @@ export function useRoute(): Route {
   return parse(hash);
 }
 
+export const SETUP_HREF = "#/setup";
 export const flightHref = (id: string) => `#/flight/${encodeURIComponent(id)}`;
 export const openFlight = (id: string) => { window.location.hash = flightHref(id).slice(1); };
 export const openFlights = () => { window.location.hash = "/"; };
+export const openSetup = () => { window.location.hash = SETUP_HREF.slice(1); };

@@ -1,19 +1,18 @@
 //! The commands of `docs/debrief-api.md` and the state they share with the
 //! recorder.
 
-use std::cmp::Reverse;
-use std::collections::HashMap;
-use std::fs;
 use std::io;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::JoinHandle;
-use std::time::SystemTime;
 
-use ::debrief::{Debrief, FlightSummary, RecorderStatus, Station, StorageUsage};
+use ::debrief::{Debrief, FlightSummary, Index, RecorderStatus, Station, StorageUsage};
 use capture::Stopper;
-use tauri::State;
+use tauri::{AppHandle, State};
+use tauri_plugin_dialog::DialogExt;
+
+use crate::setup::{Setup, SetupStatus};
 
 /// What the commands, the tray and the recorder thread share.
 pub struct Shared {
@@ -24,10 +23,9 @@ pub struct Shared {
     pub status: Mutex<RecorderStatus>,
     pub stopper: Stopper,
     pub recorder: Mutex<Option<JoinHandle<()>>>,
-    /// Analysed summaries by journal, valid while its modification time is
-    /// unchanged, so listing re-analyses only new or growing flights.
-    /// `None`: nothing to analyse in it (yet).
-    summaries: Mutex<HashMap<PathBuf, (SystemTime, Option<FlightSummary>)>>,
+    pub setup: Setup,
+    /// The flight list, analysed once per flight file; the recorder's.
+    index: Arc<Index>,
 }
 
 impl Shared {
@@ -35,15 +33,18 @@ impl Shared {
         station: Arc<Station>,
         dir: PathBuf,
         stopper: Stopper,
+        index: Arc<Index>,
         recorder: JoinHandle<()>,
+        setup: Setup,
     ) -> Self {
         Self {
             station,
-            dir,
             status: Mutex::new(RecorderStatus::WaitingForSim),
             stopper,
             recorder: Mutex::new(Some(recorder)),
-            summaries: Mutex::default(),
+            index,
+            dir,
+            setup,
         }
     }
 
@@ -53,24 +54,12 @@ impl Shared {
     }
 
     /// Every stored flight in the folder, the most recently written first.
-    fn summaries(&self) -> Vec<FlightSummary> {
-        let mut journals: Vec<(SystemTime, PathBuf)> = ::debrief::flight_files(&self.dir)
-            .into_iter()
-            .filter_map(|p| Some((fs::metadata(&p).ok()?.modified().ok()?, p)))
-            .collect();
-        journals.sort_by_key(|j| Reverse(j.0));
-        let mut cache = lock(&self.summaries);
-        journals
-            .into_iter()
-            .filter_map(|(modified, path)| match cache.get(&path) {
-                Some((at, summary)) if *at == modified => summary.clone(),
-                _ => {
-                    let summary = self.station.open(&path).ok().map(|a| a.summary());
-                    cache.insert(path, (modified, summary.clone()));
-                    summary
-                }
-            })
-            .collect()
+    pub fn summaries(&self) -> Vec<FlightSummary> {
+        self.index.summaries(&self.station)
+    }
+
+    fn setup_status(&self) -> SetupStatus {
+        self.setup.status(&lock(&self.status), &self.dir)
     }
 
     /// The stored file of a flight id. Ids are file stems from `list_flights`;
@@ -129,4 +118,66 @@ pub fn open_flights_folder(shared: State<'_, Arc<Shared>>) -> Result<(), String>
 #[tauri::command]
 pub fn storage_usage(shared: State<'_, Arc<Shared>>) -> StorageUsage {
     ::debrief::storage_usage(&shared.dir)
+}
+
+/// Runs a fix off the IPC thread, then checks again.
+async fn fix(
+    shared: State<'_, Arc<Shared>>,
+    f: impl FnOnce(&Setup) -> Result<(), String> + Send + 'static,
+) -> Result<SetupStatus, String> {
+    let shared = Arc::clone(&shared);
+    blocking(move || {
+        f(&shared.setup)?;
+        Ok(shared.setup_status())
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn setup_status(shared: State<'_, Arc<Shared>>) -> Result<SetupStatus, String> {
+    fix(shared, |_| Ok(())).await
+}
+
+#[tauri::command]
+pub async fn setup_install(
+    package: String,
+    shared: State<'_, Arc<Shared>>,
+) -> Result<SetupStatus, String> {
+    fix(shared, move |setup| setup.install(&package)).await
+}
+
+#[tauri::command]
+pub async fn setup_remove(
+    package: String,
+    shared: State<'_, Arc<Shared>>,
+) -> Result<SetupStatus, String> {
+    fix(shared, move |setup| setup.remove(&package)).await
+}
+
+#[tauri::command]
+pub async fn setup_use_community(
+    path: Option<PathBuf>,
+    shared: State<'_, Arc<Shared>>,
+) -> Result<SetupStatus, String> {
+    fix(shared, move |setup| setup.use_community(path.as_deref())).await
+}
+
+/// Asks for the Community folder; a cancelled dialog changes nothing.
+#[tauri::command]
+pub async fn setup_pick_community(
+    app: AppHandle,
+    shared: State<'_, Arc<Shared>>,
+) -> Result<SetupStatus, String> {
+    fix(shared, move |setup| {
+        let picked = app
+            .dialog()
+            .file()
+            .set_title("MSFS 2024 Community folder")
+            .blocking_pick_folder();
+        match picked {
+            Some(dir) => setup.use_community(Some(&dir.into_path().map_err(|e| e.to_string())?)),
+            None => Ok(()),
+        }
+    })
+    .await
 }

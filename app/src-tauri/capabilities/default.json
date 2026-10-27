@@ -1,7 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "The debrief window: app commands and events, notifications.",
+  "description": "The debrief window: app commands and events, notifications, start-with-Windows toggle.",
   "windows": ["main"],
-  "permissions": ["core:default", "notification:default"]
+  "permissions": ["core:default", "notification:default",
+    "autostart:allow-enable", "autostart:allow-disable", "autostart:allow-is-enabled"]
 }

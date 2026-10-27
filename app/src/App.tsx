@@ -1,12 +1,19 @@
-import { useCallback } from "react";
+import { useCallback, useEffect } from "react";
+import { PackageCheck, TriangleAlert } from "lucide-react";
+import { Badge } from "@ui/components/badge/badge";
+import { Button } from "@ui/components/button/button";
+import { Tooltip } from "@ui/components/tooltip/tooltip";
 import { ThemeSwitch } from "@ui/components/theme-switch/theme-switch";
+import { api } from "./api";
+import { AutostartToggle } from "./components/AutostartToggle";
 import { DebriefScreen } from "./components/debrief/DebriefScreen";
 import { FlightsScreen } from "./components/flights/FlightsScreen";
 import { RecorderStatusPill } from "./components/RecorderStatusPill";
+import { SetupScreen } from "./components/setup/SetupScreen";
 import { measured, number } from "./lib/format";
-import { flightHref, openFlight, useRoute } from "./lib/route";
+import { flightHref, openFlight, openSetup, SETUP_HREF, useRoute } from "./lib/route";
 import { useNotify, useTheme } from "./lib/context";
-import { useBackendEvent, useRecorderStatus } from "./lib/use-backend";
+import { useBackendEvent, useRecorderStatus, useSetup } from "./lib/use-backend";
 import type { LandingNotice, OpenFlight } from "./types";
 
 export default function App() {
@@ -14,6 +21,18 @@ export default function App() {
   const recorder = useRecorderStatus();
   const { theme, setTheme } = useTheme();
   const notify = useNotify();
+  const setup = useSetup(recorder?.value.state);
+  const failing = setup.state.status === "ready" ? setup.state.data.checks.filter((check) => check.state === "fail").length : 0;
+
+  // The first time a check fails (a fresh install: no packages in the sim yet), open the Installation screen once.
+  useEffect(() => {
+    if (!failing || route.screen !== "flights") return;
+    try {
+      if (localStorage.getItem(SETUP_SHOWN)) return;
+      localStorage.setItem(SETUP_SHOWN, "1");
+    } catch { return; }
+    openSetup();
+  }, [failing, route.screen]);
 
   // A click on the Windows landing notification asks the app to show that flight.
   useBackendEvent("open-flight", useCallback((payload: OpenFlight) => openFlight(payload.flight_id), []));
@@ -39,17 +58,35 @@ export default function App() {
               <span>/</span><a className="text-fg-2 no-underline hover:text-fg" href="#/">Flights</a><span>/</span>
               <a className="readout text-fg no-underline" href={flightHref(route.id)} aria-current="page">{route.id}</a>
             </nav>
+          ) : route.screen === "setup" ? (
+            <nav aria-label="Breadcrumb" className="hidden items-center gap-2 text-sm text-fg-3 sm:flex">
+              <span>/</span><a className="text-fg no-underline" href={SETUP_HREF} aria-current="page">Installation</a>
+            </nav>
           ) : null}
           <div className="ml-auto flex items-center gap-2">
+            {failing ? (
+              <a href={SETUP_HREF} className="no-underline" aria-label={`${failing} installation check${failing > 1 ? "s" : ""} failing`}>
+                <Badge tone="danger" size="sm" icon={<TriangleAlert size={12} aria-hidden="true" />}>{failing} setup issue{failing > 1 ? "s" : ""}</Badge>
+              </a>
+            ) : null}
             <RecorderStatusPill status={recorder} />
+            <Tooltip content="Installation status" side="bottom">
+              <Button href={SETUP_HREF} variant={route.screen === "setup" ? "secondary" : "ghost"} size="sm" iconOnly label="Installation status" aria-current={route.screen === "setup" ? "page" : undefined}>
+                <PackageCheck size={16} aria-hidden="true" />
+              </Button>
+            </Tooltip>
+            {api.live ? <AutostartToggle /> : null}
             <ThemeSwitch theme={theme} iconOnly onThemeChange={(next) => setTheme(next)} />
           </div>
         </div>
       </header>
-      {route.screen === "debrief" ? <DebriefScreen key={route.id} id={route.id} /> : <FlightsScreen recorder={recorder} />}
+      {route.screen === "debrief" ? <DebriefScreen key={route.id} id={route.id} />
+        : route.screen === "setup" ? <SetupScreen setup={setup} /> : <FlightsScreen recorder={recorder} />}
     </div>
   );
 }
+
+const SETUP_SHOWN = "foqa-sim.setup-shown";
 
 /** Attitude-indicator mark: horizon line and aircraft symbol in a ring. */
 const Logo = () => (

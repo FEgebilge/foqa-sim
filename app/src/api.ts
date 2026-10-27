@@ -2,7 +2,8 @@
 // in a plain browser it reads mock JSON from /mock so the UI can be developed without the app.
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { Debrief, FlightSummary, LandingNotice, OpenFlight, RecorderStatus, StorageUsage } from "./types";
+import { mockSetup } from "./lib/setup-mock";
+import type { Debrief, FlightSummary, LandingNotice, OpenFlight, RecorderStatus, SetupStatus, StorageUsage } from "./types";
 
 export type Unlisten = () => void;
 
@@ -20,6 +21,12 @@ export interface Api {
   recorderStatus(): Promise<RecorderStatus>;
   openFlightsFolder(): Promise<void>;
   storageUsage(): Promise<StorageUsage>;
+  setupStatus(): Promise<SetupStatus>;
+  setupInstall(pkg: string): Promise<SetupStatus>;
+  setupRemove(pkg: string): Promise<SetupStatus>;
+  /** null goes back to the Community folder of the install found. */
+  setupUseCommunity(path: string | null): Promise<SetupStatus>;
+  setupPickCommunity(): Promise<SetupStatus>;
   on<K extends keyof BackendEvents>(event: K, handler: (payload: BackendEvents[K]) => void): Promise<Unlisten>;
 }
 
@@ -30,6 +37,11 @@ const tauriApi: Api = {
   recorderStatus: () => invoke<RecorderStatus>("recorder_status"),
   openFlightsFolder: () => invoke<void>("open_flights_folder"),
   storageUsage: () => invoke<StorageUsage>("storage_usage"),
+  setupStatus: () => invoke<SetupStatus>("setup_status"),
+  setupInstall: (pkg) => invoke<SetupStatus>("setup_install", { package: pkg }),
+  setupRemove: (pkg) => invoke<SetupStatus>("setup_remove", { package: pkg }),
+  setupUseCommunity: (path) => invoke<SetupStatus>("setup_use_community", { path }),
+  setupPickCommunity: () => invoke<SetupStatus>("setup_pick_community"),
   on<K extends keyof BackendEvents>(event: K, handler: (payload: BackendEvents[K]) => void) {
     return listen<BackendEvents[K]>(event, (message) => handler(message.payload));
   },
@@ -78,6 +90,7 @@ const mockApi: Api = {
     const flights = await firstJson<FlightSummary[]>(mockFiles("flights.json"));
     return { flights: flights.length, bytes: flights.length * 1_800_000, folder: "Documents\\FOQA-Sim\\flights" };
   },
+  ...mockSetup(params.get("setup")),
   on: async () => () => {},
 };
 

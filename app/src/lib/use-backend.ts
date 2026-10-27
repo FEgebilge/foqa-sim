@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, type BackendEvents } from "../api";
-import type { Debrief, FlightSummary, RecorderStatus } from "../types";
+import type { Debrief, FlightSummary, RecorderStatus, SetupStatus } from "../types";
 
 export type Load<T> = { status: "loading" } | { status: "ready"; data: T } | { status: "error"; message: string };
 
@@ -62,3 +62,18 @@ export function useRecorderStatus() {
   useBackendEvent("recorder-status", onStatus);
   return status;
 }
+
+/** The installation checks, run again whenever the recorder's state changes; `fix` runs one fix and shows the checks it returns. */
+export function useSetup(recorder: RecorderStatus["state"] | undefined) {
+  const load = useCallback(() => api.setupStatus(), [recorder]); // eslint-disable-line react-hooks/exhaustive-deps
+  const result = useLoad(load);
+  const { setState } = result;
+  const [pending, setPending] = useState<string | null>(null);
+  const fix = useCallback((key: string, run: () => Promise<SetupStatus>) => {
+    setPending(key);
+    return run().then((data) => setState({ status: "ready", data })).finally(() => setPending(null));
+  }, [setState]);
+  return { ...result, pending, fix };
+}
+
+export type Setup = ReturnType<typeof useSetup>;

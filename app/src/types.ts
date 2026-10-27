@@ -38,9 +38,12 @@ export interface RunwayFix {
   cross_m: number;
   lda_m: number;
   tdz_m: number;
+  aiming_point_m: number;
   in_tdz: boolean;
   long_landing: boolean;
   short_landing: boolean;
+  /** "In TDZ", "Long" or "Short". */
+  zone: string;
 }
 
 export interface Touchdown {
@@ -72,10 +75,8 @@ export interface FlightEvent {
   /** Plain-language consequence and technique, from the rule. */
   why_it_matters?: string;
   advice?: string;
-  /** Context at `peak_s`: IAS, flap angle and the profile's VFE there. */
-  ias_kt?: number;
-  flap_deg?: number;
-  vfe_kt?: number;
+  /** The event in words, e.g. "111 kt at flaps 12°, limit 85 kt". */
+  detail?: string;
 }
 
 export type SeriesValues = (number | null)[];
@@ -111,8 +112,22 @@ export interface Airport {
   runways: { width_m: number; ends: RunwayEnd[] }[];
 }
 
+/** A type-profile value with the document it comes from. */
+export interface Sourced {
+  value: number;
+  source: string;
+  note?: string;
+}
+
 export interface Debrief {
-  flight: FlightSummary & { lfl_version: number; profile: string; class?: "light" | "transport"; damaged_at?: number };
+  flight: FlightSummary & {
+    lfl_version: number;
+    profile: string;
+    class?: "light" | "transport";
+    /** The profile's values by rule name, e.g. `hard_landing_g`, `tail_landing_pitch`. */
+    profile_limits?: Record<string, Sourced>;
+    damaged_at?: number;
+  };
   phases: PhaseSpan[];
   touchdowns: Touchdown[];
   events: FlightEvent[];
@@ -136,4 +151,35 @@ export interface StorageUsage {
   flights: number;
   bytes: number;
   folder: string;
+}
+
+export type CheckState = "pass" | "warn" | "fail";
+
+export interface SetupFix {
+  action: "install" | "remove" | "pick_community";
+  package?: string;
+  label: string;
+}
+
+export interface SetupCheck {
+  id: string;
+  title: string;
+  state: CheckState;
+  detail: string;
+  paths?: string[];
+  files?: string[];
+  fixes?: SetupFix[];
+}
+
+export interface SimInstall {
+  store: "ms_store" | "steam";
+  user_cfg: string;
+  community: string;
+}
+
+export interface SetupStatus {
+  checks: SetupCheck[];
+  sims: SimInstall[];
+  community: string | null;
+  choice: "found" | "install" | "folder";
 }

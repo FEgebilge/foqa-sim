@@ -7,6 +7,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod commands;
+mod setup;
 
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver};
@@ -17,6 +18,7 @@ use ::debrief::{LandingNotice, RecorderStatus, Station};
 use capture::{Happening, Service};
 use commands::{Shared, lock};
 use serde::Serialize;
+use setup::Setup;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, WindowEvent, Wry};
@@ -34,12 +36,23 @@ fn main() {
             show(app, None)
         }))
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_dialog::init())
+        // Off until the user enables it (`plugin:autostart|enable`).
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .invoke_handler(tauri::generate_handler![
             commands::list_flights,
             commands::debrief,
             commands::recorder_status,
             commands::open_flights_folder,
             commands::storage_usage,
+            commands::setup_status,
+            commands::setup_install,
+            commands::setup_remove,
+            commands::setup_use_community,
+            commands::setup_pick_community,
         ])
         .setup(|app| {
             let station = Arc::new(Station::core()?);
@@ -47,13 +60,17 @@ fn main() {
             // FOQA_RAW=1 also keeps raw captures, to replay through a changed chain.
             let service = Service::new(dir.clone(), Arc::clone(&station))?
                 .raw(std::env::var_os("FOQA_RAW").is_some());
-            let stopper = service.stopper();
+            let (stopper, index) = (service.stopper(), service.index());
             let (tx, rx) = mpsc::channel();
             let recorder = thread::Builder::new()
                 .name("recorder".into())
                 .spawn(move || service.run(tx))?;
-            let shared = Arc::new(Shared::new(station, dir, stopper, recorder));
+            let setup = Setup::new(app.path().app_config_dir()?, app.path().resource_dir().ok());
+            let shared = Arc::new(Shared::new(station, dir, stopper, index, recorder, setup));
             app.manage(Arc::clone(&shared));
+            // Brings the flight list's index up to date before it is asked for.
+            let warm = Arc::clone(&shared);
+            thread::spawn(move || warm.summaries());
 
             let handle = app.handle().clone();
             app.notification().on_action(move |action| {
@@ -122,7 +139,7 @@ fn notify(app: &AppHandle, notice: &LandingNotice) {
         } else {
             String::new()
         };
-        format!("{:?}: {}{more}", e.level.0, e.title)
+        format!("{:?}: {}{more}", e.level, e.title)
     });
     let shown = app
         .notification()
