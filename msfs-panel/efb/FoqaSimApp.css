@@ -100,3 +100,31 @@
 .foqa.history .mlost.lvl-medium { background: var(--medium); }
 .foqa.history .mlost.lvl-high { background: var(--high); }
 .foqa.history .mtop { margin-top: 8px; font-size: 15px; color: var(--secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Challenges tab (foqa-challenges.js) and the attempt strip at tablet scale */
+.foqa-efb .foqa .strip { padding: 10px 12px; }
+.foqa-efb .foqa .strip .stext { font-size: 16px; }
+.foqa.challenges .cstrip { flex-shrink: 0; }
+.foqa.challenges .ccard {
+    margin-top: 8px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--surface); cursor: pointer;
+}
+.foqa.challenges .ccard:hover { background: var(--surface-2); }
+.foqa.challenges .crow, .foqa.challenges .bhead { display: flex; align-items: baseline; }
+.foqa.challenges .ctitle, .foqa.challenges .btitle { flex: 1 1 auto; min-width: 0; font-family: var(--bold); }
+.foqa.challenges .cwhere { margin-left: 10px; font-family: var(--mono); color: var(--secondary); white-space: nowrap; }
+.foqa.challenges .csub, .foqa.challenges .clast { margin-top: 3px; font-size: 15px; color: var(--muted); }
+.foqa.challenges .clast { color: var(--secondary); font-family: var(--mono); }
+.foqa.challenges .bhead { margin-top: 8px; }
+.foqa.challenges .bhead .btn { margin-right: 10px; }
+.foqa.challenges .bline { margin-top: 6px; font-size: 16px; color: var(--secondary); }
+.foqa.challenges .check {
+    display: flex; margin-top: 6px; padding: 8px 10px; border-left: 3px solid var(--muted);
+    background: var(--surface); border-radius: 4px; font-size: 16px;
+}
+.foqa.challenges .check.ok { border-left-color: var(--ok); }
+.foqa.challenges .check.warn { border-left-color: var(--medium); }
+.foqa.challenges .check.fail { border-left-color: var(--high); }
+.foqa.challenges .cname { width: 96px; flex-shrink: 0; color: var(--muted); }
+.foqa.challenges .ctext { flex: 1 1 auto; min-width: 0; }
+.foqa.challenges .cfix { display: block; margin-top: 2px; color: var(--muted); }

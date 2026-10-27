@@ -33,7 +33,7 @@
     overflow: hidden;
 }
 .foqa.short { --big: 22px; padding: 6px 8px; }
-.foqa .top, .foqa .tabs, .foqa .flash-slot, .foqa .toast-slot { flex-shrink: 0; }
+.foqa .top, .foqa .tabs, .foqa .flash-slot, .foqa .strip-slot, .foqa .toast-slot { flex-shrink: 0; }
 .foqa .body { flex: 1 1 auto; min-height: 0; overflow-x: hidden; overflow-y: auto; padding: 0 3px; }
 .foqa .body::-webkit-scrollbar { width: 6px; }
 .foqa .body::-webkit-scrollbar-track { background: transparent; }
@@ -199,3 +199,17 @@
 .foqa .lvl-low { border-top-color: var(--low); border-left-color: var(--low); }
 .foqa .lvl-advisory { border-top-color: var(--advisory); border-left-color: var(--advisory); }
 .foqa .lvl-none { border-top-color: var(--ok); border-left-color: var(--ok); }
+
+/* Attempt strip (foqa-strip.js): the challenge attempt in one line, under the board */
+.foqa .strip {
+    display: flex; align-items: center; margin-top: 6px; padding: 5px 8px;
+    border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 4px;
+    background: var(--surface);
+}
+.foqa .strip.ok { border-left-color: var(--ok); }
+.foqa .strip.warn { border-left-color: var(--medium); }
+.foqa .strip.bad { border-left-color: var(--high); }
+.foqa .strip.stage-abandoned, .foqa .strip.stage-failed_start { border-left-color: var(--muted); }
+.foqa .strip .stext { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 12px; }
+.foqa .strip .btn { margin-left: 6px; }
+.foqa .strip .sbusy { flex-shrink: 0; margin-left: 6px; color: var(--muted); font-size: 12px; }

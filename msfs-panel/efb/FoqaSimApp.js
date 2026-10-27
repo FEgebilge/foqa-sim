@@ -1,7 +1,8 @@
 // MSFS 2024 EFB glue: registers the FOQA-Sim tablet app with the EFB OS and
-// shows two tabs, Live (foqa-board.js) and Flights (foqa-history.js), over
-// one Comm Bus listener. build.ps1 puts both ahead of this file in one
-// script. Plain JS against the OS's globals: window.EFB_API (the app
+// shows three tabs, Live (foqa-board.js with the attempt strip,
+// foqa-strip.js), Challenges (foqa-challenges.js) and Flights
+// (foqa-history.js), over one Comm Bus listener. build.ps1 puts them ahead
+// of this file in one script. Plain JS against the OS's globals: window.EFB_API (the app
 // container) and msfssdk (FSComponent, DisplayComponent, Subject).
 (function () {
     "use strict";
@@ -31,14 +32,18 @@
         };
     }
 
-    // Tabs over the two views; the history asks for the list when shown.
+    // Tabs over the views; Challenges and the history ask the app when shown.
     function Shell(root, bus) {
         var self = this;
         root.innerHTML = '<div class="efb-tabs"><span class="efb-tab" data-tab="live">Live</span>' +
+            '<span class="efb-tab" data-tab="challenges">Challenges</span>' +
             '<span class="efb-tab" data-tab="flights">Flights</span></div>' +
-            '<div class="efb-pane" data-pane="live"></div><div class="efb-pane" data-pane="flights"></div>';
+            '<div class="efb-pane" data-pane="live"></div><div class="efb-pane" data-pane="challenges"></div>' +
+            '<div class="efb-pane" data-pane="flights"></div>';
         this.root = root;
         this.board = FoqaSim.attach(root.querySelector('[data-pane="live"]'), bus);
+        this.challenges = FoqaChallenges.attach(root.querySelector('[data-pane="challenges"]'), bus, this.board.strip);
+        this.board.onAck(function (ack) { self.challenges.onAck(ack); });
         this.history = FoqaHistory.attach(root.querySelector('[data-pane="flights"]'), bus);
         FoqaWeather.attach(bus);   // idle until the app sends set_weather
         root.querySelector(".efb-tabs").addEventListener("click", function (e) {
@@ -54,6 +59,8 @@
             el.classList.toggle("on", (el.getAttribute("data-tab") || el.getAttribute("data-pane")) === tab);
         });
         if (tab === "flights") this.history.show();
+        if (tab === "challenges") this.challenges.show();
+        else this.challenges.hide();
     };
 
     // What the OS drives: onOpen once, onResume/onPause on app switches,
@@ -68,8 +75,8 @@
         onAfterRender() { this.shell = new Shell(this.ref.instance, this.props.commBus); }
         onOpen() {}
         onClose() {}
-        onResume() { if (this.shell.tab === "flights") this.shell.history.show(); }
-        onPause() {}
+        onResume() { this.shell.show(this.shell.tab); }
+        onPause() { this.shell.challenges.hide(); }
         onUpdate() {}
         routeGamepadInteractionEvent() {}
         handlePageKeyAction() {}
