@@ -342,23 +342,30 @@ fn utf16(le: &[u8]) -> String {
     String::from_utf16_lossy(&units)
 }
 
-/// Adds `package` to the list file, or drops it; one absolute path per line, no
-/// duplicates. UTF-16LE with a BOM, which the uninstaller reads (windows/hooks.nsh).
-pub fn record(list: &Path, package: &Path, installed: bool) -> io::Result<()> {
+/// The folders in the list file `record` keeps; none without the file.
+fn recorded(list: &Path) -> io::Result<Vec<String>> {
     let text = match fs::read(list) {
         Ok(bytes) => utf16(&bytes),
         Err(e) if e.kind() == io::ErrorKind::NotFound => String::new(),
         Err(e) => return Err(e),
     };
-    let package = package.to_string_lossy();
-    let mut lines: Vec<&str> = text
+    Ok(text
         .trim_start_matches(BOM)
         .lines()
         .map(str::trim)
-        .filter(|l| !l.is_empty() && !l.eq_ignore_ascii_case(&package))
-        .collect();
+        .filter(|l| !l.is_empty())
+        .map(str::to_owned)
+        .collect())
+}
+
+/// Adds `package` to the list file, or drops it; one absolute path per line, no
+/// duplicates. UTF-16LE with a BOM, which the uninstaller reads (windows/hooks.nsh).
+pub fn record(list: &Path, package: &Path, installed: bool) -> io::Result<()> {
+    let package = package.to_string_lossy();
+    let mut lines = recorded(list)?;
+    lines.retain(|l| !l.eq_ignore_ascii_case(&package));
     if installed {
-        lines.push(&package);
+        lines.push(package.into_owned());
     }
     if let Some(dir) = list.parent() {
         fs::create_dir_all(dir)?;
@@ -689,6 +696,42 @@ impl Setup {
         record(&self.config.join(INSTALLED), &target, true).map_err(|e| format!("{INSTALLED}: {e}"))
     }
 
+    /// After the app was updated: each package the user installed (it is in
+    /// the list file) that is now missing, as the old version's uninstaller
+    /// removes it, or older than the one the app ships is installed again.
+    /// Not while MSFS runs (its files are in use); the status screen then
+    /// offers the update. The packages tried, and how it went.
+    pub fn refresh(&self) -> Vec<(&'static str, Result<(), String>)> {
+        let due = self.refreshable();
+        if due.is_empty() || sim_running() {
+            return Vec::new();
+        }
+        due.into_iter()
+            .map(|name| (name, self.install(name)))
+            .collect()
+    }
+
+    /// The packages `refresh` installs again: listed, and missing or older.
+    fn refreshable(&self) -> Vec<&'static str> {
+        let listed = recorded(&self.config.join(INSTALLED)).unwrap_or_default();
+        PACKAGES
+            .into_iter()
+            .map(|(name, _)| name)
+            .filter(|&name| {
+                let (Ok(target), Ok(bundled)) = (self.target(name), self.bundled(name)) else {
+                    return false;
+                };
+                let path = target.to_string_lossy();
+                let stale = match (ours(&target), ours(&bundled)) {
+                    (Some(have), Some(want)) => older(&have, &want),
+                    (None, _) => !target.exists(),
+                    _ => false,
+                };
+                stale && listed.iter().any(|l| l.eq_ignore_ascii_case(&path))
+            })
+            .collect()
+    }
+
     /// Removes a package, and what an earlier install left beside it; only ours.
     pub fn remove(&self, name: &str) -> Result<(), String> {
         let (name, _) = package_name(name)?;
@@ -942,6 +985,36 @@ mod tests {
             Path::new(r"C:\MSFS\Community"),
             Path::new(r"C:\MSFS\Community2024")
         ));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn refreshes_only_listed_packages_that_are_missing_or_older() {
+        let root = temp("refresh");
+        let (config, community) = (root.join("config"), root.join("Community"));
+        fs::create_dir_all(&config).unwrap();
+        fs::write(config.join(CHOSEN), community.to_string_lossy().as_ref()).unwrap();
+        let setup = Setup::new(config.clone(), None);
+        let (panel, efb) = (
+            community.join("foqa-sim-panel"),
+            community.join("foqa-sim-efb"),
+        );
+        // Never installed: nothing listed, nothing refreshed.
+        assert!(setup.refreshable().is_empty());
+        // Installed, then removed by the old version's uninstaller.
+        record(&config.join(INSTALLED), &panel, true).unwrap();
+        assert_eq!(setup.refreshable(), ["foqa-sim-panel"]);
+        // Older than the app's, or as new; the EFB app was never installed.
+        let version = |v: &str| {
+            fs::create_dir_all(&panel).unwrap();
+            let json = format!(r#"{{"manufacturer": "{MANUFACTURER}", "package_version": "{v}"}}"#);
+            fs::write(panel.join("manifest.json"), json).unwrap();
+        };
+        version("0.0.1");
+        assert_eq!(setup.refreshable(), ["foqa-sim-panel"]);
+        version(env!("CARGO_PKG_VERSION"));
+        assert!(setup.refreshable().is_empty());
+        assert!(!efb.exists());
         fs::remove_dir_all(root).unwrap();
     }
 
