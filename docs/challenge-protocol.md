@@ -9,10 +9,12 @@ site depends on the protocol, its example fixtures (A11) and the open
 implementer is Pilot Aptitude (Mollymawk `docs/landing-challenges.md`),
 but nothing below names it.
 
-Status: design, nothing implemented. Part A is the wire protocol (what a
-site implements). Part B is the app side (how FOQA-Sim implements the
-client without depending on it). Revised 2026-10-27 after a security and
-a UX review.
+Status: design. Part A is the wire protocol (what a site implements).
+Part B is the app side (how FOQA-Sim implements the client without
+depending on it). Revised 2026-10-27 after a security and a UX review.
+Built (2026-10-28): slices F3 and F4 (`crates/connect`,
+`app/src-tauri/src/connect.rs`, Challenges → Sites); see "Implementation
+notes" at the end. Deep links (F5) and F6 are not built.
 
 ## Principles
 
@@ -502,9 +504,12 @@ msfs-panel/        toolbar panel strip + EFB Challenges tab (B9)
   attempt, Fly again, local grade, history and logs, the in-sim strip
   and EFB tab with local states. The marker and slice features are
   generic (a slice is also a way to share one landing).
-- HTTP: `reqwest` (already in the lock), rustls, 10 s connect / 60 s
-  upload timeouts, redirects off (a redirect to another origin would leak
-  the token).
+- HTTP: `ureq` 3 (blocking, rustls with ring, webpki roots), 10 s
+  connect / 60 s request timeouts, redirects off (a redirect to another
+  origin would leak the token). `reqwest` is in the lock only through
+  Tauri, without a TLS backend or its blocking client; enabling those
+  pulls aws-lc-rs (CMake to build) and a Tokio runtime per client, while
+  every call here is blocking on a worker thread anyway.
 - Commands (added to [debrief-api.md](debrief-api.md) when built). Core:
   `challenge_open_file(path)`, `challenge_preflight(key)`,
   `attempt_create(key)`, `attempt_place(id)`, `attempt_finish(id)`,
@@ -775,3 +780,30 @@ Each slice keeps the app fully usable with no site configured.
   and temperature set by the app, every time; measuring live weather and
   accepting a band is not enough. How the app sets it is under research
   (docs/challenges.md, "What MSFS 2024 allows").
+
+## Implementation notes (F3, F4)
+
+- `crates/connect` depends on no FOQA-Sim crate; the app's `connect`
+  feature (default on) adds it with `open` (system browser). Off
+  (`cargo build -p foqa-sim-app --no-default-features`), the app has no
+  network code for challenges; `cargo tree -i connect` lists only the app.
+- The core joins it through `commands::AttemptHooks` (issue before
+  placing, the pre-flight ranking line) and the attempt change callback
+  (done → upload, abandoned / failed start → site abandon). The core's
+  states and files are unchanged; `site.json` and `site.log.jsonl` sit in
+  the attempt folder (the app keeps attempt folders in its data folder,
+  not `Documents`).
+- Sites come only from the user: Challenges → Sites → Add (deep links are
+  F5). A site's challenge is taken into the library as its exact bytes
+  (checked against `definition_sha256` and by `Challenge::parse`); an
+  attempt at it is issued under the local id, and a definition other
+  than the one issued makes it practice.
+- **Upload until F1:** the attempt's `slice.fqz` when present; until
+  `fdm slice` and the attempt marker exist, the **whole flight's `.fqz`**
+  (more than A5 allows: tail number, aircraft title, the rest of the
+  flight). TODO(F1): upload only the slice.
+- "Allow local sites" is the environment variable
+  `FOQA_ALLOW_LOCAL_SITES=1` until the app has a settings screen; the
+  auto-upload, notifications and links toggles (B3), toasts (B7), the
+  stale-attempt sweep at start-up (B6) and site states in the strip/EFB
+  (B9) are not built yet.

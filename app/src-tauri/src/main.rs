@@ -8,6 +8,8 @@
 
 mod attempts;
 mod commands;
+#[cfg(feature = "connect")]
+mod connect;
 mod library;
 mod setup;
 
@@ -33,20 +35,10 @@ const QUIT_GRACE: Duration = Duration::from_secs(3);
 /// The notification's payload key naming the flight to open on a click.
 const FLIGHT_ID: &str = "flight_id";
 
-fn main() {
-    tauri::Builder::default()
-        // First, so a second launch only brings this one's window up.
-        .plugin(tauri_plugin_single_instance::init(|app, _, _| {
-            show(app, None)
-        }))
-        .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_dialog::init())
-        // Off until the user enables it (`plugin:autostart|enable`).
-        .plugin(tauri_plugin_autostart::init(
-            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-            None,
-        ))
-        .invoke_handler(tauri::generate_handler![
+/// The core commands, and those of the optional modules given.
+macro_rules! handler {
+    ($($extra:path),*) => {
+        tauri::generate_handler![
             commands::list_flights,
             commands::debrief,
             commands::delete_flight,
@@ -68,8 +60,45 @@ fn main() {
             commands::setup_install,
             commands::setup_remove,
             commands::setup_use_community,
-            commands::setup_pick_community,
-        ])
+            commands::setup_pick_community
+            $(, $extra)*
+        ]
+    };
+}
+
+type Commands = fn(tauri::ipc::Invoke<Wry>) -> bool;
+
+fn main() {
+    #[cfg(feature = "connect")]
+    let commands: Commands = handler!(
+        connect::connect_available,
+        connect::sites_list,
+        connect::site_add,
+        connect::site_sign_in,
+        connect::site_sign_in_cancel,
+        connect::site_sign_out,
+        connect::site_remove,
+        connect::site_challenges,
+        connect::site_challenge_take,
+        connect::site_attempts,
+        connect::attempt_upload,
+        connect::site_open
+    );
+    #[cfg(not(feature = "connect"))]
+    let commands: Commands = handler!();
+    tauri::Builder::default()
+        // First, so a second launch only brings this one's window up.
+        .plugin(tauri_plugin_single_instance::init(|app, _, _| {
+            show(app, None)
+        }))
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_dialog::init())
+        // Off until the user enables it (`plugin:autostart|enable`).
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
+        .invoke_handler(commands)
         .setup(|app| {
             let station = Arc::new(Station::core()?);
             let dir = app.path().document_dir()?.join("FOQA-Sim").join("flights");
@@ -87,14 +116,29 @@ fn main() {
             let data = app.path().app_data_dir()?;
             let library = Library::new(data.join("challenges"))?;
             let handle = app.handle().clone();
+            #[cfg(feature = "connect")]
+            let connect =
+                connect::Connect::start(data.clone(), data.join("attempts"), handle.clone())?;
+            #[cfg(feature = "connect")]
+            let site = Arc::clone(&connect);
             let attempts = Attempts::new(data.join("attempts"))?.on_change(move |record| {
                 if let Err(e) = handle.emit("attempt-changed", record) {
                     eprintln!("event not sent: {e}");
                 }
+                #[cfg(feature = "connect")]
+                site.attempt_changed(record);
             });
-            let shared = Arc::new(Shared::new(
+            let shared = Shared::new(
                 station, dir, stopper, index, recorder, setup, sim, library, attempts,
-            ));
+            );
+            #[cfg(feature = "connect")]
+            let shared = shared.with_hooks(Arc::clone(&connect) as Arc<dyn commands::AttemptHooks>);
+            let shared = Arc::new(shared);
+            #[cfg(feature = "connect")]
+            {
+                connect.attach(&shared);
+                app.manage(connect);
+            }
             app.manage(Arc::clone(&shared));
             let recover = Arc::clone(&shared);
             thread::spawn(move || recover.recover());

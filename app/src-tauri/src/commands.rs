@@ -40,6 +40,18 @@ pub struct Shared {
     /// Challenge files the user opened.
     library: Library,
     attempts: Attempts,
+    /// What an optional module adds to an attempt (the site client).
+    hooks: Option<Arc<dyn AttemptHooks>>,
+}
+
+/// Where an optional module joins the attempt lifecycle; the core knows
+/// no site, token or upload (docs/challenge-protocol.md B1).
+pub trait AttemptHooks: Send + Sync {
+    /// After the attempt is created, before the aircraft is placed.
+    fn before_place(&self, record: &Record);
+    /// The pre-flight card's ranking line for library entry `key`, when it
+    /// is not a local file: `(state, text, fix)`.
+    fn ranking(&self, key: &str) -> Option<(&'static str, String, Option<String>)>;
 }
 
 impl Shared {
@@ -66,6 +78,7 @@ impl Shared {
             index,
             dir,
             setup,
+            hooks: None,
         }
     }
 
@@ -106,6 +119,28 @@ impl Shared {
             return Err(format!("no flight {id:?}"));
         }
         ::debrief::flight_path(&self.dir, id).ok_or_else(|| format!("no flight {id:?}"))
+    }
+}
+
+/// What optional modules use.
+#[cfg_attr(not(feature = "connect"), allow(dead_code))]
+impl Shared {
+    pub fn with_hooks(mut self, hooks: Arc<dyn AttemptHooks>) -> Self {
+        self.hooks = Some(hooks);
+        self
+    }
+
+    /// Imports a challenge's exact bytes into the library.
+    pub fn import_challenge(&self, json: &str) -> Result<Entry, String> {
+        self.library.import(json)
+    }
+
+    /// The compact flight file (`.fqz`) an attempt was flown in, once the
+    /// flight is closed and compacted.
+    pub fn compact_flight(&self, attempt_id: &str) -> Option<PathBuf> {
+        let id = self.attempts.get(attempt_id).ok()?.flight_id?;
+        let path = self.flight(&id).ok()?;
+        (path.extension()? == "fqz").then_some(path)
     }
 }
 
@@ -184,7 +219,7 @@ impl Shared {
 
     /// The pre-flight card (protocol B8) and the flight being recorded,
     /// with the sim time it has reached.
-    fn preflight(&self, c: &Challenge) -> (Vec<Line>, Option<(String, Option<f64>)>) {
+    fn preflight(&self, key: &str, c: &Challenge) -> (Vec<Line>, Option<(String, Option<f64>)>) {
         let status = lock(&self.status).clone();
         let load = if c.start.mode == Mode::Teleport {
             "Load a flight in MSFS 2024 at any airport; Place moves you to the start."
@@ -265,7 +300,11 @@ impl Shared {
                 "Set by the challenge (pending in-flight verification).",
             )
         };
-        let ranking = Line::ok("ranking", "Local challenge file: graded here only.");
+        let hooked = self.hooks.as_ref().and_then(|h| h.ranking(key));
+        let ranking = match hooked {
+            Some((state, text, fix)) => Line::new("ranking", state, text, fix.as_deref()),
+            None => Line::ok("ranking", "Local challenge file: graded here only."),
+        };
         let begin = analysis.and_then(|a| a.ok()?.track.t.last().map(|t| t.as_secs_f64()));
         (
             vec![sim, aircraft, weather, ranking],
@@ -290,9 +329,12 @@ impl Shared {
     /// Creates an attempt at `definition` and places it.
     fn start_attempt(&self, key: &str, definition: &str) -> Result<Record, String> {
         let c = Challenge::parse(definition)?;
-        let (lines, flight) = self.preflight(&c);
+        let (lines, flight) = self.preflight(key, &c);
         let (flight_id, begin_s) = flight.ok_or_else(|| lines[0].text.clone())?;
         let record = self.attempts.create(key, definition)?;
+        if let Some(hooks) = &self.hooks {
+            hooks.before_place(&record);
+        }
         let checks: serde_json::Map<_, _> = lines
             .iter()
             .map(|l| (l.name.to_owned(), l.state.into()))
@@ -433,7 +475,7 @@ pub async fn challenge_preflight(
     shared: State<'_, Arc<Shared>>,
 ) -> Result<Vec<Line>, String> {
     let shared = Arc::clone(&shared);
-    blocking(move || Ok(shared.preflight(&shared.library.get(&key)?.0).0)).await
+    blocking(move || Ok(shared.preflight(&key, &shared.library.get(&key)?.0).0)).await
 }
 
 /// Creates an attempt at a library challenge and places the aircraft.
