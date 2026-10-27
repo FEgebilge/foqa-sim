@@ -149,6 +149,11 @@ impl Sites {
         let origin = Origin::parse(input, self.allow_local)?;
         let well_known = discovery::discover(&self.http, &origin)?;
         let old = self.get(origin.as_str());
+        // A refreshed document keeps the session (its tokens, its single
+        // refresh) unless the API moved.
+        let moved = old
+            .as_ref()
+            .is_none_or(|r| r.well_known.api() != well_known.api());
         let record = SiteRecord {
             origin: origin.clone(),
             well_known,
@@ -161,7 +166,9 @@ impl Sites {
             all.retain(|r| r.origin != origin);
             all.push(kept);
         })?;
-        lock(&self.sessions).remove(origin.as_str());
+        if moved {
+            lock(&self.sessions).remove(origin.as_str());
+        }
         self.log(json!({ "event": "site_added", "origin": origin }));
         Ok(record)
     }
@@ -416,6 +423,28 @@ pub(crate) mod tests {
             !text.contains("refresh-1") && !text.contains("access-1"),
             "no secret on disk"
         );
+    }
+
+    #[test]
+    fn a_day_old_document_is_fetched_again_without_dropping_the_session() {
+        let mock = Mock::start(|req, base| match req.path.as_str() {
+            discovery::PATH => Reply::json(200, well_known(base)),
+            _ => Reply::error(404, "not_found"),
+        });
+        let tmp = tempfile::tempdir().unwrap();
+        // The refresh token lives in memory only: a new session would lose it.
+        let s = sites(tmp.path(), Arc::new(MemoryStore::broken()));
+        let origin = s.add(&mock.base).unwrap().origin.as_str().to_owned();
+        let session = s.session(&origin).unwrap();
+        session
+            .accept(&serde_json::from_value(tokens(1)).unwrap())
+            .unwrap();
+        s.save(|all| all[0].fetched_at_ms = 0).unwrap();
+        s.freshen(&origin);
+        assert_eq!(mock.hits(discovery::PATH), 2, "fetched again");
+        assert!(s.get(&origin).unwrap().fetched_at_ms > 0);
+        assert!(Arc::ptr_eq(&session, &s.session(&origin).unwrap()));
+        assert!(s.signed_in(&origin));
     }
 
     #[test]

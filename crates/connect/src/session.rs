@@ -141,7 +141,7 @@ impl Session {
                 (self.log)(
                     json!({ "event": "refresh", "origin": self.origin, "outcome": e.code, "http": e.http, "request_id": request_id }),
                 );
-                self.drop_grant();
+                self.forget(&token);
                 Err(Error::SignedOut)
             }
             Err(e) => Err(e),
@@ -153,6 +153,22 @@ impl Session {
         *lock(&self.access) = None;
         *lock(&self.memory) = None;
         if let Err(e) = self.store.delete(&self.origin) {
+            (self.log)(json!({ "event": "store_unavailable", "origin": self.origin, "error": e }));
+        }
+    }
+
+    /// Forgets the grant whose refresh token `token` was refused; a
+    /// credential stored since (rotated by another session) is kept.
+    fn forget(&self, token: &str) {
+        *lock(&self.access) = None;
+        let mut memory = lock(&self.memory);
+        if memory.as_deref() == Some(token) {
+            *memory = None;
+        }
+        drop(memory);
+        if self.store.get(&self.origin).ok().flatten().as_deref() == Some(token)
+            && let Err(e) = self.store.delete(&self.origin)
+        {
             (self.log)(json!({ "event": "store_unavailable", "origin": self.origin, "error": e }));
         }
     }
@@ -370,6 +386,23 @@ mod tests {
         assert_eq!(s.me(), Err(Error::SignedOut));
         assert_eq!(store.get(&mock.base).unwrap(), None);
         assert!(!s.has_grant());
+    }
+
+    #[test]
+    fn a_refused_refresh_keeps_a_credential_rotated_meanwhile() {
+        let store = Arc::new(MemoryStore::default());
+        let winner = Arc::clone(&store);
+        let mock = Mock::start(move |req, base| {
+            // Another session rotated the token while this one's was in flight.
+            winner.set(base, "refresh-2").unwrap();
+            assert_eq!(req.json()["refresh_token"], "refresh-1");
+            Reply::error(400, "invalid_grant")
+        });
+        store.set(&mock.base, "refresh-1").unwrap();
+        let s = session(&mock, store.clone());
+        assert_eq!(s.me(), Err(Error::SignedOut));
+        assert_eq!(store.get(&mock.base).unwrap().as_deref(), Some("refresh-2"));
+        assert!(s.has_grant(), "the winner's grant is still there");
     }
 
     #[test]
