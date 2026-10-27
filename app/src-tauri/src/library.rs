@@ -58,6 +58,14 @@ impl Library {
         }
         let c = Challenge::parse(json).map_err(|e| plain(&e))?;
         let entry = entry(&c, json);
+        if let Ok((kept, _)) = self.get(&entry.key)
+            && kept.id != c.id
+        {
+            return Err(format!(
+                "A different challenge, `{}`, is already kept under the same name; change this one's id.",
+                kept.id
+            ));
+        }
         fs::write(self.dir.join(format!("{}.json", entry.key)), json).map_err(|e| e.to_string())?;
         Ok(entry)
     }
@@ -230,6 +238,16 @@ mod tests {
         for key in ["../x", "a/b", "A", "", "c:\\x"] {
             assert!(lib.get(key).is_err() && lib.remove(key).is_err(), "{key}");
         }
+    }
+
+    #[test]
+    fn ids_that_share_a_key_do_not_overwrite_each_other() {
+        let (_tmp, lib) = library();
+        let with = |id: &str| JSON.replace(r#""id": "test-20""#, &format!(r#""id": "{id}""#));
+        lib.import(&with("a.b")).unwrap();
+        assert!(lib.import(&with("a_b")).is_err() && lib.import(&with("A-B")).is_err());
+        assert_eq!(lib.get("a-b-v1").unwrap().0.id, "a.b");
+        lib.import(&with("a.b")).unwrap();
     }
 
     #[test]

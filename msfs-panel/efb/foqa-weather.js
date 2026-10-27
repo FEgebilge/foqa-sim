@@ -49,6 +49,8 @@ var FoqaWeather = (function () {
 
     function angDiff(a, b) { var d = Math.abs(a - b) % 360; return d > 180 ? 360 - d : d; }
 
+    function num(v) { return typeof v === "number" && isFinite(v); }
+
     // Spec check; null when fine.
     function validate(spec) {
         if (!spec || typeof spec !== "object") return "no spec";
@@ -56,7 +58,7 @@ var FoqaWeather = (function () {
         if (!Array.isArray(spec.wind) || !spec.wind.length) return "wind needs layers";
         for (var i = 0; i < spec.wind.length; i++) {
             var w = spec.wind[i];
-            if (!w || !isFinite(w.alt_ft) || !isFinite(w.from_deg) || !isFinite(w.kt) || w.kt < 0 || w.from_deg < 0 || w.from_deg > 360) return "bad wind layer " + i;
+            if (!w || !num(w.alt_ft) || !num(w.from_deg) || !num(w.kt) || w.kt < 0 || w.from_deg < 0 || w.from_deg > 360) return "bad wind layer " + i;
         }
         if (spec.qnh_hpa != null && !(spec.qnh_hpa >= 850 && spec.qnh_hpa <= 1085)) return "bad qnh_hpa";
         if (spec.temp_c != null && !(spec.temp_c >= -80 && spec.temp_c <= 60)) return "bad temp_c";

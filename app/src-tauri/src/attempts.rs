@@ -4,8 +4,9 @@
 //! Knows no site, token or upload state; those live in the `connect`
 //! sidecar.
 
+use std::collections::HashSet;
 use std::fs::{self, OpenOptions};
-use std::io::{self, BufRead, BufReader, Write};
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -115,6 +116,8 @@ pub type Grade<'a> = &'a dyn Fn(&Record, &str) -> Result<Attempt, String>;
 pub struct Attempts {
     dir: PathBuf,
     guard: Mutex<()>,
+    /// Attempts being finished and graded right now.
+    grading: Mutex<HashSet<String>>,
     changed: Box<dyn Fn(&Record) + Send + Sync>,
 }
 
@@ -124,6 +127,7 @@ impl Attempts {
         Ok(Self {
             dir,
             guard: Mutex::new(()),
+            grading: Mutex::new(HashSet::new()),
             changed: Box::new(|_| {}),
         })
     }
@@ -324,7 +328,18 @@ impl Attempts {
 
     /// Ends the attempt (`reason`: `stopped`, `finish`, …) and grades it;
     /// an attempt left `finished` by a failed grade is graded again.
+    /// A finish already running for `id` is not repeated: the attempt as it
+    /// stands is returned.
     pub fn finish(&self, id: &str, reason: &str, grade: Grade) -> Result<Record, String> {
+        if !lock(&self.grading).insert(id.to_owned()) {
+            return self.get(id);
+        }
+        let result = self.finish_claimed(id, reason, grade);
+        lock(&self.grading).remove(id);
+        result
+    }
+
+    fn finish_claimed(&self, id: &str, reason: &str, grade: Grade) -> Result<Record, String> {
         let mut record = self.get(id)?;
         if record.state != State::Finished {
             record = self.step(
@@ -412,15 +427,14 @@ impl Attempts {
                             },
                         )
                         .and_then(|r| self.graded(r, Ok(a))),
-                    other => {
-                        if let Err(e) = other {
-                            let _ = self.note(
-                                &id,
-                                "error",
-                                json!({ "during": "recovery", "message": e }),
-                            );
-                        }
-                        self.abandon(&id, "interrupted")
+                    // Graded, but no landing: it never finished.
+                    Ok(_) => self.abandon(&id, "interrupted"),
+                    // Not graded (file locked, flight unreadable): kept for
+                    // the next start-up.
+                    Err(e) => {
+                        let fields = json!({ "during": "recovery", "message": e });
+                        let _ = self.note(&id, "error", fields);
+                        Err(e)
                     }
                 },
             };
@@ -469,7 +483,12 @@ fn write_record(dir: &Path, record: &Record) -> Result<(), String> {
 /// One line `{at, seq, event, …fields}`, after the last; never rewritten.
 fn append(dir: &Path, event: &str, fields: Value) -> Result<(), String> {
     let path = dir.join(LOG);
-    let seq = read_log(dir).len() + 1;
+    let seq = read_log(dir)
+        .iter()
+        .filter_map(|l| l["seq"].as_u64())
+        .max()
+        .unwrap_or(0)
+        + 1;
     // A line cut off by a crash ends there, so this one starts on its own.
     let cut = fs::read(&path).is_ok_and(|b| b.last().is_some_and(|&c| c != b'\n'));
     let mut line = Map::new();
@@ -490,12 +509,10 @@ fn append(dir: &Path, event: &str, fields: Value) -> Result<(), String> {
 
 /// The log's lines; a line cut off by a crash is skipped.
 fn read_log(dir: &Path) -> Vec<Value> {
-    let Ok(file) = fs::File::open(dir.join(LOG)) else {
-        return Vec::new();
-    };
-    let lines = BufReader::new(file).lines().map_while(Result::ok);
-    lines
-        .filter_map(|l| serde_json::from_str(&l).ok())
+    let bytes = fs::read(dir.join(LOG)).unwrap_or_default();
+    bytes
+        .split(|&b| b == b'\n')
+        .filter_map(|l| serde_json::from_slice(l).ok())
         .collect()
 }
 
@@ -503,6 +520,7 @@ fn read_log(dir: &Path) -> Vec<Value> {
 pub(crate) mod tests {
     use super::*;
     use challenge::{Check, Part, Score};
+    use std::thread;
 
     pub(crate) const JSON: &str = r#"{
       "id": "test-20", "version": 1, "title": "Runway 20",
@@ -716,5 +734,51 @@ pub(crate) mod tests {
         write!(file, "{{\"at\":\"2026-").unwrap();
         a.abandon(&r.id, "cancelled").unwrap();
         assert_eq!(events(&a, &r.id), ["created", "abandoned"]);
+    }
+
+    #[test]
+    fn a_failed_grade_at_start_up_keeps_a_landed_attempt() {
+        let (_tmp, a) = attempts();
+        let r = flying(&a, 100.0);
+        a.recover(&|_, _| Err("flight file locked".into()));
+        assert_eq!(a.get(&r.id).unwrap().state, State::Flying);
+        a.recover(&|_, _| Ok(graded(None)));
+        assert_eq!(a.get(&r.id).unwrap().state, State::Abandoned);
+    }
+
+    #[test]
+    fn two_finishes_grade_an_attempt_once() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        let (_tmp, a) = attempts();
+        let r = flying(&a, 100.0);
+        let grades = AtomicU32::new(0);
+        let slow = |_: &Record, _: &str| {
+            grades.fetch_add(1, Ordering::SeqCst);
+            thread::sleep(std::time::Duration::from_millis(300));
+            Ok(graded(Some(400.0)))
+        };
+        thread::scope(|s| {
+            s.spawn(|| a.finish(&r.id, "finish", &slow).unwrap());
+            thread::sleep(std::time::Duration::from_millis(100));
+            s.spawn(|| a.finish(&r.id, "stopped", &slow).unwrap());
+        });
+        assert_eq!(grades.load(Ordering::SeqCst), 1);
+        assert_eq!(a.get(&r.id).unwrap().state, State::Done);
+        assert_eq!(events(&a, &r.id).iter().filter(|e| *e == "done").count(), 1);
+    }
+
+    #[test]
+    fn a_non_utf8_log_line_hides_nothing_and_seq_continues() {
+        let (_tmp, a) = attempts();
+        let r = a.create("test-20-v1", JSON).unwrap();
+        let log = a.folder(&r.id).unwrap().join(LOG);
+        let mut file = OpenOptions::new().append(true).open(&log).unwrap();
+        file.write_all(b"{\"seq\":2,\"x\":\"\xC3\n").unwrap();
+        file.write_all(b"{\"seq\":2,\"event\":\"noted\"}\n")
+            .unwrap();
+        a.abandon(&r.id, "cancelled").unwrap();
+        let lines = read_log(&a.folder(&r.id).unwrap());
+        assert_eq!(events(&a, &r.id), ["created", "noted", "abandoned"]);
+        assert_eq!(lines[2]["seq"], 3);
     }
 }

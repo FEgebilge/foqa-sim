@@ -35,6 +35,9 @@ var spec = { base: "clear", wind: [{ alt_ft: 0, from_deg: 270, kt: 18 }, { alt_f
 assert.strictEqual(W.validate(spec), null);
 assert.ok(W.validate({ base: "clear", wind: [] }));
 assert.ok(W.validate({ base: "storm", wind: spec.wind }));
+assert.ok(W.validate({ base: "clear", wind: [{ alt_ft: null, from_deg: 270, kt: 5 }] }), "null is not a number");
+assert.ok(W.validate({ base: "clear", wind: [{ alt_ft: 0, from_deg: "270", kt: 5 }] }), "a string is not a number");
+assert.ok(W.validate({ base: "clear", wind: [{ alt_ft: 0, from_deg: 270, kt: [] }] }));
 assert.ok(W.validate({ base: 2, wind: [{ alt_ft: 0, from_deg: 400, kt: 1 }] }));
 assert.ok(W.validate({ base: 2, wind: spec.wind, clouds: [{}] }));
 assert.strictEqual(W.validate({ base: 2, wind: spec.wind, clouds: [] }), null);

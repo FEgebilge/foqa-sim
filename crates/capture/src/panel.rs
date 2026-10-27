@@ -279,7 +279,7 @@ pub struct WeatherResult {
 impl WeatherResult {
     /// From the view's JSON, with or without trailing NULs.
     pub fn parse(data: &str) -> Result<Self, String> {
-        let v: Value = serde_json::from_str(data.trim_end_matches(' '))
+        let v: Value = serde_json::from_str(data.trim_end_matches('\0'))
             .map_err(|e| format!("not JSON: {e}"))?;
         if v["v"] != VERSION {
             return Err("unsupported version".into());
@@ -881,7 +881,7 @@ mod tests {
         let ok = r#"{"v":2,"cmd":"weather_result","req":"w1","ok":false,
             "applied":{"wind":[{"alt_ft":0,"from_deg":270,"kt":18}],"qnh_hpa":1013.2},
             "measured":{"wind_dir_deg":268,"wind_kt":17.5},"mismatches":["temp"]}"#;
-        let r = WeatherResult::parse(&format!("{ok}  ")).unwrap();
+        let r = WeatherResult::parse(&format!("{ok}\0\0")).unwrap();
         assert_eq!((r.req.as_str(), r.ok), ("w1", false));
         assert_eq!(r.mismatches, ["temp"]);
         assert_eq!(r.measured.unwrap().wind_kt, Some(17.5));
