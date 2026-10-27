@@ -186,7 +186,8 @@ not carried over.
 The rest of the file is one zstd frame (level 19, with its content
 checksum) around the body below. A frame that fails to decompress, or a
 body that does not decode exactly, is an error: unlike a journal, a compact
-flight is never cut short.
+flight is never cut short. A reader refuses a body past 256 MiB, and
+past 32 MiB for a challenge input (`fdm challenge`, `fdm slice`).
 
 ### Body
 

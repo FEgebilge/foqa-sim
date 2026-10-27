@@ -14,10 +14,13 @@
 //! capture (`.raw.jsonl.gz`), which is first recorded through the on-board
 //! chain in memory. `compact` replaces closed journals, so not while
 //! recording. Without
-//! `--rules`, the built-in core rule set is used.
+//! `--rules`, the built-in core rule set is used. A compact flight given to
+//! `challenge` or `slice` may decompress to 32 MiB at most (a site runs them
+//! on uploads), others to 256 MiB.
 
 use std::error::Error;
 use std::fs;
+use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -215,9 +218,23 @@ fn challenge(def: &Path, path: &Path) -> Result<(), Box<dyn Error>> {
     let challenge = challenge::Challenge::parse(&fs::read_to_string(def)?)?;
     uploadable(path)?;
     let station = Station::core()?;
-    let attempt = challenge::evaluate(&challenge, &open(&station, path)?);
+    let attempt = challenge::evaluate(&challenge, &challenge_input(&station, path)?);
     println!("{}", serde_json::to_string_pretty(&attempt)?);
     Ok(())
+}
+
+/// The records of a challenge input (`challenge`, `slice`): a compact
+/// flight's body held to `recorder::CHALLENGE_MAX_BODY`, not the general cap.
+fn challenge_records(path: &Path) -> std::io::Result<recorder::FlightRecords<impl std::io::Read>> {
+    let file = BufReader::new(fs::File::open(path)?);
+    recorder::read_records_within(file, recorder::CHALLENGE_MAX_BODY)
+}
+
+/// The flight graded as a challenge input.
+fn challenge_input<'s>(station: &'s Station, path: &Path) -> Result<Analysis<'s>, Box<dyn Error>> {
+    let flight = analyzer::Flight::from_records(challenge_records(path)?)?;
+    let analysis = station.analyse(flight_id(path), flight);
+    Ok(analysis.ok_or("no air/ground data in this flight")?)
 }
 
 /// Validates a challenge definition the way an attempt is graded against
@@ -262,7 +279,9 @@ fn slice_args<'a>(args: &[&'a str]) -> Option<(recorder::Cut<'a>, Option<&'a str
 /// Cuts an attempt's slice (docs/challenge-protocol.md A5) into `out`,
 /// `<flight>.slice.fqz` by default, and reports it as JSON.
 fn slice(path: &Path, cut: recorder::Cut, out: Option<&str>) -> Result<(), Box<dyn Error>> {
-    let sliced = recorder::slice(fs::File::open(path)?, cut)?.ok_or_else(|| match cut {
+    let records = challenge_records(path)?;
+    let recording = recorder::Recording::from_records(records.lfl_version(), records)?;
+    let sliced = recording.slice(cut).ok_or_else(|| match cut {
         recorder::Cut::Attempt(r) => format!("{}: no attempt marker with ref {r}", path.display()),
         recorder::Cut::Range(..) => format!("{}: no data", path.display()),
     })?;
@@ -306,6 +325,38 @@ mod tests {
         ] {
             assert!(!ok(bad), "{bad:?}");
         }
+    }
+
+    /// A compact flight past the challenge cap is refused by `challenge` and
+    /// `slice`, though the app's own flights may be larger.
+    #[test]
+    fn challenge_inputs_are_held_to_the_lower_cap() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("big.fqz");
+        let mut file = b"FQJC".to_vec();
+        file.extend([1, 0, 1, 0]);
+        let body = vec![0u8; recorder::CHALLENGE_MAX_BODY as usize + 1];
+        file.extend(zstd::encode_all(&body[..], 3).unwrap());
+        fs::write(&path, file).unwrap();
+        let golden = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../fixtures/challenge/challenge.json"
+        );
+        let too_big = "compact flight larger than this reader accepts";
+        let err = challenge(Path::new(golden), &path).unwrap_err();
+        assert_eq!(err.to_string(), too_big);
+        let err = slice(
+            &path,
+            recorder::Cut::Range(SimTime::ZERO, SimTime::from_micros(1)),
+            None,
+        );
+        assert_eq!(err.unwrap_err().to_string(), too_big);
+        let err = Station::core().unwrap().open(&path).err().unwrap();
+        assert_eq!(
+            err.to_string(),
+            "corrupt compact flight",
+            "the general cap reads it"
+        );
     }
 
     #[test]

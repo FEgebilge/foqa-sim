@@ -251,7 +251,8 @@ Leaderboards are the site's business, not part of the protocol.
    `fdm slice <flight> --ref <ref> [-o out.fqz]` cuts the attempt's slice
    the app uploads ([format.md](format.md), Recording slice); the golden
    example a site's CI checks is in `fixtures/challenge/`. It takes a compact flight only, whose decompressed body is capped
-   (256 MiB); a journal or a raw capture is refused by its extension, since
+   at 32 MiB for `fdm challenge` and `fdm slice` (256 MiB for the app's own
+   flights); a journal or a raw capture is refused by its extension, since
    a raw capture's gzip lets a small upload expand. The raw replay is capped
    too (1 GiB decompressed, 64 KiB a line) for local use.
 4. **Accounts:** site accounts; the app signs in through the browser

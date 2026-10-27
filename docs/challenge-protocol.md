@@ -828,8 +828,10 @@ Each slice keeps the app fully usable with no site configured.
 - **`fdm challenge`** grades only a touchdown after the latest `begin`
   marker and reports `marker` (`ref`, `begin_s`, `end_s`) and `aircraft`
   (`icao`, `class`) in the `Attempt`.
-- **Not in F1 yet:** the ~32 MiB decode cap (the compact reader still
-  caps at 256 MiB), the protocol example fixtures (A11, under
+- **Decode cap:** `fdm challenge` and `fdm slice` refuse a compact
+  flight whose body decompresses past 32 MiB
+  (`recorder::CHALLENGE_MAX_BODY`); the app's own flights keep 256 MiB.
+- **Not in F1 yet:** the protocol example fixtures (A11, under
   `crates/connect`), the live `[begin, now]` grading during the rollout
   (B5).
 - "Allow local sites" is the environment variable

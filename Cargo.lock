@@ -700,6 +700,7 @@ dependencies = [
  "sim-link",
  "tempfile",
  "testkit",
+ "zstd",
 ]
 
 [[package]]

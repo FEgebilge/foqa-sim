@@ -16,8 +16,13 @@ use crate::{JournalReader, Record, SimEvent};
 
 pub const EXT: &str = "fqz";
 /// Largest decompressed body read, far above a day-long flight: a crafted
-/// file (an uploaded challenge attempt) cannot make the reader hold more.
+/// file cannot make the reader hold more.
 const MAX_BODY: u64 = 256 << 20;
+/// Largest decompressed body of a challenge input (`fdm challenge`, `fdm
+/// slice`; docs/challenge-protocol.md A10.4): an attempt's slice is minutes
+/// of one flight, so a crafted upload can make a site's scorer hold at most
+/// this much.
+pub const CHALLENGE_MAX_BODY: u64 = 32 << 20;
 
 const MAGIC: &[u8; 4] = b"FQJC";
 const FORMAT_VERSION: u16 = 1;
@@ -67,14 +72,15 @@ impl Recording {
         zstd.finish()?.flush()
     }
 
-    /// Reads a compact file whose magic is already consumed.
-    fn read_after_magic(mut input: impl Read) -> io::Result<Self> {
+    /// Reads a compact file whose magic is already consumed, its body at
+    /// most `max_body` bytes.
+    fn read_after_magic(mut input: impl Read, max_body: u64) -> io::Result<Self> {
         let mut head = [0; 4];
         input.read_exact(&mut head)?;
         if u16::from_le_bytes([head[0], head[1]]) != FORMAT_VERSION {
             return Err(invalid("not a FOQA-Sim v1 compact flight"));
         }
-        let body = body(input, MAX_BODY)?;
+        let body = body(input, max_body)?;
         Self::decode(u16::from_le_bytes([head[2], head[3]]), &body)
             .ok_or_else(|| invalid("corrupt compact flight"))
     }
@@ -199,11 +205,17 @@ enum Source<R: Read> {
 }
 
 /// Opens a `.fqj` journal or a `.fqz` compact flight by its magic.
-pub fn read_records<R: Read>(mut input: R) -> io::Result<FlightRecords<R>> {
+pub fn read_records<R: Read>(input: R) -> io::Result<FlightRecords<R>> {
+    read_records_within(input, MAX_BODY)
+}
+
+/// [`read_records`], a compact flight's body refused beyond `max_body`
+/// bytes ([`CHALLENGE_MAX_BODY`] for a challenge input).
+pub fn read_records_within<R: Read>(mut input: R, max_body: u64) -> io::Result<FlightRecords<R>> {
     let mut magic = [0; 4];
     input.read_exact(&mut magic)?;
     if &magic == MAGIC {
-        let recording = Recording::read_after_magic(input)?;
+        let recording = Recording::read_after_magic(input, max_body)?;
         return Ok(FlightRecords {
             lfl_version: recording.lfl_version,
             source: Source::Compact(recording.into_records().collect::<Vec<_>>().into_iter()),
@@ -262,7 +274,7 @@ pub fn compact_file(journal: &Path) -> io::Result<Option<PathBuf>> {
         f.sync_all()?;
         let mut check = BufReader::new(File::open(&part)?);
         check.read_exact(&mut [0; 4])?;
-        Recording::read_after_magic(check)
+        Recording::read_after_magic(check, MAX_BODY)
     });
     match written {
         Ok(back) if back == recording => {}
@@ -346,6 +358,25 @@ mod tests {
         assert_eq!(body(&packed[..], 1000).unwrap().len(), 1000);
         let err = body(&packed[..], 999).unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+    }
+
+    /// A challenge input is held to the lower cap; the app's own flights to
+    /// the general one.
+    #[test]
+    fn a_challenge_input_has_the_lower_cap() {
+        let mut file = MAGIC.to_vec();
+        file.extend(FORMAT_VERSION.to_le_bytes());
+        file.extend(1u16.to_le_bytes());
+        let over = vec![0u8; CHALLENGE_MAX_BODY as usize + 1];
+        file.extend(zstd::encode_all(&over[..], 3).unwrap());
+        let err = read_records_within(&file[..], CHALLENGE_MAX_BODY).err();
+        assert_eq!(
+            err.map(|e| e.to_string()).as_deref(),
+            Some("compact flight larger than this reader accepts")
+        );
+        // Within the general cap the body is read (and is no valid flight).
+        let err = read_records(&file[..]).err().unwrap();
+        assert_eq!(err.to_string(), "corrupt compact flight");
     }
 
     fn journal() -> Vec<u8> {
