@@ -154,22 +154,102 @@ interface FlightSummary {
   assessment: Assessment;
 }
 
-// The flight graded as a whole. Each rule the flight broke counts once, at
-// its worst level, so a repeated finding does not pile up but different ones
-// do: high 4 points, medium 2, low 1, advisory 0. good: 0-1 points, fair: 2-5,
-// poor: 6 or more.
+// The flight graded as a whole, as the flight list shows it: by landing-2
+// (docs/scoring.md) when a landing was scored, else by the points method.
+// `points` and `findings` are the points method's, kept for one release:
+// each rule the flight broke counts once, at its worst level, high 4
+// points, medium 2, low 1, advisory 0 (good 0-1, fair 2-5, poor 6+).
+// Summaries cached before landing-2 have no `method`.
 interface Assessment {
   grade: "good" | "fair" | "poor";
   points: number;
   findings: number;       // rules broken at low or above
+  method: "landing-2" | "points";
+  score?: number;         // 0-100, to 0.1, with a scored landing
+  confidence?: "full" | "partial";
 }
 
-// How the assessment was reached, for the debrief. Each rule that fired is
-// one part, at its worst level in the flight, which alone counts; the parts
-// add up to `assessment.points`.
+// How the assessment was reached (docs/scoring.md §7.5). Each landing is
+// scored in six domains; the flight takes the score of its last full-stop
+// landing, held down by an earlier landing's safety cap and by high
+// findings outside every landing (one: at most Fair, two: Poor). Without a
+// scored landing, `method` is "points" and the parts and bands grade it.
 interface AssessmentDetail {
-  parts: AssessmentPart[];   // most points first, then by rule name; advisories (0 points) last
-  bands: GradeBand[];        // the scale, low to high: good up to 1, fair up to 5, poor above
+  method: "landing-2" | "points";
+  score: number | null;
+  grade: "good" | "fair" | "poor";
+  confidence: "full" | "partial" | null;
+  caps: CapNote[];           // the grading landing's caps, then the flight's own (kind "flight")
+  graded_by: number | null;  // index in `landings` of the landing that sets the grade
+  landings: LandingAssessment[];   // one per landing (touchdowns that are not bounces), in time order
+  other_findings: number[];  // indices in `Debrief.events` outside every scored landing (no pilot reports)
+  legacy_points: number;     // the points method's, for one release
+  legacy_findings: number;
+  parts: AssessmentPart[];   // points method: most points first, then by rule name; advisories (0 points) last
+  bands: GradeBand[];        // points method's scale, low to high: good up to 1, fair up to 5, poor above
+  grades: { good: number; fair: number };   // landing-2's edges: Good from 85, Fair from 60
+}
+
+interface CapNote {
+  kind: "material" | "unstable" | "inspection" | "undershoot" | "excursion" | "flight";
+  score: number;             // the most the score can be
+  reason: string;            // what caused it, e.g. "level 2 or more: A2 above, high-sink-light"
+  source: string;
+  landing?: number;          // index in `landings`
+}
+
+interface LandingAssessment {
+  t_s: number;               // its first touchdown
+  status: "scored" | "insufficient";   // insufficient: a runway fix, peak g, sink or rollout position missing
+  score: number | null;      // after the caps
+  raw: number | null;        // before them
+  grade: "good" | "fair" | "poor" | null;
+  confidence: "full" | "partial" | null;
+  class: "light" | "turboprop" | "jet" | null;   // the scoring class whose bands apply
+  partial: string[];         // expected data that was missing, e.g. "No Vref for B738"
+  missing: string[];         // required data that was missing (insufficient)
+  full_stop: boolean;        // false: a touch-and-go, no rollout scored, does not set the flight grade
+  caps: CapNote[];
+  stable_from_ft: number | null;   // lowest height above which every approach criterion stayed within tolerance
+  speeds: { vref_kt: number; vapp_kt: number; source: "profile" | "selected"; approximate: boolean; basis: string } | null;
+  domains: DomainAssessment[];     // stability, energy, point, lateral, contact, rollout; empty when insufficient
+}
+
+interface DomainAssessment {
+  id: "stability" | "energy" | "point" | "lateral" | "contact" | "rollout";
+  title: string;             // "Approach stability", …
+  weight: number;            // 25, 10, 20, 15, 20, 10
+  loss: number | null;       // 0-1 of the weight, its worst item's; null: n/a, its weight shared out
+  points: number;            // points it cost, to 0.1
+  level: number;             // 0-3, of its worst item
+  criteria: CriterionAssessment[];
+  findings: FindingAssessment[];   // its events inside the landing's window
+  sets_by: string | null;    // the item that set the loss: "A2 above" or a rule id
+}
+
+interface CriterionAssessment {
+  id: string;                // A1…F2 (scoring/landing-2.yaml)
+  title: string;
+  height: "all" | "above" | "below";   // the half of the approach window (split 500 ft, light 300 ft)
+  value: number;             // its worst value, in `unit`; offsets (A1, B1, B2, C1) signed
+  unit: string | null;       // null: a level 0-3 (A6, E3)
+  ell: number;               // continuous level 0-3: 0 ideal, 0.5 tolerance edge, 1-3 the FDM levels
+  level: number;             // floor(ell)
+  loss: number;              // 0-1 of the domain
+  // [ideal, tolerance, L1, L2, L3] resolved for this landing; `above` grades
+  // larger values, `below` smaller; null where the anchor does not exist
+  bands: { above: (number | null)[]; below: (number | null)[] };
+  standard: string;          // the published source, with "est" for FOQA-Sim choices
+  sets: boolean;             // it set its domain's loss
+}
+
+interface FindingAssessment {
+  event: number | null;      // index in `Debrief.events`
+  rule: string;
+  level: Level;
+  ell: number;               // low 1, medium 2, high 3, advisory 0
+  loss: number;
+  sets: boolean;             // it set its domain's loss
 }
 
 interface AssessmentPart {
@@ -199,7 +279,8 @@ interface Debrief {
     // go_around_drop_ft. `source` is "<ICAO> profile, <document>" where the
     // type profile sets it, else e.g. "light class default"
     phase_values: Record<string, { value: number; source: string; approximate?: boolean; note?: string }>;
-    assessment_detail: AssessmentDetail;   // how `assessment` was reached
+    assessment_detail: AssessmentDetail;   // how `assessment` was reached, per landing
+
     damaged_at?: number;    // byte offset if the journal was cut off
   };
   // CICTT, contiguous. `trigger` says what opened the span with the value

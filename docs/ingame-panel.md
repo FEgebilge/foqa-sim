@@ -323,6 +323,13 @@ view's. A view ignores replies whose `req` is not the one it waits for, and
 a new query replaces a waiting one. With nothing complete after about 8 s
 it shows an error and **Try again**, which asks again with a new `req`.
 
+The debrief view opens with the flight's landing-2 score and grade
+([scoring.md](scoring.md)), six domain mini-bars of the grading landing
+(track as long as the weight, the points lost in the level's colour) and
+its largest deduction in one line; "How this was graded" still lists the
+points method's parts. A flight without a scored landing shows its points.
+
+
 ```ts
 interface Flights {
   v: 2;
@@ -352,8 +359,18 @@ interface DebriefPart {
 // What the parts join to (by req, in seq order): the debrief without airports,
 // its series cut to the EFB's charts.
 interface CompactDebrief {
-  flight: FlightItem & {     // the assessment's points and findings, and how they came about:
-    profile: string; points: number; findings: number;
+  flight: FlightItem & {     // the assessment (debrief-api.md) and how it came about:
+    profile: string;
+    method: "landing-2" | "points";
+    score?: number;          // landing-2, 0-100
+    confidence?: "full" | "partial";
+    // The grading landing's six domains in order (stability, energy, point,
+    // lateral, contact, rollout) as mini-bars: [weight, points lost or null
+    // when n/a, level 0-3]; absent without a scored landing.
+    bars?: [number, number | null, number][];
+    top?: string;            // its largest deduction in one line, e.g. "Approach stability −17.3: Descent rate 1562 fpm"
+    points: number; findings: number;   // the points method's, for one release
+
     parts: { title: string; level: Level; points: number; count: number }[];   // only rules with points, most first
     bands: GradeBand[];   // the grade scale (debrief-api.md)
   };

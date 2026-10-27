@@ -205,9 +205,11 @@ stale file is rebuilt from the flights, and it can be deleted at any time.
 }
 ```
 
-- `station`: hash of the rule set, the type profiles and the build (the
-  running executable's size and modification time). Any change drops every
-  entry, so new rules or code regrade every flight.
+- `station`: hash of the rule set, the type profiles, the landing
+  assessment method (`scoring/landing-2.yaml`) and the analysis source
+  (`crates/debrief/build.rs`). Any change drops every entry, so new rules,
+  bands or code regrade every flight.
+
 - `flights`: by file name, compact flights only (a journal may still be
   recording). An entry is used while the file's `len` (bytes) and
   `modified_ns` (modification time, ns since the Unix epoch) are unchanged;

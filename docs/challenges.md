@@ -134,7 +134,10 @@ Field reasons:
 
 `Challenge::parse` rejects unknown fields, a gate not closer than the
 start, flaps outside 0 to 1, a runway not written like `06` or `27L` and an
-unknown scoring version.
+unknown scoring version. A `landing-2` challenge must list
+`aircraft.types`, each with a Vref source in its profile (Vref table, POH
+approach speeds or VSO): the pilot's selected speed never counts for a
+ranked attempt ([scoring.md](scoring.md) §5, Decision 1).
 
 ## Attempt lifecycle
 
@@ -187,8 +190,25 @@ not prevention, which matches the stakes.
 
 ## Scoring
 
-`landing-1`, 0 to 100, sum of smooth sub-scores (curves, not
-bands), per aircraft class:
+`scoring.version` names the method, and the server re-scores an upload
+with the one its challenge names, so app updates never move a board.
+
+**`landing-2`** is the method for new challenges, specified in
+[scoring.md](scoring.md): the same assessment the debrief shows (six
+domains, ideal and tolerance from the checkride standard, levels from the
+FDM thresholds, safety caps), run as a ranked attempt from the gate.
+`challenge::evaluate` takes it from `crates/assess`; the attempt's
+`score.total` is the landing's score and its `parts` are the six domains
+(weight shared out where a domain is n/a; a safety cap holds the total
+below their sum). It adds two checks: `data` (every expected value
+recorded, `confidence: full`; a landing without a runway fix, peak g or
+sink is not scored at all) and `go_around` (an attempt that went around
+after the gate is not ranked: fly again). Boards should be split by
+scoring class (light, turboprop, jet); the attempt does not carry the
+class yet, the site reads it from the type.
+
+**`landing-1`** (frozen, for the challenges that name it), 0 to 100, sum of
+smooth sub-scores (curves, not bands), per aircraft class:
 
 | Part | Weight | Full marks (transport / light) | Zero |
 |---|---|---|---|
@@ -220,7 +240,9 @@ Leaderboards are the site's business, not part of the protocol.
 ## Decisions (Ege, 2026-10-27)
 
 1. **Start:** `teleport` by default, `self` as the fallback.
-2. **Scoring:** `landing-1` above.
+2. **Scoring:** `landing-1` above; `landing-2` ([scoring.md](scoring.md))
+   for new challenges since 2026-10-27.
+
 3. **Server analysis:** the Rust analysis on the home server:
    `fdm challenge <challenge.json> <flight.fqz>` prints the `Attempt`
    (checks, validity, score) as JSON, the same `challenge::evaluate` the app

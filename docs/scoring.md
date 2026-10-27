@@ -6,9 +6,15 @@ leaderboard. The debrief and the leaderboard therefore tell the same story.
 `landing-1` (`crates/challenge/src/score.rs`) stays frozen for the
 challenges that name it.
 
-Status: slices 1-4 of §7 are implemented (profile fields, analyzer
-values, rule set v2, `crates/assess` with `scoring/landing-2.yaml`); the
-debrief, challenges and UI do not use it yet. Thresholds marked
+Status: implemented (§7 slices 1-8): profile fields, analyzer values, rule
+set v2, `crates/assess` with `scoring/landing-2.yaml`, the debrief wire
+(`assessment_detail`, [debrief-api.md](debrief-api.md)), `landing-2`
+challenges ([challenges.md](challenges.md)), the app's assessment panel
+and the EFB summary. Not yet: go-around approaches assessed on A and B
+(§4; the debrief scores touchdowns only), A7 low thrust, a challenge's own
+touchdown target (Decision 2), boards keyed by scoring class on the site,
+and the calibration of the **est** anchors (Decision 4). Thresholds marked
+
 **est** are FOQA-Sim choices that no published source covers; they are
 listed so they can be reviewed, not hidden.
 
