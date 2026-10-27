@@ -34,6 +34,8 @@ const AIRCRAFT: u8 = 6;
 const PILOT_REPORT: u8 = 7;
 /// Text is the attempt marker as JSON.
 const ATTEMPT: u8 = 8;
+/// No text. The recording's `gear.extended` is in percent (docs/format.md).
+const GEAR_SCALED_V1: u8 = 9;
 /// SSM wire codes are indexes into this table.
 const SSM_CODES: [Ssm; 3] = [Ssm::Normal, Ssm::NoComputedData, Ssm::Failure];
 /// Event code of flow event `n` is `FLOW_BASE + n`.
@@ -223,6 +225,7 @@ pub(crate) fn event_parts(event: &SimEvent) -> (u8, String) {
         SimEvent::Aircraft(id) => (AIRCRAFT, aircraft_json::to_json(id).to_string()),
         SimEvent::PilotReport(note) => (PILOT_REPORT, note.clone()),
         SimEvent::Attempt(m) => (ATTEMPT, marker_json::to_json(m).to_string()),
+        SimEvent::GearScaledV1 => (GEAR_SCALED_V1, String::new()),
     }
 }
 
@@ -230,6 +233,7 @@ pub(crate) fn event_from(code: u8, text: &[u8]) -> Result<Option<SimEvent>, Malf
     Ok(Some(match code {
         SIM_START => SimEvent::SimStart,
         SIM_STOP => SimEvent::SimStop,
+        GEAR_SCALED_V1 => SimEvent::GearScaledV1,
         CRASHED => SimEvent::Crashed,
         FLIGHT_LOADED => SimEvent::FlightLoaded(utf8(text)?),
         PILOT_REPORT => SimEvent::PilotReport(utf8(text)?),

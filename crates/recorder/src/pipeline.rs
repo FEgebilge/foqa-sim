@@ -2,7 +2,7 @@ use std::io::{self, Write};
 
 use fdm_core::{Lfl, Sample, SimTime};
 
-use crate::{Acquisition, Fdau, JournalWriter, Telemetry, TelemetrySource};
+use crate::{Acquisition, Fdau, JournalWriter, SimEvent, Telemetry, TelemetrySource};
 
 /// The on-board chain in one piece: wiring, FDAU and journal.
 pub struct Recorder<W: Write> {
@@ -14,10 +14,12 @@ pub struct Recorder<W: Write> {
 
 impl<W: Write> Recorder<W> {
     pub fn new(lfl: &Lfl, out: W) -> io::Result<Self> {
+        let mut journal = JournalWriter::new(out, lfl)?;
+        journal.event(SimTime::ZERO, &SimEvent::GearScaledV1)?;
         Ok(Self {
             acquisition: Acquisition::new(lfl),
             fdau: Fdau::new(lfl),
-            journal: JournalWriter::new(out, lfl)?,
+            journal,
             batch: Vec::new(),
         })
     }
