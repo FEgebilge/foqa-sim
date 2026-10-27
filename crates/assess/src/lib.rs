@@ -24,4 +24,6 @@ pub use score::{
     Cap, CapKind, Confidence, CriterionScore, DomainScore, Finding, FindingScore, FlightGrade,
     Grade, LandingScore, Measures, Outcome, Value,
 };
-pub use text::{height_text, item_text, list, number, reading_text, value_text, with_level};
+pub use text::{
+    height_text, item_text, list, not_scored_text, number, reading_text, value_text, with_level,
+};

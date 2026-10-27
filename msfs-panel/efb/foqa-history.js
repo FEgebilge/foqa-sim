@@ -296,7 +296,7 @@ var FoqaHistory = (function () {
             var track = '<div class="mtrack' + (lost === null ? " na" : "") + '" style="width:' + (weight / 25 * 100).toFixed(0) + '%">' +
                 (share ? '<div class="mlost lvl-' + level + '" style="width:' + (Math.min(1, share) * 100).toFixed(0) + '%"></div>' : "") + "</div>";
             return '<div class="mbar"><div class="mname">' + esc(b[4] || "") + '<span class="mpts">' +
-                (lost === null ? "n/a" : lost ? "−" + lost.toFixed(1) : "0") + "</span></div>" + track + "</div>";
+                (lost === null ? "not graded" : lost ? "−" + lost.toFixed(1) : "0") + "</span></div>" + track + "</div>";
         }).join("") + "</div>";
         return html + (f.top ? '<div class="mtop">' + esc(f.top) + "</div>" : "");
     }

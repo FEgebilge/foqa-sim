@@ -69,7 +69,7 @@ function Scored({ landing, debrief, onSelectEvent }: { landing: LandingAssessmen
           <span className="text-fg-2">Before safety caps {number(landing.raw ?? 0, 1)}{landing.caps.length ? ((landing.score ?? 0) < (landing.raw ?? 0) ? `, held to ${number(landing.score ?? 0, 1)} by a cap` : `; a cap at ${number(Math.min(...landing.caps.map((c) => c.score)), 1)} did not apply`) : ""}</span>
           <span className="readout text-base font-semibold">{number(landing.score ?? 0, 1)} <span className="text-xs font-normal text-fg-3">{landing.grade ? GRADE_LABEL[landing.grade] : ""}</span></span>
         </div>
-        <p className="text-[11px] leading-relaxed text-fg-3">Each area loses points for its worst item only, so one mistake is never counted twice. An area with nothing measured is not graded (n/a) and its weight is shared among the others.</p>
+        <p className="text-[11px] leading-relaxed text-fg-3">Each area loses points for its worst item only, so one mistake is never counted twice. An area with nothing measured is not graded and its weight is shared among the others.</p>
       </div>
       <DomainDetail domain={domain} landing={landing} debrief={debrief} onSelectEvent={onSelectEvent} />
     </div>
@@ -113,7 +113,7 @@ function DomainDetail({ domain, landing, debrief, onSelectEvent }: { domain: Dom
           {[...domain.criteria].sort((a, b) => a.id.localeCompare(b.id)).map((c) => <CriterionRow
  key={`${c.id}-${c.height}`} c={c} landing={landing} domain={domain} />)}
         </ul>
-      ) : <p className="text-xs text-fg-3">No measured value in this domain.</p>}
+      ) : <p className="text-xs text-fg-3">No measured value in this area.</p>}
       {domain.findings.length ? (
         <div className="flex flex-col gap-1.5">
           <h4 className="eyebrow">Flagged events</h4>

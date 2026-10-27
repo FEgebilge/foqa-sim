@@ -103,6 +103,29 @@ pub fn list(items: &[String]) -> String {
     }
 }
 
+/// Why a landing has no score: the required measurements in `missing`
+/// (`runway`, `peak_g`, `sink`, `rollout position`) were not recorded.
+pub fn not_scored_text(missing: &[&str]) -> String {
+    let words: Vec<String> = missing
+        .iter()
+        .map(|m| {
+            match *m {
+                "runway" => "runway data",
+                "peak_g" => "the touchdown g-load",
+                "sink" => "the touchdown sink rate",
+                "rollout position" => "the rollout position on the runway",
+                other => other,
+            }
+            .to_owned()
+        })
+        .collect();
+    format!(
+        "Not scored: {} not recorded, and a score needs {}. Missing data never earns credit, so this landing counts through its findings only (event points).",
+        list(&words),
+        if missing.len() == 1 { "it" } else { "them" }
+    )
+}
+
 impl Method {
     /// What a cap at `score` allows, in words: "below Good (max 84.9)", or
     /// "at zero".
@@ -122,6 +145,19 @@ impl Method {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_landing_without_a_score_says_what_was_missing() {
+        assert_eq!(
+            not_scored_text(&["sink"]),
+            "Not scored: the touchdown sink rate not recorded, and a score needs it. Missing data never earns credit, so this landing counts through its findings only (event points)."
+        );
+        let two = not_scored_text(&["runway", "peak_g"]);
+        assert!(
+            two.starts_with("Not scored: runway data and the touchdown g-load not recorded, and a score needs them."),
+            "{two}"
+        );
+    }
 
     /// As the app showed them: offsets signed, dots to 0.1, g to 0.01,
     /// thousands grouped, small fractions to 0.1, levels as "L2".

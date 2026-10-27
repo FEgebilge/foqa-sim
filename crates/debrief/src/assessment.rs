@@ -266,17 +266,6 @@ fn partial_note(landings: &[LandingAssessment]) -> Option<String> {
     })
 }
 
-/// A required measurement that is missing, in words.
-fn missing_text(what: &str) -> &str {
-    match what {
-        "runway" => "runway data",
-        "peak_g" => "the touchdown g-load",
-        "sink" => "the touchdown sink rate",
-        "rollout position" => "the rollout position on the runway",
-        other => other,
-    }
-}
-
 /// The class's grading limits, the speeds and the stable height: the facts
 /// under a scored landing's title.
 fn facts(class: ScoringClass, speeds: &Option<Speeds>, stable_from_ft: Option<f64>) -> Vec<String> {
@@ -381,16 +370,7 @@ impl LandingAssessment {
             confidence: None,
             class: None,
             partial: Vec::new(),
-            note: Some(format!(
-                "Not scored: {} not recorded, and a score needs {}. Missing data never earns credit, so this landing counts through its findings only (event points).",
-                assess::list(
-                    &missing
-                        .iter()
-                        .map(|m| missing_text(m).to_owned())
-                        .collect::<Vec<_>>()
-                ),
-                if missing.len() == 1 { "it" } else { "them" }
-            )),
+            note: Some(assess::not_scored_text(&missing)),
             facts: Vec::new(),
             missing,
             full_stop: true,
