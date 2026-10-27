@@ -6,6 +6,7 @@
 //! departs from and lands at. `record` covers one sim session (`foqa-rec`);
 //! `Service` keeps doing it across sim restarts for the desktop app.
 
+mod history;
 mod live;
 mod monitor;
 mod panel;
@@ -98,12 +99,9 @@ pub fn record(
                 reply(on(Progress::Opened(&f.journal)));
                 flight = Some(f);
             }
-            (Action::Record, Some(item)) => flight
-                .as_mut()
-                .expect("session opened a flight")
-                .record(item)?,
+            (Action::Record, Some(item)) => flight.as_mut().ok_or_else(no_flight)?.record(item)?,
             (Action::Close, _) => {
-                let mut f = flight.take().expect("session opened a flight");
+                let mut f = flight.take().ok_or_else(no_flight)?;
                 if let Some(item) = &item {
                     f.record(item)?;
                 }
@@ -120,6 +118,10 @@ pub fn record(
         let _ = on(Progress::Saved(&f.finish()?));
     }
     Ok(())
+}
+
+fn no_flight() -> io::Error {
+    io::Error::other("session routed to a flight that is not open")
 }
 
 /// One flight's files: the journal, as the QAR records it, and optionally

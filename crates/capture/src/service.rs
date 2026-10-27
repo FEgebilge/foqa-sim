@@ -13,10 +13,11 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use debrief::{Analysis, FlightSummary, LandingNotice, RecorderStatus, Station, flight_id};
+use debrief::{Analysis, FlightSummary, Index, LandingNotice, RecorderStatus, Station, flight_id};
 use fdm_core::Lfl;
 use recorder::{Acquisition, TOUCHDOWN_WINDOW_US, Telemetry};
 
+use crate::history::History;
 use crate::monitor::Monitor;
 use crate::panel::{self, Ack, Msg, Snapshot, ViewCommand};
 use crate::{Command, LiveSource, Progress, Reply, record};
@@ -67,6 +68,7 @@ impl Stopper {
 pub struct Service {
     dir: PathBuf,
     station: Arc<Station>,
+    index: Arc<Index>,
     stopper: Stopper,
     raw: bool,
     /// An analysis for the panel is running.
@@ -78,6 +80,7 @@ impl Service {
     pub fn new(dir: PathBuf, station: Arc<Station>) -> io::Result<Self> {
         std::fs::create_dir_all(&dir)?;
         Ok(Self {
+            index: Arc::new(Index::open(&dir)),
             dir,
             station,
             stopper: Stopper::default(),
@@ -97,14 +100,20 @@ impl Service {
         self.stopper.clone()
     }
 
+    /// The flights folder's index; share it rather than open another.
+    pub fn index(&self) -> Arc<Index> {
+        self.index.clone()
+    }
+
     /// Runs until stopped. Blocks: give it a thread of its own, which then
     /// owns the SimConnect connection. Analyses run on threads of their own
     /// so recording never waits for them.
     pub fn run(self, out: Sender<Happening>) {
         // Everything reported also goes to the in-sim panel, which sends
-        // its views' commands back.
+        // its views' commands back and answers their history queries.
         let (commands_tx, commands) = mpsc::channel();
-        let feed = panel::tee(out, commands_tx);
+        let history = History::new(self.dir.clone(), self.station.clone(), self.index.clone());
+        let feed = panel::tee(out, commands_tx, history);
         // Journals of earlier runs, listed before any new flight exists.
         let backlog = debrief::journals(&self.dir);
         thread::spawn(move || debrief::compact_all(backlog));
@@ -177,7 +186,10 @@ impl Service {
                 };
             }
             Progress::Recorded { item, touchdown } => {
-                let flight = watch.flight.as_mut().expect("a flight is open");
+                // Recorded only follows Opened; stop recording if it ever does not.
+                let Some(flight) = watch.flight.as_mut() else {
+                    return ControlFlow::Break(());
+                };
                 flight.monitor.record(item);
                 if let Telemetry::Frame(frame) = item {
                     // Column 0 is always SIMULATION TIME (raw capture format).
@@ -254,6 +266,7 @@ impl Service {
         let (station, feed, busy) = (self.station.clone(), feed.clone(), self.analysing.clone());
         let journal = flight.journal.clone();
         thread::spawn(move || {
+            let _clear = ClearOnDrop(busy);
             match station.open(&journal) {
                 Ok(a) => {
                     let _ = feed.send(Msg::Snapshot(Snapshot {
@@ -264,13 +277,13 @@ impl Service {
                 }
                 Err(e) => eprintln!("{}: {e}", journal.display()),
             }
-            busy.store(false, Ordering::Release);
         });
     }
 
-    /// Analyses the journal as it stands (the recorder flushes every frame)
-    /// on a thread of its own and sends what `pick` takes from it. A closed
-    /// flight is compacted once it has been analysed.
+    /// Sends what `pick` takes from the journal as it stands, analysed on a
+    /// thread of its own; a closed flight is then compacted. Quitting mid-way
+    /// is safe: compaction writes `.part` and renames, and a journal left
+    /// behind is compacted on the next run.
     fn report(
         &self,
         journal: PathBuf,
@@ -291,6 +304,15 @@ impl Service {
                 debrief::compact_all([journal]);
             }
         });
+    }
+}
+
+/// Clears the flag when dropped, even by a panic.
+pub(crate) struct ClearOnDrop(pub Arc<AtomicBool>);
+
+impl Drop for ClearOnDrop {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
     }
 }
 

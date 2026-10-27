@@ -1,5 +1,5 @@
 //! What the in-sim panel shows live while a flight is recorded
-//! (`FOQA_SIM_LIVE`, `docs/ingame-panel-v2.md`): the recorded frames in
+//! (`FOQA_SIM_LIVE`, `docs/ingame-panel.md`): the recorded frames in
 //! engineering units, the analyzer's live track and phase, and the
 //! stabilised-approach gates checked against the rule set's thresholds and
 //! the type profile, so the panel and the debrief judge alike.

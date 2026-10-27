@@ -2,11 +2,12 @@
 //! SimConnect Comm Bus to the sim's JavaScript views (the FOQA-Sim toolbar
 //! panel, later an EFB app), so the pilot sees a landing without leaving
 //! the sim, and the views' commands taken back. Messages and payloads:
-//! `docs/ingame-panel-v2.md`.
+//! `docs/ingame-panel.md`.
 //!
 //! A view hears only what is sent while it is open, so the feed repeats:
 //! the status each second, the live values while recording, the flight's
-//! events and landings every few seconds.
+//! events and landings every few seconds, a reply to a query for a few
+//! seconds.
 
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::thread;
@@ -18,6 +19,7 @@ use serde_json::{Value, json};
 use sim_link::{Recv, SimConnect};
 
 use crate::Happening;
+use crate::history::{self, Ask, History, Query, REQUEST_MAX_BYTES, Reply};
 use crate::monitor::Live;
 
 pub const STATUS: &str = "FOQA_SIM_STATUS";
@@ -25,12 +27,17 @@ pub const LIVE: &str = "FOQA_SIM_LIVE";
 pub const EVENTS: &str = "FOQA_SIM_EVENTS";
 pub const LANDING: &str = "FOQA_SIM_LANDING";
 pub const LANDINGS: &str = "FOQA_SIM_LANDINGS";
+pub const FLIGHTS: &str = "FOQA_SIM_FLIGHTS";
+pub const DEBRIEF: &str = "FOQA_SIM_DEBRIEF";
 /// View to app.
 pub const CMD: &str = "FOQA_SIM_CMD";
 /// Payload version, `v` in every message.
 pub(crate) const VERSION: u32 = 2;
 const STATUS_EVERY: Duration = Duration::from_secs(1);
 const REPEAT_EVERY: Duration = Duration::from_secs(5);
+/// A query's reply goes out this many times, a second apart.
+const REPLY_TIMES: u32 = 5;
+const REPLY_EVERY: Duration = Duration::from_secs(1);
 /// Landings in `FOQA_SIM_LANDINGS`.
 const LANDINGS_SENT: usize = 3;
 /// Client event id of the `CMD` subscription.
@@ -101,21 +108,49 @@ impl ViewCommand {
             Self::Mark(_) => "mark",
         }
     }
+}
 
-    /// From the view's JSON, with or without trailing NULs; a bad one is
-    /// answered at once.
+/// What a view sent.
+#[derive(Debug, Clone, PartialEq)]
+enum Request {
+    Command(ViewCommand),
+    /// Answered on its own event, not in `Status.ack`.
+    Query(Query),
+}
+
+impl Request {
+    /// From the view's JSON, with or without trailing NULs; a bad command
+    /// is answered at once.
     fn parse(data: &str) -> Result<Self, Ack> {
         let data = data.trim_end_matches('\0');
         let v: Value =
             serde_json::from_str(data).map_err(|e| Ack::new("?", Err(format!("not JSON: {e}"))))?;
         let cmd = v["cmd"].as_str().unwrap_or("?");
         let fail = |m: &str| Ack::new(cmd, Err(m.to_owned()));
+        let text = |key: &str| v[key].as_str().unwrap_or_default().to_owned();
+        let ask = match cmd {
+            "list_flights" => Some(Ask::Flights),
+            "debrief" => Some(Ask::Debrief(text("id"))),
+            _ => None,
+        };
+        if let Some(ask) = ask {
+            let req = text("req");
+            if req.len() + text("id").len() > REQUEST_MAX_BYTES {
+                return Err(fail("request too long"));
+            }
+            let ask = if v["v"] == VERSION {
+                ask
+            } else {
+                Ask::Refused("unsupported version")
+            };
+            return Ok(Self::Query(Query { req, ask }));
+        }
         if v["v"] != VERSION {
             return Err(fail("unsupported version"));
         }
-        Ok(match cmd {
-            "end_flight" => Self::EndFlight,
-            "discard_flight" => Self::DiscardFlight,
+        Ok(Self::Command(match cmd {
+            "end_flight" => ViewCommand::EndFlight,
+            "discard_flight" => ViewCommand::DiscardFlight,
             "mark" => {
                 let mut note = v["note"].as_str().unwrap_or_default().to_owned();
                 let mut end = note.len().min(NOTE_MAX_BYTES);
@@ -123,20 +158,22 @@ impl ViewCommand {
                     end -= 1;
                 }
                 note.truncate(end);
-                Self::Mark(note)
+                ViewCommand::Mark(note)
             }
             _ => return Err(fail("unknown command")),
-        })
+        }))
     }
 }
 
-/// Hands every happening on to `out` unchanged and mirrors what it is
-/// given into the sim, a landing in the same instant `out` gets it, and
-/// passes the views' commands on to `commands`. The feed runs on a thread
-/// of its own with a SimConnect connection of its own, opened while the
-/// recorder is connected, so it never touches the recording connection.
-/// It ends when every sender of the returned channel is gone.
-pub fn tee(out: Sender<Happening>, commands: Sender<ViewCommand>) -> Sender<Msg> {
+/// Forwards happenings to `out`, mirrors them into the sim panel on its own
+/// thread and SimConnect connection, passes view commands to `commands` and
+/// has `history` answer the views' queries. Ends when every sender of the
+/// returned channel is gone.
+pub(crate) fn tee(
+    out: Sender<Happening>,
+    commands: Sender<ViewCommand>,
+    mut history: History,
+) -> Sender<Msg> {
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
         let (mut board, mut link) = (Board::default(), Link::default());
@@ -153,12 +190,16 @@ pub fn tee(out: Sender<Happening>, commands: Sender<ViewCommand>) -> Sender<Msg>
                 Err(RecvTimeoutError::Disconnected) => break,
             }
             let now = Instant::now();
+            for reply in history.poll() {
+                board.reply(reply, now);
+            }
             for data in link.send(board.due(now), board.sim_up(), now) {
-                match ViewCommand::parse(&data) {
-                    Ok(cmd) if board.recording().is_some() => {
+                match Request::parse(&data) {
+                    Ok(Request::Query(query)) => history.ask(query),
+                    Ok(Request::Command(cmd)) if board.recording().is_some() => {
                         let _ = commands.send(cmd);
                     }
-                    Ok(cmd) => {
+                    Ok(Request::Command(cmd)) => {
                         let ack = Ack::new(cmd.name(), Err("no flight open".into()));
                         board.take(&Msg::Ack(ack), now);
                     }
@@ -196,6 +237,8 @@ struct Board {
     snapshot: Option<Snapshot>,
     /// Sent once, with the next status.
     ack: Option<Ack>,
+    /// The latest reply on each event, while it repeats.
+    replies: Vec<Repeat>,
     /// `None`: due now.
     next_status: Option<Instant>,
     next_landing: Option<Instant>,
@@ -203,7 +246,25 @@ struct Board {
     next_landings: Option<Instant>,
 }
 
+/// A reply, the times it is still to go out and when next.
+#[derive(Debug)]
+struct Repeat {
+    reply: Reply,
+    left: u32,
+    next: Instant,
+}
+
 impl Board {
+    /// Replaces an earlier reply on the same event.
+    fn reply(&mut self, reply: Reply, now: Instant) {
+        self.replies.retain(|r| r.reply.event != reply.event);
+        self.replies.push(Repeat {
+            reply,
+            left: REPLY_TIMES,
+            next: now,
+        });
+    }
+
     fn take(&mut self, msg: &Msg, now: Instant) {
         match msg {
             Msg::Happening(Happening::Status(status)) => {
@@ -268,7 +329,7 @@ impl Board {
         let aircraft = summary.and_then(|s| s.aircraft.as_ref());
         Some(FlightInfo {
             id: flight_id,
-            aircraft: aircraft.map(|a| a.icao.as_deref().unwrap_or(&a.title)),
+            aircraft: aircraft.map(history::aircraft),
             departure: summary.and_then(|s| s.departure.as_deref()),
             elapsed_s: *elapsed_s,
             phase: self.phase.unwrap_or("Standing"),
@@ -322,6 +383,12 @@ impl Board {
             let msg = json!({ "v": VERSION, "age_s": age_s, "notice": notice });
             due.push((LANDING, msg.to_string()));
         }
+        for r in self.replies.iter_mut().filter(|r| now >= r.next) {
+            (r.left, r.next) = (r.left - 1, now + REPLY_EVERY);
+            let event = r.reply.event;
+            due.extend(r.reply.msgs.iter().map(|m| (event, m.clone())));
+        }
+        self.replies.retain(|r| r.left > 0);
         due
     }
 }
@@ -431,7 +498,7 @@ mod tests {
                 arrival: None,
                 landings,
                 worst_level: None,
-                event_counts: BTreeMap::from([(Level(rules::Level::Advisory), 0)]),
+                event_counts: BTreeMap::from([(Level::Advisory, 0)]),
             },
             events: vec![],
             landings: vec![notice(); landings],
@@ -555,9 +622,61 @@ mod tests {
     }
 
     #[test]
+    fn a_reply_repeats_each_second_five_times_the_latest_only() {
+        let (mut board, t0) = (Board::default(), Instant::now());
+        let reply = |event, msgs: &[&str]| Reply {
+            event,
+            msgs: msgs.iter().map(|m| m.to_string()).collect(),
+        };
+        board.reply(reply(DEBRIEF, &["a0", "a1"]), t0);
+        board.reply(reply(FLIGHTS, &["f"]), t0);
+        assert_eq!(board.due(t0).len(), 3);
+        assert!(board.due(t0 + Duration::from_millis(900)).is_empty());
+        // A newer debrief replaces the older one.
+        let t1 = t0 + REPLY_EVERY;
+        board.reply(reply(DEBRIEF, &["b0"]), t1);
+        let sent = |due: Vec<(&str, String)>| due.into_iter().map(|(_, m)| m).collect::<Vec<_>>();
+        assert_eq!(sent(board.due(t1)), ["f", "b0"]);
+        for s in 2..REPLY_TIMES {
+            assert_eq!(sent(board.due(t0 + REPLY_EVERY * s)), ["f", "b0"]);
+        }
+        let t5 = t0 + REPLY_EVERY * REPLY_TIMES;
+        assert_eq!(sent(board.due(t5)), ["b0"]);
+        assert!(board.due(t5 + REPLY_EVERY * 9).is_empty());
+    }
+
+    #[test]
+    fn queries_parse_and_are_never_acked() {
+        let query = |data: &str| match Request::parse(data) {
+            Ok(Request::Query(q)) => q,
+            other => panic!("{other:?}"),
+        };
+        let list = query("{\"v\":2,\"cmd\":\"list_flights\",\"req\":\"h1\"}\0");
+        assert_eq!((list.req.as_str(), list.ask), ("h1", Ask::Flights));
+        let one = query(r#"{"v":2,"cmd":"debrief","req":"h2","id":"flight-1"}"#);
+        assert_eq!(one.ask, Ask::Debrief("flight-1".into()));
+        let old = query(r#"{"v":1,"cmd":"debrief","req":"h3","id":"flight-1"}"#);
+        assert_eq!(old.ask, Ask::Refused("unsupported version"));
+        assert_eq!(query(r#"{"v":2,"cmd":"list_flights"}"#).req, "");
+        let long = format!(
+            r#"{{"v":2,"cmd":"list_flights","req":"{}"}}"#,
+            "r".repeat(300)
+        );
+        assert_eq!(
+            Request::parse(&long).unwrap_err().message.as_deref(),
+            Some("request too long")
+        );
+    }
+
+    #[test]
     fn commands_parse_with_or_without_terminators() {
         use ViewCommand::*;
-        let parse = ViewCommand::parse;
+        let parse = |data: &str| {
+            Request::parse(data).map(|r| match r {
+                Request::Command(cmd) => cmd,
+                Request::Query(q) => panic!("{q:?}"),
+            })
+        };
         assert_eq!(parse(r#"{"v":2,"cmd":"end_flight"}"#), Ok(EndFlight));
         let terminated = "{\"v\":2,\"cmd\":\"discard_flight\"}\0\0";
         assert_eq!(parse(terminated), Ok(DiscardFlight));
