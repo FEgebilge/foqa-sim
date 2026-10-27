@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
-use std::sync::{Arc, Mutex, OnceLock, Weak};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -32,7 +32,6 @@ pub struct Connect {
     sites: Arc<Sites>,
     uploader: Uploader,
     wake: Mutex<Sender<()>>,
-    shared: Arc<OnceLock<Weak<Shared>>>,
     /// The device code shown while a device sign-in waits, per origin.
     device: Mutex<HashMap<String, Device>>,
     app: AppHandle,
@@ -85,18 +84,14 @@ impl Connect {
             Arc::new(KeyringStore),
             allow_local,
         )?);
-        let shared: Arc<OnceLock<Weak<Shared>>> = Arc::new(OnceLock::new());
-        let s = Arc::clone(&shared);
-        let flight = move |id: &str| s.get()?.upgrade()?.compact_flight(id);
         let handle = app.clone();
-        let uploader = Uploader::new(Arc::clone(&sites), attempts, flight)
+        let uploader = Uploader::new(Arc::clone(&sites), attempts)
             .on_change(move |id| emit(&handle, json!({ "attempt": id })));
         let (tx, rx) = mpsc::channel();
         let connect = Arc::new(Self {
             sites,
             uploader,
             wake: Mutex::new(tx),
-            shared,
             device: Mutex::new(HashMap::new()),
             app,
         });
@@ -106,11 +101,6 @@ impl Connect {
             .name("uploader".into())
             .spawn(move || run.run(rx))?;
         Ok(connect)
-    }
-
-    /// Hands the uploader the app's state, for the flight files.
-    pub fn attach(&self, shared: &Arc<Shared>) {
-        let _ = self.shared.set(Arc::downgrade(shared));
     }
 
     /// One attempt at a time, until the app quits.
@@ -131,10 +121,11 @@ impl Connect {
         let _ = lock(&self.wake).send(());
     }
 
-    /// The core changed an attempt: done → upload, abandoned → tell the site.
+    /// The core changed an attempt: sliced → upload (`done` too: one done
+    /// without a slice is refused), abandoned → tell the site.
     pub fn attempt_changed(&self, record: &Record) {
         match record.state {
-            AttemptState::Done | AttemptState::Sliced => self.uploader.core_done(&record.id),
+            AttemptState::Sliced | AttemptState::Done => self.uploader.core_done(&record.id),
             AttemptState::Abandoned | AttemptState::FailedStart => {
                 self.uploader.core_abandoned(&record.id)
             }
@@ -165,9 +156,9 @@ impl Connect {
 }
 
 impl AttemptHooks for Connect {
-    fn before_place(&self, record: &Record) {
+    fn before_place(&self, record: &Record) -> Option<String> {
         self.uploader
-            .issue(&record.id, &record.key, &record.definition_sha256);
+            .issue(&record.id, &record.key, &record.definition_sha256)
     }
 
     fn ranking(&self, key: &str) -> Option<(&'static str, String, Option<String>)> {

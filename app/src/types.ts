@@ -396,6 +396,7 @@ export interface AttemptRecord {
   created_at: string;
   updated_at: string;
   flight_id: string | null;
+  ref?: string | null;    // the attempt marker's reference (A7); null for a local attempt
   begin_s: number | null;
   touchdown_s: number | null;
   reason: string | null;  // why it finished or was abandoned
@@ -405,6 +406,8 @@ export interface AttemptRecord {
 export interface AttemptResult {
   challenge: string;
   challenge_version: number;
+  aircraft?: { icao: string | null; class: string | null };
+  marker?: { ref: string | null; begin_s: number; end_s: number | null } | null;
   valid: boolean;
   checks: { name: string; ok: boolean; detail: string }[];
   gate_s: number | null;

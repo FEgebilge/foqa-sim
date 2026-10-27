@@ -655,9 +655,12 @@ dependencies = [
  "challenge",
  "debrief",
  "fdm-core",
+ "recorder",
  "rules",
  "serde_json",
  "sim-link",
+ "tempfile",
+ "testkit",
 ]
 
 [[package]]
@@ -1301,6 +1304,7 @@ dependencies = [
  "connect",
  "debrief",
  "open",
+ "recorder",
  "serde",
  "serde_json",
  "sha2",

@@ -1,6 +1,8 @@
 //! The local attempt lifecycle (docs/challenge-protocol.md B5): one folder
 //! per attempt with `attempt.json`, the definition flown (`challenge.json`),
-//! the local grade (`result.local.json`) and an append-only `log.jsonl`.
+//! the local grade (`result.local.json`), the recording slice of an
+//! attempt with a marker reference (`slice.fqz`) and an append-only
+//! `log.jsonl`.
 //! Knows no site, token or upload state; those live in the `connect`
 //! sidecar.
 
@@ -24,9 +26,12 @@ const RECORD: &str = "attempt.json";
 const DEFINITION: &str = "challenge.json";
 const RESULT: &str = "result.local.json";
 const LOG: &str = "log.jsonl";
+/// What a site receives (A5).
+pub const SLICE: &str = "slice.fqz";
 
-/// Core states (B5). The core ends at `Done`; `Sliced` waits for the
-/// recording slice (F1).
+/// Core states (B5). The core ends at `Done`. An attempt with a marker
+/// reference passes `Sliced` once its slice is cut; one without goes from
+/// `GradedLocal` to `Done`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum State {
@@ -61,7 +66,8 @@ impl State {
         )
     }
 
-    /// Between placing and the grade: what a crash leaves to recover.
+    /// Between placing and the grade: what a crash leaves to recover
+    /// (an attempt graded but not sliced is recovered apart).
     fn interrupted(self) -> bool {
         use State::*;
         matches!(self, Placing | Flying | Approach | Rollout | Finished)
@@ -90,6 +96,11 @@ pub struct Record {
     pub created_at: String,
     pub updated_at: String,
     pub flight_id: Option<String>,
+    /// The opaque reference its attempt markers carry (A7), chosen by the
+    /// module that issued it; `None` for a local attempt, which is never
+    /// sliced.
+    #[serde(rename = "ref", default)]
+    pub marker_ref: Option<String>,
     /// Sim time the flight had reached when the aircraft was placed: only
     /// a landing after it is graded, until the recording carries the
     /// attempt marker (A7).
@@ -111,6 +122,15 @@ pub struct View {
 
 /// Grades an attempt from its record and the definition flown.
 pub type Grade<'a> = &'a dyn Fn(&Record, &str) -> Result<Attempt, String>;
+
+/// A recording slice cut for an attempt.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Cut {
+    pub bytes: Vec<u8>,
+    /// The window it covers, sim s.
+    pub from_s: f64,
+    pub to_s: f64,
+}
 
 /// The attempt folders, written by one owner at a time.
 pub struct Attempts {
@@ -156,6 +176,7 @@ impl Attempts {
             created_at: now.clone(),
             updated_at: now,
             flight_id: None,
+            marker_ref: None,
             begin_s: None,
             touchdown_s: None,
             reason: None,
@@ -242,12 +263,13 @@ impl Attempts {
 
     /// Places the aircraft with `place`, which returns what to log with
     /// `placed`; on its error the attempt is `failed_start` and the error
-    /// returned.
+    /// returned. `marker_ref` is the reference its markers carry.
     pub fn place(
         &self,
         id: &str,
         flight_id: &str,
         begin_s: Option<f64>,
+        marker_ref: Option<&str>,
         place: impl FnOnce(&Challenge) -> Result<Value, String>,
     ) -> Result<Record, String> {
         let challenge = Challenge::parse(&self.definition(id)?)?;
@@ -256,9 +278,11 @@ impl Attempts {
             Ok(mut fields) => {
                 if let Value::Object(map) = &mut fields {
                     map.insert("flight_id".into(), flight_id.into());
+                    map.insert("ref".into(), marker_ref.into());
                 }
                 self.step(id, State::Flying, "placed", fields, |r| {
                     r.flight_id = Some(flight_id.to_owned());
+                    r.marker_ref = marker_ref.map(Into::into);
                     r.begin_s = begin_s;
                 })
             }
@@ -357,8 +381,8 @@ impl Attempts {
     }
 
     /// Records a grade: the gate and touchdown it found, the result file,
-    /// then `graded_local` and `done`. A failed grade is logged and the
-    /// attempt stays `finished`.
+    /// then `graded_local`, and `done` unless it waits for its slice. A
+    /// failed grade is logged and the attempt stays `finished`.
     fn graded(&self, record: Record, result: Result<Attempt, String>) -> Result<Record, String> {
         let id = &record.id;
         let attempt = match result {
@@ -398,10 +422,55 @@ impl Attempts {
             "failed_checks": failed,
         });
         let touchdown_s = attempt.touchdown_s;
-        self.step(id, State::GradedLocal, "graded_local", fields, |r| {
+        let record = self.step(id, State::GradedLocal, "graded_local", fields, |r| {
             r.touchdown_s = r.touchdown_s.or(touchdown_s);
         })?;
+        if record.marker_ref.is_some() {
+            return Ok(record);
+        }
         self.step(id, State::Done, "done", json!({}), |_| {})
+    }
+
+    /// Cuts the slice of a graded attempt with `cut`, writes it, then
+    /// `sliced` and `done`. A failed cut is logged and the attempt stays
+    /// `graded_local`, to be cut again (`unsliced`).
+    pub fn slice(
+        &self,
+        id: &str,
+        cut: impl FnOnce(&Record) -> Result<Cut, String>,
+    ) -> Result<Record, String> {
+        let record = self.get(id)?;
+        if record.state != State::GradedLocal || record.marker_ref.is_none() {
+            return Err(format!("attempt {} has no slice to cut", record.n));
+        }
+        let dir = self.folder(id)?;
+        let written = cut(&record).and_then(|c| {
+            let part = dir.join(format!("{SLICE}.part"));
+            fs::write(&part, &c.bytes).map_err(text)?;
+            fs::rename(part, dir.join(SLICE)).map_err(text)?;
+            Ok(c)
+        });
+        let c = match written {
+            Ok(c) => c,
+            Err(e) => {
+                self.note(id, "error", json!({ "during": "slicing", "message": e }))?;
+                return Err(e);
+            }
+        };
+        let fields = json!({
+            "bytes": c.bytes.len(), "sha256": sha256_hex(&c.bytes),
+            "from_s": c.from_s, "to_s": c.to_s,
+        });
+        self.step(id, State::Sliced, "sliced", fields, |_| {})?;
+        self.step(id, State::Done, "done", json!({}), |_| {})
+    }
+
+    /// Attempts graded but waiting for their slice: a failed cut or a crash.
+    pub fn unsliced(&self) -> Vec<String> {
+        let waiting = self
+            .records()
+            .filter(|r| r.state == State::GradedLocal && r.marker_ref.is_some());
+        waiting.map(|r| r.id).collect()
     }
 
     /// At start-up: each attempt a crash left between placing and its
@@ -548,6 +617,11 @@ pub(crate) mod tests {
         Attempt {
             challenge: "test-20".into(),
             challenge_version: 1,
+            aircraft: challenge::Flown {
+                icao: Some("B738".into()),
+                class: Some("transport".into()),
+            },
+            marker: None,
             valid: touchdown_s.is_some(),
             checks: vec![Check {
                 name: "runway",
@@ -572,8 +646,12 @@ pub(crate) mod tests {
 
     /// An attempt placed in flight-1 at sim time `begin_s`.
     fn flying(a: &Attempts, begin_s: f64) -> Record {
+        flying_as(a, begin_s, None)
+    }
+
+    fn flying_as(a: &Attempts, begin_s: f64, marker_ref: Option<&str>) -> Record {
         let r = a.create("test-20-v1", JSON).unwrap();
-        a.place(&r.id, "flight-1", Some(begin_s), |_| {
+        a.place(&r.id, "flight-1", Some(begin_s), marker_ref, |_| {
             Ok(json!({ "start": { "alt_ft": 2600 } }))
         })
         .unwrap()
@@ -643,10 +721,53 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn an_attempt_with_a_reference_is_sliced_before_it_is_done() {
+        let (_tmp, a) = attempts();
+        let r = flying_as(&a, 100.0, Some("Qe3v1hJ0dEa9fP2kLm7xRw"));
+        assert_eq!(r.marker_ref.as_deref(), Some("Qe3v1hJ0dEa9fP2kLm7xRw"));
+        let finished = a.finish(&r.id, "stopped", &|_, _| Ok(graded(Some(400.0))));
+        assert_eq!(finished.unwrap().state, State::GradedLocal);
+        assert_eq!(a.unsliced(), [r.id.as_str()]);
+
+        // A failed cut is logged and cut again later.
+        assert!(
+            a.slice(&r.id, |_| Err("flight file locked".into()))
+                .is_err()
+        );
+        assert_eq!(a.get(&r.id).unwrap().state, State::GradedLocal);
+        let cut = Cut {
+            bytes: b"FQJC slice".to_vec(),
+            from_s: 90.0,
+            to_s: 405.0,
+        };
+        let done = a.slice(&r.id, |_| Ok(cut)).unwrap();
+        assert_eq!(done.state, State::Done);
+        assert!(a.unsliced().is_empty());
+        let dir = a.folder(&r.id).unwrap();
+        assert_eq!(fs::read(dir.join(SLICE)).unwrap(), b"FQJC slice");
+        let log = read_log(&dir);
+        let sliced = log.iter().find(|l| l["event"] == "sliced").unwrap();
+        assert_eq!(sliced["sha256"], sha256_hex(b"FQJC slice").as_str());
+        assert_eq!(
+            (sliced["bytes"].as_u64(), sliced["to_s"].as_f64()),
+            (Some(10), Some(405.0))
+        );
+        assert_eq!(
+            log[2]["ref"], "Qe3v1hJ0dEa9fP2kLm7xRw",
+            "placed with its ref"
+        );
+        assert!(a.slice(&r.id, |_| unreachable!()).is_err(), "cut once");
+        // A local attempt has nothing to slice.
+        let local = flying(&a, 100.0);
+        let done = a.finish(&local.id, "stopped", &|_, _| Ok(graded(Some(400.0))));
+        assert_eq!(done.unwrap().state, State::Done);
+    }
+
+    #[test]
     fn a_failed_placement_or_grade_is_logged() {
         let (_tmp, a) = attempts();
         let r = a.create("test-20-v1", JSON).unwrap();
-        let err = a.place(&r.id, "flight-1", None, |_| {
+        let err = a.place(&r.id, "flight-1", None, None, |_| {
             Err("no answer from the sim".into())
         });
         assert_eq!(err.unwrap_err(), "no answer from the sim");

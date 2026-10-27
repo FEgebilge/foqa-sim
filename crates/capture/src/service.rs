@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 
 use debrief::{Analysis, FlightSummary, Index, LandingNotice, RecorderStatus, Station, flight_id};
 use fdm_core::{Airport, Lfl};
-use recorder::{Acquisition, TOUCHDOWN_WINDOW_US, Telemetry};
+use recorder::{Acquisition, AttemptMarker, TOUCHDOWN_WINDOW_US, Telemetry};
 
 use crate::history::History;
 use crate::monitor::Monitor;
@@ -91,6 +91,13 @@ impl SimRequests {
         answer
     }
 
+    /// Records an attempt's begin or end marker into the open flight at the
+    /// next sim frame (docs/challenge-protocol.md A7); with no flight open
+    /// it is dropped.
+    pub fn attempt_marker(&self, marker: AttemptMarker) {
+        self.send(Command::Attempt(marker));
+    }
+
     fn send(&self, command: Command) {
         // A stopped service drops the request, disconnecting its answer.
         let _ = self.0.send(command);
@@ -106,7 +113,7 @@ pub struct Service {
     /// An analysis for the panel is running.
     analysing: Arc<AtomicBool>,
     requests: Sender<Command>,
-    /// The app's requests (`SimRequests`): only `Place` and `Airport`.
+    /// The app's requests (`SimRequests`): `Place`, `Airport` and `Attempt`.
     requested: Receiver<Command>,
 }
 

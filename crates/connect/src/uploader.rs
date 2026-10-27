@@ -4,11 +4,9 @@
 //! until the local upload deadline. State lives in the sidecars, so the
 //! queue survives restarts; offline it simply stays queued.
 //!
-//! What is uploaded: the attempt's slice `slice.fqz` (A5). Until
-//! `fdm slice` and the attempt marker exist (F1), an attempt without one
-//! uploads its whole flight's compact file (`.fqz`), which carries more
-//! than A5 allows (tail number, aircraft title, the rest of the flight).
-//! TODO(F1): upload only the slice once the core cuts one.
+//! What is uploaded: only the attempt's slice `slice.fqz` (A5), which the
+//! core cuts from the flight by the attempt's marker; an attempt without
+//! one is refused, never replaced by the whole flight.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -35,13 +33,10 @@ const HOUR_S: i64 = 3600;
 const NO_RECORDING_S: i64 = 30;
 
 type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
-type FlightFile = Box<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 
 pub struct Uploader {
     sites: Arc<Sites>,
     attempts: PathBuf,
-    /// The compact flight file of a local attempt id, if written yet.
-    flight: FlightFile,
     changed: Box<dyn Fn(&str) + Send + Sync>,
     now: Clock,
 }
@@ -64,15 +59,10 @@ pub struct View {
 }
 
 impl Uploader {
-    pub fn new(
-        sites: Arc<Sites>,
-        attempts: PathBuf,
-        flight: impl Fn(&str) -> Option<PathBuf> + Send + Sync + 'static,
-    ) -> Self {
+    pub fn new(sites: Arc<Sites>, attempts: PathBuf) -> Self {
         Self {
             sites,
             attempts,
-            flight: Box::new(flight),
             changed: Box::new(|_| {}),
             now: Arc::new(crate::now_ms),
         }
@@ -131,13 +121,12 @@ impl Uploader {
     }
 
     /// Before placing (B5): when library entry `key` came from a site,
-    /// asks it for an attempt under the local id; offline or signed out,
-    /// the attempt is practice. A local file gets no sidecar.
-    pub fn issue(&self, id: &str, key: &str, definition_sha256: &str) {
-        let Some((site, linked)) = self.sites.source(key) else {
-            return;
-        };
-        let Some(dir) = self.dir(id) else { return };
+    /// asks it for an attempt under the local id and returns the marker
+    /// `ref` it issued; offline or signed out, the attempt is practice. A
+    /// local file gets no sidecar.
+    pub fn issue(&self, id: &str, key: &str, definition_sha256: &str) -> Option<String> {
+        let (site, linked) = self.sites.source(key)?;
+        let dir = self.dir(id)?;
         let origin = site.origin.as_str();
         let user = site.user.as_ref().map(|u| u.id.clone());
         let mut car = Sidecar::new(origin, user, &linked.id, linked.version);
@@ -146,7 +135,7 @@ impl Uploader {
         let practice = |why: &str| format!("Practice: {why} Graded here, never uploaded.");
         let Some(session) = self.sites.session(origin).filter(|s| s.has_grant()) else {
             car.text = practice(&format!("signed out of {host} at the start."));
-            return self.save(
+            self.save(
                 id,
                 &dir,
                 &mut car,
@@ -154,6 +143,7 @@ impl Uploader {
                 "practice",
                 json!({ "reason": "signed_out" }),
             );
+            return None;
         };
         match session.issue(&linked.id, linked.version, id) {
             Ok((a, definition)) => {
@@ -175,6 +165,7 @@ impl Uploader {
                 if matches {
                     car.text = format!("Ranked on {host}: fly within {} min.", a.fly_within_s / 60);
                     self.save(id, &dir, &mut car, SiteState::Issued, "issued", fields);
+                    Some(a.marker_ref)
                 } else {
                     // The site would score another definition than the one flown.
                     let _ = session.abandon(&a.id);
@@ -182,6 +173,7 @@ impl Uploader {
                         "this challenge changed on {host}; take it again from Sites."
                     ));
                     self.save(id, &dir, &mut car, SiteState::Practice, "practice", fields);
+                    None
                 }
             }
             Err(e) => {
@@ -189,6 +181,7 @@ impl Uploader {
                 car.detail = detail(&e);
                 let fields = json!({ "reason": e.code() });
                 self.save(id, &dir, &mut car, SiteState::Practice, "practice", fields);
+                None
             }
         }
     }
@@ -328,16 +321,19 @@ impl Uploader {
             car.next_at_ms = None;
             return self.save(id, dir, &mut car, SiteState::Expired, "expired", json!({}));
         }
-        let Some(path) = Some(dir.join(SLICE))
-            .filter(|p| p.is_file())
-            .or_else(|| (self.flight)(id))
-        else {
-            return wait(
+        let path = dir.join(SLICE);
+        if !path.is_file() {
+            car.text = "This attempt has no recording slice, so it can't be uploaded.".into();
+            car.next_at_ms = None;
+            return self.save(
+                id,
+                dir,
                 &mut car,
-                "Waiting for the recording to close…".into(),
-                Some(now + NO_RECORDING_S * 1000),
+                SiteState::UploadRefused,
+                "upload_refused",
+                json!({ "reason": "no_slice" }),
             );
-        };
+        }
         let bytes = match fs::read(&path) {
             Ok(b) => b,
             Err(e) => {
@@ -636,12 +632,11 @@ mod tests {
         let attempts = tmp.path().join("attempts");
         let dir = attempts.join(ID);
         fs::create_dir_all(&dir).unwrap();
-        let flight = tmp.path().join("flight-1.fqz");
-        fs::write(&flight, b"FQJC compact flight").unwrap();
+        fs::write(dir.join(SLICE), b"FQJC slice").unwrap();
         let clock = Arc::new(AtomicI64::new(1_000_000));
         let c = Arc::clone(&clock);
-        let up = Uploader::new(Arc::clone(&sites), attempts, move |_| Some(flight.clone()))
-            .clock(move || c.load(Ordering::SeqCst));
+        let up =
+            Uploader::new(Arc::clone(&sites), attempts).clock(move || c.load(Ordering::SeqCst));
         World {
             mock,
             _tmp: tmp,
@@ -661,20 +656,20 @@ mod tests {
         fn advance(&self, ms: i64) {
             self.clock.fetch_add(ms, Ordering::SeqCst);
         }
-        fn issue(&self) {
-            self.up.issue(ID, "ltfj-06-v1", &sha(DEFINITION.as_bytes()));
+        fn issue(&self) -> Option<String> {
+            self.up.issue(ID, "ltfj-06-v1", &sha(DEFINITION.as_bytes()))
         }
     }
 
     #[test]
     fn an_issued_attempt_uploads_its_recording_and_polls_to_its_score() {
         let w = world(vec![]);
-        w.up.issue(ID, "a-local-file-v1", "x");
+        assert_eq!(w.up.issue(ID, "a-local-file-v1", "x"), None);
         assert!(
             Sidecar::read(&w.dir).is_none(),
             "a local file gets no sidecar"
         );
-        w.issue();
+        assert_eq!(w.issue().as_deref(), Some("Qe3v1hJ0dEa9fP2kLm7xRw"));
         let car = w.car();
         assert_eq!(
             (car.state, car.attempt_id.as_deref(), car.definition_match),
@@ -708,10 +703,10 @@ mod tests {
             .into_iter()
             .find(|r| r.path.ends_with("/recording"))
             .unwrap();
-        assert_eq!(put.body, b"FQJC compact flight");
+        assert_eq!(put.body, b"FQJC slice");
         assert_eq!(
             put.header("x-foqa-sha256"),
-            Some(sha(b"FQJC compact flight").as_str())
+            Some(sha(b"FQJC slice").as_str())
         );
         assert_eq!(put.header("content-type"), Some("application/octet-stream"));
         assert_eq!(w.up.pending(&w.origin), 0);
@@ -738,19 +733,19 @@ mod tests {
     }
 
     #[test]
-    fn a_slice_wins_over_the_whole_flight() {
+    fn without_a_slice_nothing_is_uploaded() {
         let w = world(vec![]);
         w.issue();
-        fs::write(w.dir.join(SLICE), b"FQJC slice").unwrap();
+        fs::remove_file(w.dir.join(SLICE)).unwrap();
         w.up.core_done(ID);
         w.up.run_due();
-        let put = w
-            .mock
-            .requests()
-            .into_iter()
-            .find(|r| r.path.ends_with("/recording"))
-            .unwrap();
-        assert_eq!(put.body, b"FQJC slice");
+        let car = w.car();
+        assert_eq!(
+            (car.state, car.next_at_ms),
+            (SiteState::UploadRefused, None)
+        );
+        assert!(car.text.contains("no recording slice"), "{}", car.text);
+        assert_eq!(w.mock.hits("/recording"), 0, "never the whole flight");
     }
 
     #[test]
@@ -852,7 +847,7 @@ mod tests {
     fn practice_when_signed_out_at_the_start_and_abandon_tells_the_site() {
         let w = world(vec![]);
         w.sites.session(&w.origin).unwrap().drop_grant();
-        w.issue();
+        assert_eq!(w.issue(), None, "practice has no marker ref");
         let car = w.car();
         assert_eq!(car.state, SiteState::Practice);
         assert!(
@@ -878,7 +873,10 @@ mod tests {
     #[test]
     fn a_definition_other_than_the_one_issued_is_practice() {
         let w = world(vec![]);
-        w.up.issue(ID, "ltfj-06-v1", &sha(b"another definition"));
+        assert_eq!(
+            w.up.issue(ID, "ltfj-06-v1", &sha(b"another definition")),
+            None
+        );
         let car = w.car();
         assert_eq!(
             (car.state, car.definition_match),

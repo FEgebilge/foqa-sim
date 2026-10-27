@@ -136,7 +136,6 @@ fn main() {
             let shared = Arc::new(shared);
             #[cfg(feature = "connect")]
             {
-                connect.attach(&shared);
                 app.manage(connect);
             }
             app.manage(Arc::clone(&shared));

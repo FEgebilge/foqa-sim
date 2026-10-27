@@ -1,25 +1,27 @@
 //! The commands of `docs/debrief-api.md` and the state they share with the
 //! recorder.
 
-use std::io;
+use std::fs::File;
+use std::io::{self, BufReader};
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use ::debrief::{
     Debrief, FlightSummary, Index, LandingNotice, RecorderStatus, Station, StorageUsage,
 };
 use capture::{ASK_TIMEOUT, InitPosition, SimRequests, Start, Stopper};
 use challenge::{Attempt, Challenge, Mode, StartState};
+use recorder::{AttemptMarker, AttemptPhase};
 use serde::Serialize;
 use serde_json::json;
 use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
 
-use crate::attempts::{Attempts, Record, State as AttemptState, View};
+use crate::attempts::{Attempts, Cut, Record, State as AttemptState, View};
 use crate::library::{Briefing, Entry, Library};
 use crate::setup::{Setup, SetupStatus};
 
@@ -47,8 +49,9 @@ pub struct Shared {
 /// Where an optional module joins the attempt lifecycle; the core knows
 /// no site, token or upload (docs/challenge-protocol.md B1).
 pub trait AttemptHooks: Send + Sync {
-    /// After the attempt is created, before the aircraft is placed.
-    fn before_place(&self, record: &Record);
+    /// After the attempt is created, before the aircraft is placed: the
+    /// opaque reference its markers carry, if the module has one for it.
+    fn before_place(&self, record: &Record) -> Option<String>;
     /// The pre-flight card's ranking line for library entry `key`, when it
     /// is not a local file: `(state, text, fix)`.
     fn ranking(&self, key: &str) -> Option<(&'static str, String, Option<String>)>;
@@ -133,14 +136,6 @@ impl Shared {
     /// Imports a challenge's exact bytes into the library.
     pub fn import_challenge(&self, json: &str) -> Result<Entry, String> {
         self.library.import(json)
-    }
-
-    /// The compact flight file (`.fqz`) an attempt was flown in, once the
-    /// flight is closed and compacted.
-    pub fn compact_flight(&self, attempt_id: &str) -> Option<PathBuf> {
-        let id = self.attempts.get(attempt_id).ok()?.flight_id?;
-        let path = self.flight(&id).ok()?;
-        (path.extension()? == "fqz").then_some(path)
     }
 }
 
@@ -332,22 +327,86 @@ impl Shared {
         let (lines, flight) = self.preflight(key, &c);
         let (flight_id, begin_s) = flight.ok_or_else(|| lines[0].text.clone())?;
         let record = self.attempts.create(key, definition)?;
-        if let Some(hooks) = &self.hooks {
-            hooks.before_place(&record);
-        }
+        let marker_ref = self
+            .hooks
+            .as_ref()
+            .and_then(|hooks| hooks.before_place(&record))
+            .filter(|r| recorder::is_reference(r));
         let checks: serde_json::Map<_, _> = lines
             .iter()
             .map(|l| (l.name.to_owned(), l.state.into()))
             .collect();
-        self.attempts.place(&record.id, &flight_id, begin_s, |c| {
-            let start = match c.start.mode {
-                Mode::Teleport => {
-                    serde_json::to_value(self.place(c)?).map_err(|e| e.to_string())?
-                }
-                Mode::SelfFlown => "self".into(),
-            };
-            Ok(json!({ "start": start, "preflight": checks }))
-        })
+        let reference = marker_ref.as_deref();
+        self.attempts
+            .place(&record.id, &flight_id, begin_s, reference, |c| {
+                let start = match c.start.mode {
+                    Mode::Teleport => {
+                        serde_json::to_value(self.place(c)?).map_err(|e| e.to_string())?
+                    }
+                    Mode::SelfFlown => "self".into(),
+                };
+                let begin = marker(&c.id, c.version, AttemptPhase::Begin, reference, None);
+                self.sim.attempt_marker(begin);
+                Ok(json!({ "start": start, "preflight": checks }))
+            })
+    }
+
+    /// Writes the end marker of an attempt still open, into its flight if
+    /// that is the one recording.
+    fn end_marker(&self, r: &Record, reason: &str) {
+        let open = matches!(
+            r.state,
+            AttemptState::Flying | AttemptState::Approach | AttemptState::Rollout
+        );
+        if !open || !r.flight_id.as_deref().is_some_and(|f| self.recording(f)) {
+            return;
+        }
+        let reason = match reason {
+            "finish" | "stopped" => "stopped",
+            "cancelled" => "abandoned",
+            other => other,
+        };
+        let reference = r.marker_ref.as_deref();
+        let end = marker(
+            &r.challenge,
+            r.version,
+            AttemptPhase::End,
+            reference,
+            Some(reason),
+        );
+        self.sim.attempt_marker(end);
+    }
+
+    fn recording(&self, flight: &str) -> bool {
+        matches!(&*lock(&self.status), RecorderStatus::Recording { flight_id, .. } if flight_id == flight)
+    }
+
+    /// Abandons attempt `id` (`cancelled`, `replaced`), ending its marker.
+    fn abandon(&self, id: &str, reason: &str) -> Result<Record, String> {
+        self.end_marker(&self.attempts.get(id)?, reason);
+        self.attempts.abandon(id, reason)
+    }
+
+    /// The slice of an attempt from its flight (A5). While the flight
+    /// records, waits up to `SLICE_WAIT` for the data past the end marker.
+    fn cut(&self, r: &Record) -> Result<Cut, String> {
+        let reference = r.marker_ref.as_deref().ok_or("the attempt has no marker")?;
+        let id = r.flight_id.as_deref().ok_or("the attempt has no flight")?;
+        let until = Instant::now() + SLICE_WAIT;
+        loop {
+            let file = File::open(self.flight(id)?).map_err(|e| format!("{id}: {e}"))?;
+            let slice = recorder::slice(BufReader::new(file), recorder::Cut::Attempt(reference))
+                .map_err(|e| format!("{id}: {e}"))?
+                .ok_or_else(|| format!("{id} has no begin marker for this attempt"))?;
+            if slice.complete || !self.recording(id) || Instant::now() >= until {
+                return Ok(Cut {
+                    bytes: slice.to_bytes().map_err(|e| e.to_string())?,
+                    from_s: slice.from.as_secs_f64(),
+                    to_s: slice.to.as_secs_f64(),
+                });
+            }
+            thread::sleep(Duration::from_secs(1));
+        }
     }
 
     /// A landing in the recorded flight: attempts flying in it go to the
@@ -366,7 +425,7 @@ impl Shared {
                     .get(&id)
                     .is_ok_and(|r| r.state == AttemptState::Rollout)
                 {
-                    shared.finish(&id, "stopped");
+                    let _ = shared.finish(&id, "stopped");
                 }
             });
         }
@@ -381,21 +440,63 @@ impl Shared {
         }
     }
 
-    fn finish(&self, id: &str, reason: &str) {
-        if let Err(e) = self.attempts.finish(id, reason, &|r, d| self.grade(r, d)) {
-            eprintln!("attempt {id}: {e}");
+    /// Ends attempt `id` (its end marker first) and grades it; its slice is
+    /// then cut on a thread of its own.
+    fn finish(self: &Arc<Self>, id: &str, reason: &str) -> Result<Record, String> {
+        if let Ok(r) = self.attempts.get(id) {
+            self.end_marker(&r, reason);
+        }
+        let record = self
+            .attempts
+            .finish(id, reason, &|r, d| self.grade(r, d))
+            .inspect_err(|e| eprintln!("attempt {id}: {e}"))?;
+        if record.state == AttemptState::GradedLocal {
+            let (shared, id) = (Arc::clone(self), id.to_owned());
+            thread::spawn(move || shared.slice(&id));
+        }
+        Ok(record)
+    }
+
+    fn slice(&self, id: &str) {
+        if let Err(e) = self.attempts.slice(id, |r| self.cut(r)) {
+            eprintln!("attempt {id}: not sliced: {e}");
         }
     }
 
-    /// At start-up: attempts a crash left open, resolved from their flights.
-    pub fn recover(&self) {
+    /// At start-up: attempts a crash left open, resolved from their
+    /// flights, then the graded ones still to slice.
+    pub fn recover(self: &Arc<Self>) {
         self.attempts.recover(&|r, d| self.grade(r, d));
+        let shared = Arc::clone(self);
+        thread::spawn(move || {
+            for id in shared.attempts.unsliced() {
+                shared.slice(&id);
+            }
+        });
     }
 }
 
 /// After a landing, how long the rollout runs before the attempt is graded
 /// on its own (protocol B5).
 const ROLLOUT: Duration = Duration::from_secs(120);
+/// How long a slice waits for the recording to pass its end marker.
+const SLICE_WAIT: Duration = Duration::from_secs(15);
+
+fn marker(
+    challenge: &str,
+    version: u32,
+    phase: AttemptPhase,
+    reference: Option<&str>,
+    reason: Option<&str>,
+) -> AttemptMarker {
+    AttemptMarker {
+        phase,
+        challenge: challenge.to_owned(),
+        version,
+        reference: reference.map(Into::into),
+        reason: reason.map(Into::into),
+    }
+}
 
 /// A line of the pre-flight card.
 #[derive(Debug, Clone, Serialize)]
@@ -496,7 +597,7 @@ pub async fn attempt_fly_again(
     blocking(move || {
         let record = shared.attempts.get(&id)?;
         if record.state.can_become(AttemptState::Abandoned) {
-            shared.attempts.abandon(&id, "replaced")?;
+            shared.abandon(&id, "replaced")?;
         }
         shared.start_attempt(&record.key, &shared.attempts.definition(&id)?)
     })
@@ -507,17 +608,12 @@ pub async fn attempt_fly_again(
 #[tauri::command]
 pub async fn attempt_finish(id: String, shared: State<'_, Arc<Shared>>) -> Result<Record, String> {
     let shared = Arc::clone(&shared);
-    blocking(move || {
-        shared
-            .attempts
-            .finish(&id, "finish", &|r, d| shared.grade(r, d))
-    })
-    .await
+    blocking(move || shared.finish(&id, "finish")).await
 }
 
 #[tauri::command]
 pub fn attempt_abandon(id: String, shared: State<'_, Arc<Shared>>) -> Result<Record, String> {
-    shared.attempts.abandon(&id, "cancelled")
+    shared.abandon(&id, "cancelled")
 }
 
 #[tauri::command]

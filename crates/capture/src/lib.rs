@@ -21,7 +21,9 @@ use std::path::{Path, PathBuf};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use fdm_core::{Airport, Lfl};
-use recorder::{Acquisition, Column, RawWriter, Recorder, SimEvent, Telemetry, TelemetrySource};
+use recorder::{
+    Acquisition, AttemptMarker, Column, RawWriter, Recorder, SimEvent, Telemetry, TelemetrySource,
+};
 
 pub use live::LiveSource;
 pub use place::{ASK_TIMEOUT, Ask, InitPosition, Start, flaps_set_data};
@@ -53,6 +55,9 @@ pub enum Command {
     Close,
     /// Record a pilot report with this note into the open flight.
     Mark(String),
+    /// Record an attempt marker into the open flight; dropped with none
+    /// open, so it never lands in the next one.
+    Attempt(AttemptMarker),
     /// Open a flight at the next frame, as a flight start does: to fly on
     /// after ending or discarding one without leaving to the menu.
     Start,
@@ -69,7 +74,7 @@ impl Command {
         match self {
             Self::Place(ask) => ask.answer(Err(reason.into())),
             Self::Airport(ask) => ask.answer(Err(reason.into())),
-            Self::Close | Self::Mark(_) | Self::Start => {}
+            Self::Close | Self::Mark(_) | Self::Attempt(_) | Self::Start => {}
         }
     }
 }
@@ -101,6 +106,10 @@ pub fn record(
                 continue;
             }
             Some(Command::Mark(note)) => Some(Telemetry::Event(SimEvent::PilotReport(note))),
+            Some(Command::Attempt(m)) if flight.is_some() => {
+                Some(Telemetry::Event(SimEvent::Attempt(m)))
+            }
+            Some(Command::Attempt(_)) => continue,
             Some(Command::Place(ask)) => {
                 // Queued behind a long flight close: the app may have given up.
                 if let Some(ask) = ask.live(Instant::now()) {
