@@ -5,6 +5,7 @@
 # No hard_landing_g: the 172S maintenance manual sets no numeric
 # hard-landing inspection load.
 # No vle/vlo: fixed gear.
+# No main_gear_track: the POH gives it only in the three-view drawing.
 type: C172
 name: Cessna 172S Skyhawk SP (G1000)
 class: light
@@ -14,3 +15,10 @@ flaps:
   - up_to: 10 deg
     vfe: { value: 110 kt, source: &poh "Cessna 172S POH, Section 2, Fig. 2-1 Airspeed Limitations, p. 2-4, https://aerocadet.com/cbts/pdf/172S-POH.pdf#page=42", note: "FLAPS 10 deg: 110 KIAS" }
   - vfe: { value: 85 kt, source: *poh, note: "FLAPS 10 deg to FULL: 85 KIAS" }
+vso: { value: 40 kt, source: "Cessna 172S POH, Section 2, Fig. 2-2 Airspeed Indicator Markings, https://aerocadet.com/cbts/pdf/172S-POH.pdf#page=38", note: "white arc 40-85 KIAS: lower limit is maximum weight VSO in landing configuration" }
+approach_speed:
+  source: "Cessna 172S POH, Section 4, Airspeeds for Normal Operation, Landing Approach, p. 4-3, https://aerocadet.com/cbts/pdf/172S-POH.pdf#page=102"
+  note: "Normal Approach, Flaps UP 65-75 KIAS, Flaps FULL 60-70 KIAS; based on 2550 lb and usable at any lesser weight. FULL is 30 deg: EASA TCDS IM.A.051 Issue 11, Section 2 (172S), item 21, wing flaps landing 0-30 deg"
+  flaps:
+    - { flap: 0 deg, ias: [65 kt, 75 kt] }
+    - { flap: 30 deg, ias: [60 kt, 70 kt] }

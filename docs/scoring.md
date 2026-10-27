@@ -365,15 +365,17 @@ landing-2 does the same:
    vref:
      source: "Boeing 737-800 FCOM/QRH PI, Vref table"
      flaps:
-       - { flap: 30 deg, weights_kg: [40000, 50000, 60000, 70000], kt: [...] }
-       - { flap: 40 deg, weights_kg: [...], kt: [...] }
+       - { flap: 30 deg, weights_kg: [40000, 50000, 60000, 70000], ias: [...] }
+       - { flap: 40 deg, weights_kg: [...], ias: [...] }
    ```
    Lookup: `weight.gross` at the start of the window (sustained 1000 ft),
-   landing flap = `flap.te_angle` at 500 ft, linear in weight and clamped
-   at the ends. The result is marked approximate outside the table.
+   landing flap = `flap.te_angle` at 500 ft, on the nearest flap entry,
+   linear in weight and clamped at the ends. The result is marked
+   approximate outside the table (weight, or a flap angle it lacks).
 2. **Profile fixed speeds** for light aircraft:
-   `approach_speed: { flaps_full: [60, 70] kt, flaps_up: [65, 75] kt }`
-   (C172 from S11 ✔). Vapp = the middle of the range, Vref = its lower end.
+   `approach_speed: { source, flaps: [{ flap: 0 deg, ias: [65 kt, 75 kt] },
+   { flap: 30 deg, ias: [60 kt, 70 kt] }] }` (C172 from S11 ✔), read on
+   the nearest flap angle. Vapp = the middle of the range, Vref = its lower end.
    `vso` is used when no published approach speed exists:
    Vapp = 1.3 VSO (S3/S4 ✔).
 3. **Recorded selected speed** (`sel.speed`, held over the window, debrief

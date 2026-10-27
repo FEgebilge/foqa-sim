@@ -102,6 +102,8 @@ rules using them stay silent.
 | `profile.vle`, `profile.vlo` | kt | Maximum speed with the gear extended; while it moves (the lower of extension and retraction) |
 | `profile.max_crosswind` | kt | Maximum demonstrated crosswind for landing (not a limit) |
 | `profile.max_tailwind` | kt | Certified maximum tailwind for takeoff and landing |
+| `profile.vso` | kt | Stalling speed in the landing configuration at maximum weight, IAS |
+| `profile.main_gear_track` | ft | Distance between the main gear centrelines |
 
 ## Type profiles
 
@@ -132,7 +134,30 @@ flaps:                          # VFE bands by flap angle, increasing
   - { vfe: { value: 85 kt, source: "..." } }   # last band: no up_to = any larger
 phases:                         # optional; moves the class's phase boundaries
   approach_ft: { value: 1500 ft, source: "FAA AIM 4-3-3 ..." }
+scoring_class: turboprop        # optional: light | turboprop | jet (docs/scoring.md)
+vso: { value: 40 kt, source: "..." }                       # optional, as the next three
+main_gear_track: { value: 18.8 ft, source: "..." }
+approach_speed:                 # published final-approach ranges (POH)
+  source: "..."
+  flaps:                        # increasing flap angle
+    - { flap: 0 deg, ias: [65 kt, 75 kt] }
+    - { flap: 30 deg, ias: [60 kt, 70 kt] }
+vref:                           # Vref by gross weight per landing flap (FCOM/QRH)
+  source: "..."
+  flaps:
+    - { flap: 30 deg, weights_kg: [40000, 60000], ias: [120 kt, 140 kt] }
 ```
+
+`scoring_class` defaults to `light` for a light class and `jet` for a
+transport one. A landing's Vref and approach speed come from the first of
+(Data4Safety's order, `docs/scoring.md` §5): the `vref` table at the gross
+weight (linear, held at its ends) on the flap angle nearest the landing
+flap; the `approach_speed` range on the nearest flap angle (Vref its lowest
+speed, the approach speed its middle); 1.3 `vso`. A value read beyond the
+table's weights or on a flap angle more than 0.5 deg from its entry is
+marked approximate. `weights_kg` are plain kilograms, as the tables are
+published, strictly increasing with one `ias` each; a table has one
+`source` (and optional `approximate`, `note`) for all its entries.
 
 `phases:` overrides the class defaults of `docs/phases.md` where the type
 differs, each value sourced like the others: `roll_kt` (kt), `climb_end_ft`,
