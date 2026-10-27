@@ -1,6 +1,6 @@
 //! Where a site's refresh token is kept (B4): the OS credential store
-//! (Windows Credential Manager through `keyring`), service `foqa-sim`,
-//! account the origin. Behind a trait so tests never touch the real store.
+//! (Windows Credential Manager, the macOS Keychain or the Secret Service on
+//! Linux, through `keyring`), service `foqa-sim`, account the origin. Behind a trait so tests never touch the real store.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -19,6 +19,16 @@ const SERVICE: &str = "foqa-sim";
 pub struct KeyringStore;
 
 impl KeyringStore {
+    /// The platform has a store that keeps a secret until it is deleted;
+    /// without one `keyring` falls back to a mock that forgets it.
+    pub fn persistent() -> bool {
+        use keyring::credential::CredentialPersistence;
+        matches!(
+            keyring::default::default_credential_builder().persistence(),
+            CredentialPersistence::UntilDelete
+        )
+    }
+
     fn entry(origin: &str) -> Result<keyring::Entry, String> {
         keyring::Entry::new(SERVICE, origin).map_err(|e| e.to_string())
     }
@@ -34,6 +44,10 @@ impl SecretStore for KeyringStore {
     }
 
     fn set(&self, origin: &str, secret: &str) -> Result<(), String> {
+        // Refused, so the session keeps it in memory and logs why.
+        if !Self::persistent() {
+            return Err("no persistent credential store on this system".into());
+        }
         Self::entry(origin)?
             .set_password(secret)
             .map_err(|e| e.to_string())
@@ -81,5 +95,15 @@ impl SecretStore for MemoryStore {
     fn delete(&self, origin: &str) -> Result<(), String> {
         lock(&self.secrets).remove(origin);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_os_store_keeps_a_secret_until_it_is_deleted() {
+        assert!(KeyringStore::persistent());
     }
 }

@@ -564,9 +564,12 @@ leaves no network activity at all.
 
 ## B4. Token storage
 
-**OS credential store via `keyring` 3.x (`windows-native`): Windows
-Credential Manager**, service `foqa-sim`, account `<origin>`, value the
-refresh token only. The access token lives in memory.
+**OS credential store via `keyring` 3.x: Windows Credential Manager**
+(`windows-native`; the macOS Keychain and the Linux Secret Service with
+`apple-native` and `sync-secret-service`), service `foqa-sim`, account
+`<origin>`, value the refresh token only. The access token lives in
+memory. A platform without a store that keeps the secret until deleted
+counts as unavailable (below), never as `keyring`'s forgetful mock.
 
 | | Credential Manager (keyring) | File in app data |
 |---|---|---|
