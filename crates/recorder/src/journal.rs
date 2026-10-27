@@ -7,7 +7,7 @@ use std::io::{self, Read, Write};
 
 use fdm_core::{Lfl, Sample, SignalId, SimTime, Ssm};
 
-use crate::{FlowEvent, SimEvent, aircraft_json, airport_json};
+use crate::{FlowEvent, SimEvent, aircraft_json, airport_json, marker_json};
 
 const MAGIC: &[u8; 4] = b"FQJR";
 const FORMAT_VERSION: u16 = 1;
@@ -32,6 +32,8 @@ const AIRPORT: u8 = 5;
 const AIRCRAFT: u8 = 6;
 /// Text is the pilot's note, possibly empty.
 const PILOT_REPORT: u8 = 7;
+/// Text is the attempt marker as JSON.
+const ATTEMPT: u8 = 8;
 /// SSM wire codes are indexes into this table.
 const SSM_CODES: [Ssm; 3] = [Ssm::Normal, Ssm::NoComputedData, Ssm::Failure];
 /// Event code of flow event `n` is `FLOW_BASE + n`.
@@ -220,6 +222,7 @@ pub(crate) fn event_parts(event: &SimEvent) -> (u8, String) {
         SimEvent::Airport(airport) => (AIRPORT, airport_json::to_json(airport).to_string()),
         SimEvent::Aircraft(id) => (AIRCRAFT, aircraft_json::to_json(id).to_string()),
         SimEvent::PilotReport(note) => (PILOT_REPORT, note.clone()),
+        SimEvent::Attempt(m) => (ATTEMPT, marker_json::to_json(m).to_string()),
     }
 }
 
@@ -232,6 +235,7 @@ pub(crate) fn event_from(code: u8, text: &[u8]) -> Result<Option<SimEvent>, Malf
         PILOT_REPORT => SimEvent::PilotReport(utf8(text)?),
         AIRPORT => SimEvent::Airport(json(text, airport_json::from_json)?),
         AIRCRAFT => SimEvent::Aircraft(json(text, aircraft_json::from_json)?),
+        ATTEMPT => SimEvent::Attempt(json(text, marker_json::from_json)?),
         _ => {
             return Ok(code
                 .checked_sub(FLOW_BASE)
@@ -330,6 +334,9 @@ mod tests {
             SimEvent::Airport(crate::airport_json::tests::ltbj()),
             SimEvent::Aircraft(crate::aircraft_json::tests::c172()),
             SimEvent::PilotReport("long flare, ballooned".into()),
+            SimEvent::Attempt(crate::marker_json::tests::begin(Some(
+                "Qe3v1hJ0dEa9fP2kLm7xRw",
+            ))),
         ]
         .map(|e| {
             w.event(t, &e).unwrap();
@@ -412,6 +419,7 @@ mod tests {
             (EVENT, vec![0; EVENT_HEAD_LEN - 1]),
             (EVENT, event_payload(FLIGHT_LOADED, &[0xff, 0xfe])),
             (EVENT, event_payload(AIRCRAFT, b"{\"title\":\"C172\"}")),
+            (EVENT, event_payload(ATTEMPT, b"{\"phase\":\"begin\"}")),
         ] {
             let (bytes, at) = around(kind, &payload);
             let (read, damaged) = read_all(&bytes);

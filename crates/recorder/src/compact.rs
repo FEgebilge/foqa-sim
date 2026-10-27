@@ -28,9 +28,9 @@ const ZSTD_LEVEL: i32 = 19;
 /// Per parameter the samples keep their journal order, and events theirs.
 #[derive(Debug)]
 pub struct Recording {
-    lfl_version: u16,
-    series: BTreeMap<u16, Vec<Sample>>,
-    events: Vec<(SimTime, SimEvent)>,
+    pub(crate) lfl_version: u16,
+    pub(crate) series: BTreeMap<u16, Vec<Sample>>,
+    pub(crate) events: Vec<(SimTime, SimEvent)>,
 }
 
 impl Recording {
