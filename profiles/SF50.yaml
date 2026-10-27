@@ -1,0 +1,17 @@
+# Cirrus SF50 Vision Jet type profile. Schema: docs/rules.md.
+#
+# No tail_contact, hard_landing_g: not published.
+# Flap bands use the flap percent as angle: 50% = 15 deg, 100% = 39 deg (SF50
+# Pilot's Information Manual Rev 9, https://www.scribd.com/document/924929203/;
+# one exam-prep guide says 40 deg). Not AFM-verified.
+type: SF50
+name: Cirrus SF50 Vision Jet
+class: transport
+vmo: { value: 250 kt, source: &tcds "EASA TCDS EASA.IM.A.615 SF50 Issue 6, https://www.easa.europa.eu/en/downloads/24242/en", note: "VMO 250 KIAS, MMO 0.53" }
+vle: { value: 210 kt, source: *tcds, note: "VLE 210 KIAS" }
+vlo: { value: 150 kt, source: *tcds, note: "VLO extend 210 KIAS, retract 150 KIAS; lower given" }
+max_crosswind: { value: 16 kt, source: "FAA-approved SF50 AFM P/N 31452-001 Rev 2 sec 2 Configuration Limitations, https://flightsimcoach.com/wp-content/uploads/2020/12/SF50-POH.pdf", note: "max demonstrated: 18 kt flaps 50%, 16 kt flaps 100%; lower given" }
+max_tailwind: { value: 10 kt, source: "SF50 AFM P/N 31452-001 Rev 2, Operational Limits (landing)" }
+flaps:
+  - { up_to: 15 deg, vfe: { value: 190 kt, source: *tcds, note: "flaps 50% = 15 deg (PIM, not AFM-verified)" } }
+  - { vfe: { value: 150 kt, source: *tcds, note: "flaps 100% = 39 deg (PIM; one guide says 40)" } }

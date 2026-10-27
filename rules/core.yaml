@@ -284,11 +284,12 @@ detail: "{value} off the centreline, limit {threshold}"
 above: { low: 25 ft, medium: 40 ft, high: 60 ft }
 ---
 rule: stall-warning
-version: 1
+version: 2
 title: Stall warning
 description: >
-  Stall warning active in flight. The landing flare is excluded: light
-  aircraft often sound the horn just before touchdown by design.
+  Stall warning active in flight. Below 50 ft it counts only while
+  climbing, so the landing flare is excluded whatever the phase boundaries:
+  light aircraft often sound the horn just before touchdown by design.
 why_it_matters: >
   The aircraft is close to the stall; at low height a stall or departure
   from controlled flight may not be recoverable.
@@ -297,6 +298,7 @@ advice: >
   power. Prevent it by keeping speed above the minimum for the
   configuration.
 phase: [InitialClimb, EnRoute, Approach, GoAround]
+when: height >= 50 ft or vs > 0 fpm
 measure: stall.warning
 sustain: 1 s
 level: high
@@ -394,3 +396,108 @@ at: touchdown
 measure: td.peak_g - profile.hard_landing_g
 detail: "{td.peak_g} at touchdown, inspection above {profile.hard_landing_g}"
 above: { high: 0 g }
+---
+rule: vmo-exceedance
+version: 1
+title: Maximum operating speed exceeded
+description: >
+  IAS above VMO (VNE for types without one) from the aircraft's type
+  profile (AFM limitations or the type certificate data sheet). MACH is not
+  recorded, so MMO exceedances above the crossover altitude are not seen.
+  Silent without a profile value. Levels above VMO are a FOQA-Sim estimate.
+why_it_matters: >
+  Above VMO the airframe is outside its certified flutter and structural
+  margins; in a real aircraft the overspeed is reported and may need an
+  inspection.
+advice: >
+  Watch the speed trend in descents and turbulence; reduce thrust early,
+  use the speedbrakes, and shallow the descent before the barber pole.
+phase: [InitialClimb, EnRoute, Approach, GoAround]
+when: not air_ground
+measure: ias - profile.vmo
+detail: "{ias}, limit {profile.vmo}"
+sustain: 2 s
+above: { low: 0 kt, medium: 5 kt, high: 10 kt }
+---
+rule: gear-extended-overspeed
+version: 1
+title: Gear extended overspeed
+description: >
+  IAS above VLE with the landing gear down, from the aircraft's type
+  profile (AFM limitations). Silent without a profile value or with fixed
+  gear. Levels above VLE are a FOQA-Sim estimate.
+why_it_matters: >
+  Flying faster than VLE with the gear down overloads the gear doors and
+  their attachments; it requires a maintenance inspection.
+advice: >
+  Slow below VLE before selecting the gear down, and raise it promptly
+  after takeoff before accelerating.
+phase: [Takeoff, InitialClimb, EnRoute, Approach, GoAround]
+when: not air_ground and gear.extended > 99 %
+measure: ias - profile.vle
+detail: "{ias} with the gear down, limit {profile.vle}"
+sustain: 2 s
+above: { low: 0 kt, medium: 5 kt, high: 10 kt }
+---
+rule: gear-operating-overspeed
+version: 1
+title: Gear operated above its speed limit
+description: >
+  IAS above VLO while the landing gear is in transit, from the aircraft's
+  type profile (AFM limitations; the lower of the extension and retraction
+  limits). Silent without a profile value. Levels above VLO are a FOQA-Sim
+  estimate.
+why_it_matters: >
+  The gear doors are open while the gear moves; above VLO the airloads can
+  damage the doors and the actuating mechanism.
+advice: >
+  Check the speed is below VLO before moving the gear lever, in both
+  directions.
+phase: [Takeoff, InitialClimb, EnRoute, Approach, GoAround]
+when: not air_ground and gear.extended > 1 % and gear.extended < 99 %
+measure: ias - profile.vlo
+detail: "{ias} with the gear moving, limit {profile.vlo}"
+sustain: 1 s
+above: { low: 0 kt, medium: 5 kt, high: 10 kt }
+---
+rule: crosswind-above-demonstrated
+version: 1
+title: Landing crosswind above demonstrated
+description: >
+  Crosswind component at touchdown, from the wind at contact and the
+  runway heading, above the maximum demonstrated crosswind in the
+  aircraft's type profile (AFM). The demonstrated value is not a limit;
+  the medium level is a FOQA-Sim estimate. Silent without a matched runway
+  or a profile value.
+why_it_matters: >
+  Beyond the demonstrated crosswind the aircraft's handling was not shown
+  during certification: drift at touchdown, side loads on the gear and a
+  runway excursion become more likely.
+advice: >
+  Check the crosswind component against the demonstrated value before the
+  approach; consider another runway or airport, and land with the
+  recommended crosswind technique (crab, de-crab in the flare).
+at: touchdown
+measure: td.crosswind - profile.max_crosswind
+detail: "{td.crosswind} crosswind, demonstrated {profile.max_crosswind}"
+above: { low: 0 kt, medium: 5 kt }
+---
+rule: tailwind-landing-limit
+version: 1
+title: Tailwind above the landing limit
+description: >
+  Tailwind component at touchdown, from the wind at contact and the runway
+  heading, above the aircraft's certified tailwind limit (type profile, AFM
+  limitations). The high level is a FOQA-Sim estimate. Silent without a
+  matched runway or a profile value.
+why_it_matters: >
+  A tailwind raises the groundspeed at touchdown and lengthens the landing
+  distance; above the certified limit the performance data no longer
+  applies and the risk of a runway overrun grows.
+advice: >
+  Check the wind before the approach and choose the runway into wind; with
+  a tailwind above the limit, do not land on that runway.
+at: touchdown
+measure: td.tailwind - profile.max_tailwind
+detail: "{td.tailwind} tailwind, limit {profile.max_tailwind}"
+above: { medium: 0 kt, high: 5 kt }

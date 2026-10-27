@@ -14,3 +14,4 @@ serde_yaml_ng = "0.10.0"
 
 [dev-dependencies]
 recorder = { path = "../recorder" }
+testkit = { path = "../testkit" }

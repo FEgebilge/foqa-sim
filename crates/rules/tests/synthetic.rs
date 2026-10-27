@@ -1,150 +1,15 @@
-//! Synthetic golden flights: scripted profiles pushed through the whole
-//! on-board chain (wiring, FDAU, journal) and the ground segment, to check
+//! Synthetic golden flights (`testkit`) through the core rule set, to check
 //! the phase, touchdown and rule logic against flights whose answer is known
-//! by construction. Every flight lands on a 600 ft aerodrome, 0 ft AGL being
-//! the wheels on the runway.
-
-use std::collections::HashMap;
+//! by construction.
 
 use analyzer::{Flight, Phase, Track, phases, touchdowns};
+use fdm_core::Airport;
 use fdm_core::geo::LocalFrame;
-use fdm_core::{AircraftId, Airport, Designator, Lfl, Runway, RunwayEnd};
-use recorder::{Recorder, SimEvent, Telemetry};
+use recorder::SimEvent;
 use rules::{Event, Level, ProfileSet, evaluate, load};
+use testkit::*;
 
 const CORE: &str = include_str!("../../../rules/core.yaml");
-const FRAME_HZ: f64 = 60.0;
-/// Sim time of the first frame: the recording is relative to it.
-const SIM_START_S: f64 = 1000.0;
-const FIELD_FT: f64 = 600.0;
-const AIRLINER_LB: f64 = 140_000.0;
-const LIGHT_LB: f64 = 2_300.0;
-/// Time from 1500 ft on the approach to touchdown.
-const APPROACH_S: f64 = 124.0;
-/// Touchdown time of the single-approach flights (the flight starts on the approach).
-const TD_S: f64 = APPROACH_S;
-/// Time from touchdown to the end of the recording, after the rollout.
-const ROLLOUT_S: f64 = 45.0;
-
-/// Heading of every scripted flight over the ground (runway 20 on a 3000 m
-/// runway), and where the approach starts.
-const TRACK_DEG: f64 = 200.0;
-const START: (f64, f64) = (38.5, 27.0);
-const KT_MS: f64 = 1852.0 / 3600.0;
-
-/// The aircraft state at one instant, in aviation units.
-struct Pt {
-    /// Height above the runway (also the radio height), ft.
-    alt: f64,
-    /// Indicated and ground speed, kt.
-    speed: f64,
-    /// Normal load, g.
-    g: f64,
-    /// Pitch attitude, nose-up positive, deg.
-    pitch: f64,
-    /// Trailing-edge flap angle, deg, 0 = retracted.
-    flaps: f64,
-    ground: bool,
-}
-
-/// Piecewise-linear interpolation through `(t, value)` keys, held at both ends.
-fn lerp(keys: &[(f64, f64)], t: f64) -> f64 {
-    let next = keys.partition_point(|k| k.0 <= t);
-    match (next.checked_sub(1).map(|i| keys[i]), keys.get(next)) {
-        (Some((t0, v0)), Some(&(t1, v1))) => v0 + (t - t0) / (t1 - t0) * (v1 - v0),
-        (Some((_, v)), None) | (None, Some(&(_, v))) => v,
-        (None, None) => unreachable!("no keys"),
-    }
-}
-
-/// A 1500 ft approach at 140 kt, about 750 fpm down, flared to a 300 fpm
-/// touchdown at `td`, then a rollout slowing to 20 kt. `peak_g` is held for
-/// 0.2 s from contact, the gear compressing.
-fn landing(t: f64, td: f64, peak_g: f64) -> Pt {
-    let g = if (td..td + 0.2).contains(&t) {
-        peak_g
-    } else {
-        1.0
-    };
-    let descent = [
-        (td - APPROACH_S, 1500.0),
-        (td - 12.0, 100.0),
-        (td - 2.0, 10.0),
-        (td, 0.0),
-    ];
-    Pt {
-        alt: lerp(&descent, t),
-        speed: lerp(&[(td, 140.0), (td + 40.0, 20.0)], t),
-        g,
-        pitch: 3.0,
-        flaps: 0.0,
-        ground: t >= td,
-    }
-}
-
-/// Records the script at 60 Hz as raw MSFS frames and analyses it. Bank is
-/// fixed at zero; attitude is written the way MSFS reports it: -3.0 for
-/// 3 deg nose-up (nose-up is negative), left-wing-down positive.
-fn fly(weight_lb: f64, duration_s: f64, script: impl Fn(f64) -> Pt) -> (Flight, Track) {
-    fly_to(&[], weight_lb, duration_s, script)
-}
-
-/// `fly`, with `events` (airport snapshots, aircraft identity) recorded at
-/// the start. The aircraft flies straight along `TRACK_DEG` from `START` at
-/// its ground speed.
-fn fly_to(
-    events: &[SimEvent],
-    weight_lb: f64,
-    duration_s: f64,
-    script: impl Fn(f64) -> Pt,
-) -> (Flight, Track) {
-    let mut recorder = Recorder::new(&Lfl::V1, Vec::new()).unwrap();
-    let columns: HashMap<_, _> = recorder
-        .acquisition()
-        .columns()
-        .iter()
-        .enumerate()
-        .map(|(i, c)| (c.simvar, i))
-        .collect();
-    for e in events {
-        recorder.record(&Telemetry::Event(e.clone())).unwrap();
-    }
-    let frame = LocalFrame::new(START.0, START.1);
-    let (sin, cos) = TRACK_DEG.to_radians().sin_cos();
-    let mut flown_m = 0.0;
-    for k in 0..=(duration_s * FRAME_HZ) as usize {
-        let t = k as f64 / FRAME_HZ;
-        let p = script(t);
-        flown_m += p.speed * KT_MS / FRAME_HZ;
-        let (lat, lon) = frame.point(flown_m * sin, flown_m * cos);
-        let mut raw = vec![f64::NAN; columns.len()];
-        for (simvar, value) in [
-            ("SIMULATION TIME", SIM_START_S + t),
-            ("PLANE LATITUDE", lat),
-            ("PLANE LONGITUDE", lon),
-            ("PRESSURE ALTITUDE", FIELD_FT + p.alt),
-            ("RADIO HEIGHT", p.alt),
-            ("AIRSPEED INDICATED", p.speed),
-            ("GROUND VELOCITY", p.speed),
-            ("G FORCE", p.g),
-            ("PLANE PITCH DEGREES", -p.pitch),
-            ("PLANE BANK DEGREES", 0.0),
-            ("SIM ON GROUND", f64::from(u8::from(p.ground))),
-            ("GEAR TOTAL PCT EXTENDED", 100.0),
-            ("TRAILING EDGE FLAPS LEFT ANGLE", p.flaps),
-            ("AUTOPILOT AIRSPEED HOLD VAR", 140.0),
-            ("STALL WARNING", 0.0),
-            ("TOTAL WEIGHT", weight_lb),
-        ] {
-            raw[columns[simvar]] = value;
-        }
-        recorder.record(&Telemetry::Frame(raw)).unwrap();
-    }
-    let flight = Flight::read(&recorder.into_inner()[..]).unwrap();
-    let track = Track::new(&flight).unwrap();
-    (flight, track)
-}
-
 /// Every event the rules in `yaml` raise, in full, with the shipped
 /// profiles.
 fn all_events(yaml: &str, flight: &Flight, track: &Track) -> Vec<Event> {
@@ -174,8 +39,11 @@ fn found(rules: &[(&str, Level)]) -> Vec<(String, Level)> {
     rules.iter().map(|&(r, l)| (r.to_owned(), l)).collect()
 }
 
-fn sequence(track: &Track) -> Vec<Phase> {
-    phases(track).iter().map(|s| s.phase).collect()
+/// The phases, with the boundaries the flight is graded with.
+fn sequence(flight: &Flight, track: &Track) -> Vec<Phase> {
+    let profiles = ProfileSet::shipped().unwrap();
+    let cfg = profiles.select(flight).phases;
+    phases(track, &cfg).iter().map(|s| s.phase).collect()
 }
 
 /// A stabilised airliner approach and a smooth landing (1.2 g, 300 fpm):
@@ -184,7 +52,7 @@ fn sequence(track: &Track) -> Vec<Phase> {
 fn stable_airliner_approach_raises_nothing() {
     let (flight, track) = fly(AIRLINER_LB, TD_S + ROLLOUT_S, |t| landing(t, TD_S, 1.2));
     assert_eq!(
-        sequence(&track),
+        sequence(&flight, &track),
         [Phase::EnRoute, Phase::Approach, Phase::Landing, Phase::Taxi]
     );
     assert_eq!(events(CORE, &flight, &track), []);
@@ -280,7 +148,7 @@ level: advisory
         }
     });
     assert_eq!(
-        sequence(&track),
+        sequence(&flight, &track),
         [
             Phase::EnRoute,
             Phase::Approach,
@@ -331,45 +199,6 @@ above: { low: 1.2 g }
     };
     assert_eq!(event.level, Level::Low);
     assert_eq!(event.value, Some(1.5));
-}
-
-/// Runway 20 whose threshold lies `along_m` behind where the stable
-/// airliner landing (`landing`) touches down. The flight is flown once to
-/// find that point.
-fn runway_behind_touchdown(along_m: f64) -> Airport {
-    let (flight, _) = fly(AIRLINER_LB, TD_S + 1.0, |t| landing(t, TD_S, 1.2));
-    let t = touchdowns(&flight, &Track::new(&flight).unwrap())[0].t;
-    let (lat, lon) = (
-        flight.at("pos.lat", t).unwrap(),
-        flight.at("pos.lon", t).unwrap(),
-    );
-    // The centre is half the runway past the threshold.
-    let (sin, cos) = TRACK_DEG.to_radians().sin_cos();
-    let past = 1500.0 - along_m;
-    let (lat_deg, lon_deg) = LocalFrame::new(lat, lon).point(past * sin, past * cos);
-    let end = |number| RunwayEnd {
-        number,
-        designator: Designator::None,
-        displaced_m: 0.0,
-    };
-    Airport {
-        icao: "TEST".into(),
-        region: String::new(),
-        lat_deg,
-        lon_deg,
-        elevation_m: 0.0,
-        magvar_deg: 0.0,
-        runways: vec![Runway {
-            lat_deg,
-            lon_deg,
-            elevation_m: 0.0,
-            heading_deg: TRACK_DEG,
-            length_m: 3000.0,
-            width_m: 45.0,
-            primary: end(20),
-            secondary: end(2),
-        }],
-    }
 }
 
 fn land_on(airports: &[Airport]) -> (Flight, Track) {
@@ -460,16 +289,6 @@ level: advisory
     );
 }
 
-/// The identity MSFS 2024 reports for ICAO type `icao`.
-fn identity(icao: &str) -> SimEvent {
-    SimEvent::Aircraft(AircraftId {
-        title: format!("{icao} test"),
-        atc_model: format!("ATCCOM.AC_MODEL {icao}.0.text"),
-        atc_type: String::new(),
-        atc_id: "N123FQ".into(),
-    })
-}
-
 /// A light aircraft on approach at 80 kt with the flaps at 20 deg (C172: VFE
 /// 85 kt above 10 deg), at 95 kt for 3 s. As a C172 that is 10 kt over VFE
 /// for 3 s: Medium (over 5 kt; High needs more than 10 kt). Without an
@@ -533,7 +352,12 @@ fn tail_contact_and_inspection_values_drive_their_rules() {
                 g: 1.0,
                 pitch: lerp(&[(LIFTOFF_S - 3.0, 0.0), (LIFTOFF_S, 4.5)], t),
                 flaps: 0.0,
+                gear: 100.0,
+                wind: (0.0, 0.0),
+                sim_rate: 1.0,
+                ap: false,
                 ground: t < LIFTOFF_S,
+                lost: &[],
             }
         } else {
             landing(t, TD, 1.2)
@@ -567,4 +391,121 @@ fn tail_contact_and_inspection_values_drive_their_rules() {
         "light class default (no TEST profile)"
     );
     assert_eq!(graded(&shipped, CORE, &flight, &track), []);
+}
+
+/// A touch-and-go: the landing roll slows to 122 kt at 6 s with the nose
+/// lowered, power goes on, rotation to 4.5 deg and liftoff at 14 s. The
+/// landing ends at the lowest speed and the second takeoff roll starts
+/// there, so its rotation is checked (1.5 deg of tail clearance, Medium)
+/// as well as the 3 deg touchdown (0.5 deg, High).
+#[test]
+fn a_touch_and_go_splits_the_roll_and_checks_the_second_rotation() {
+    const LIFTOFF_S: f64 = TD_S + 14.0;
+    let (flight, track) = fly_to(&[identity("TEST")], LIGHT_LB, LIFTOFF_S + 60.0, |t| {
+        let p = landing(t, TD_S, 1.0);
+        if t < TD_S {
+            return p;
+        }
+        let pitch = [
+            (TD_S, 3.0),
+            (TD_S + 2.0, 0.0),
+            (LIFTOFF_S - 3.0, 0.0),
+            (LIFTOFF_S, 4.5),
+        ];
+        Pt {
+            alt: lerp(&[(LIFTOFF_S, 0.0), (LIFTOFF_S + 60.0, 1500.0)], t),
+            speed: lerp(&[(TD_S, 140.0), (TD_S + 6.0, 122.0), (LIFTOFF_S, 140.0)], t),
+            pitch: lerp(&pitch, t),
+            ground: t < LIFTOFF_S,
+            ..p
+        }
+    });
+    let profiles = ProfileSet::load([("TEST", TEST_PROFILE)]).unwrap();
+    let spans = phases(&track, &profiles.select(&flight).phases);
+    use Phase::*;
+    let seq: Vec<_> = spans.iter().map(|s| s.phase).collect();
+    assert_eq!(
+        seq,
+        [EnRoute, Approach, Landing, Takeoff, InitialClimb, EnRoute]
+    );
+    let go = &spans[3];
+    assert_eq!(go.cause.trigger, analyzer::Trigger::TouchAndGo);
+    assert!((go.start.as_secs_f64() - (TD_S + 6.0)).abs() < 0.2);
+    assert!((go.cause.value - 122.0).abs() < 0.5);
+    assert_eq!(
+        pairs(graded(&profiles, CORE, &flight, &track)),
+        found(&[
+            ("tailstrike-risk-landing", Level::High),
+            ("tailstrike-risk-takeoff", Level::Medium),
+        ])
+    );
+}
+
+/// A test type with speed and wind limits under what the scripted approach
+/// flies: VMO 132 kt, gear 150 kt extended and 125 kt moving, 10 kt
+/// demonstrated crosswind, 5 kt tailwind.
+const LIMITS_PROFILE: &str = r#"
+type: TEST
+name: Synthetic test aircraft
+class: transport
+vmo: { value: 132 kt, source: synthetic }
+vle: { value: 150 kt, source: synthetic }
+vlo: { value: 125 kt, source: synthetic, approximate: true, note: "synthetic sister type" }
+max_crosswind: { value: 10 kt, source: synthetic }
+max_tailwind: { value: 5 kt, source: synthetic }
+"#;
+
+/// The 140 kt approach onto runway 20 with the gear moving for 3 s at
+/// 30 s and the wind `wind`, graded with `LIMITS_PROFILE`.
+fn limits_flight(wind: (f64, f64)) -> Vec<(String, Level)> {
+    let events = [
+        identity("TEST"),
+        SimEvent::Airport(runway_behind_touchdown(400.0)),
+    ];
+    let (flight, track) = fly_to(&events, AIRLINER_LB, TD_S + ROLLOUT_S, |t| Pt {
+        gear: if (30.0..33.0).contains(&t) {
+            50.0
+        } else {
+            100.0
+        },
+        wind,
+        ..landing(t, TD_S, 1.2)
+    });
+    let profiles = ProfileSet::load([("TEST", LIMITS_PROFILE)]).unwrap();
+    pairs(graded(&profiles, CORE, &flight, &track))
+}
+
+/// 140 kt is 8 kt over VMO (Medium) and 15 kt over VLO while the gear
+/// moves (High); under VLE with it down. In calm air nothing else.
+#[test]
+fn speed_limits_of_the_type_profile_drive_their_rules() {
+    assert_eq!(
+        limits_flight((0.0, 0.0)),
+        found(&[
+            ("vmo-exceedance", Level::Medium),
+            ("gear-operating-overspeed", Level::High),
+        ])
+    );
+}
+
+/// 17 kt square across runway 20 is 7 kt over the demonstrated crosswind
+/// (Medium); 12 kt straight behind it is 7 kt over the certified tailwind
+/// limit (High, more than 5 kt).
+#[test]
+fn touchdown_wind_is_resolved_on_the_runway() {
+    let wind = |from: f64, kt: f64| {
+        limits_flight((from, kt))
+            .into_iter()
+            .filter(|(rule, _)| !rule.contains("speed") && rule != "vmo-exceedance")
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        wind(290.0, 17.0),
+        found(&[("crosswind-above-demonstrated", Level::Medium)])
+    );
+    assert_eq!(
+        wind(20.0, 12.0),
+        found(&[("tailwind-landing-limit", Level::High)])
+    );
+    assert_eq!(wind(200.0, 25.0), []);
 }

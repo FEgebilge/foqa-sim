@@ -1,0 +1,16 @@
+# ATR 72-600 type profile. Schema: docs/rules.md.
+#
+# No tail_contact, hard_landing_g: no reachable source (the Avianca 2019 report
+# has a tail strike at pitch above 9.4 deg and +2.73 g touchdown, not limits).
+# Every speed is from one study aid; the TCDS says refer to the AFM.
+type: AT76
+name: ATR 72-600
+class: transport
+vmo: { value: 250 kt, source: &stuvia "Stuvia ATR 72-600 limitations study aid, https://www.stuvia.com/doc/6586170/atr-72-600-limitations-questions-and-answers-complete-solutions", approximate: true, note: "study aid, not a primary document; EASA TCDS EASA.A.084 Issue 14 only says refer to the AFM" }
+vle: { value: 185 kt, source: *stuvia, approximate: true, note: "study aid value, not a primary document" }
+vlo: { value: 160 kt, source: *stuvia, approximate: true, note: "extend 170, retract 160 (lower given); study aid value" }
+max_crosswind: { value: 35 kt, source: *stuvia, approximate: true, note: "study aid value, which says it reduces in different conditions" }
+max_tailwind: { value: 10 kt, source: *stuvia, approximate: true, note: "study aid value, not a primary document" }
+flaps:
+  - { up_to: 15 deg, vfe: { value: 185 kt, source: *stuvia, approximate: true, note: "study aid value, flaps up to 15" } }
+  - { vfe: { value: 150 kt, source: *stuvia, approximate: true, note: "study aid value, flaps 30" } }

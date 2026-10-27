@@ -1,0 +1,21 @@
+# Airbus A330-300 type profile (the A330-200 shares these limits). Schema: docs/rules.md.
+#
+# Most speeds come from an unofficial airline study sheet; the TCDS defers to
+# the AFM for speeds. Gear speeds and crosswind are low confidence.
+type: A333
+name: Airbus A330-300 (A330 family; A332 -200 shares these limits)
+class: transport
+tail_contact:
+  takeoff: { value: 14.4 deg, source: "A333 Chicago O'Hare 2013 incident summary https://dru10.imibo.com/accidents-and-incidents/a333-chicago-ohare-il-usa-2013 (tail contact pitch 10.1 deg full compression to 14.4 deg full rebound)", approximate: true, note: "struts extended/rebound; page not fetchable directly, from search result text" }
+  landing: { value: 10.1 deg, source: "same incident summary as takeoff", approximate: true, note: "struts fully compressed; from search result text" }
+hard_landing_g: { value: 2.6 g, source: "Airbus AMM 05-51-11 family value (A320 AAIB sources)", approximate: true, note: "A330-specific threshold not found; A320-family value; Airbus Safety First cites an A330 hard landing at 2.74 g" }
+vmo: { value: 330 kt, source: &sheet "Unofficial Airbus study sheet, airbusdriver.net A330 Limitations May 2010, http://www.airbusdriver.net/A330Oral.pdf", approximate: true, note: "MMO 0.86; unofficial study sheet; EASA TCDS A.004 Issue 69 only says see AFM" }
+vle: { value: 250 kt, source: *sheet, approximate: true, note: "250 kt/M0.55 from the unofficial study sheet" }
+vlo: { value: 250 kt, source: *sheet, approximate: true, note: "extend 250/M0.55, retract 250/M0.55, from the unofficial study sheet" }
+max_crosswind: { value: 29 kt, source: "same sheet (29/G32 takeoff and landing; PDF layout scrambled)", approximate: true, note: "low confidence, scrambled PDF layout; the AFM holds the demonstrated value, EASA TCDS A.004 refers to the AFM" }
+max_tailwind: { value: 15 kt, source: "EASA TCDS EASA.A.004 Issue 69 https://www.easa.europa.eu/lv/downloads/7518/en (15 kt tailwind at takeoff MOD 205376 and landing MOD 205377); study sheet also lists 15 kt", note: "baseline without those mods was 10 kt" }
+flaps:
+  - { up_to: 8 deg, vfe: { value: 215 kt, source: "airbusdriver.net A330 sheet; flap angles from X-Plane A330 manual https://www.x-plane.com/manuals/A330_Pilot_Operating_Manual.pdf and PPRuNe", approximate: true, note: "CONF 1+F (slats 16/flaps 8), unofficial sheet. CONF 1 slats-only 240 kt skipped" } }
+  - { up_to: 14 deg, vfe: { value: 196 kt, source: *sheet, approximate: true, note: "CONF 2 (20/14); speed from the unofficial sheet, angle pairing from forum/sim manual" } }
+  - { up_to: 22 deg, vfe: { value: 186 kt, source: *sheet, approximate: true, note: "CONF 3 (23/22); unofficial sheet, angle from forum/sim manual" } }
+  - { vfe: { value: 180 kt, source: *sheet, approximate: true, note: "CONF FULL (23/32); unofficial sheet, angle from forum/sim manual" } }

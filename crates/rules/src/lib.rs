@@ -13,7 +13,7 @@ mod rule;
 
 pub use engine::{Event, aircraft, evaluate};
 pub use profile::{
-    FLAP_TOLERANCE_DEG, FlapBand, Profile, ProfileError, ProfileField, ProfileSet, Selection,
-    Sourced,
+    FLAP_TOLERANCE_DEG, FlapBand, PhaseField, Profile, ProfileError, ProfileField, ProfileSet,
+    Selection, Sourced, class_phases,
 };
 pub use rule::{Aircraft, Level, Limits, LoadError, Rule, Side, TdField, Trigger, Var, load};

@@ -86,6 +86,9 @@ pub enum TdField {
     /// are unknown without a matched runway.
     Distance,
     Cross,
+    /// Wind components on the runway, from the wind at contact.
+    Crosswind,
+    Tailwind,
     Lda,
     Tdz,
     InTdz,
@@ -422,6 +425,8 @@ impl Scope for RuleScope {
             "td.bounce" if self.touchdown => (Var::Td(TdField::Bounce), Ty::Bool),
             "td.distance" if self.touchdown => (Var::Td(TdField::Distance), num(Unit::Feet)),
             "td.cross" if self.touchdown => (Var::Td(TdField::Cross), num(Unit::Feet)),
+            "td.crosswind" if self.touchdown => (Var::Td(TdField::Crosswind), num(Unit::Knots)),
+            "td.tailwind" if self.touchdown => (Var::Td(TdField::Tailwind), num(Unit::Knots)),
             "td.lda" if self.touchdown => (Var::Td(TdField::Lda), num(Unit::Feet)),
             "td.tdz" if self.touchdown => (Var::Td(TdField::Tdz), num(Unit::Feet)),
             "td.in_tdz" if self.touchdown => (Var::Td(TdField::InTdz), Ty::Bool),

@@ -1,6 +1,8 @@
 use std::ops::Range;
 
-use analyzer::{Flight, Phase, RunwayFix, Touchdown, Track, phase_labels, runs, touchdowns};
+use analyzer::{
+    Flight, Phase, RunwayFix, Touchdown, Track, phase_labels, runs, touchdowns, wind_components,
+};
 use fdm_core::{SimTime, Unit};
 
 use crate::expr::{Expr, Values};
@@ -56,7 +58,7 @@ pub fn evaluate(
     flight: &Flight,
     track: &Track,
 ) -> Vec<Event> {
-    let phases = phase_labels(track);
+    let phases = phase_labels(track, &selection.phases);
     let tds = touchdowns(flight, track);
     let mut events: Vec<Event> = rules
         .iter()
@@ -89,6 +91,15 @@ impl Point<'_> {
     fn t(&self) -> SimTime {
         self.td.map_or(self.track.t[self.i], |td| td.t)
     }
+
+    /// The wind now on the runway, as (headwind, crosswind from the right).
+    fn wind(&self, fix: &RunwayFix) -> Option<(f64, f64)> {
+        let t = self.t();
+        let speed = self.flight.at("wind.speed", t)?;
+        let from = self.flight.at("wind.dir", t)?;
+        Some(wind_components(speed, from, fix.heading_deg))
+            .filter(|(h, c)| h.is_finite() && c.is_finite())
+    }
 }
 
 impl Values<Var> for Point<'_> {
@@ -117,6 +128,8 @@ impl Values<Var> for Point<'_> {
                     TdField::Bounce => Some(f64::from(u8::from(td.bounce))),
                     TdField::Distance => feet(|f| f.along_m),
                     TdField::Cross => feet(|f| f.cross_m),
+                    TdField::Crosswind => self.wind(fix?).map(|(_, cross)| cross.abs()),
+                    TdField::Tailwind => self.wind(fix?).map(|(head, _)| -head),
                     TdField::Lda => feet(|f| f.lda_m),
                     TdField::Tdz => feet(|f| f.tdz_m),
                     TdField::InTdz => flag(|f| f.in_tdz),

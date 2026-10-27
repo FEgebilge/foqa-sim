@@ -8,7 +8,7 @@ use std::sync::OnceLock;
 use analyzer::{Flight, Track};
 use fdm_core::Lfl;
 use recorder::{Recorder, ReplaySource};
-use rules::{Level, ProfileSet, evaluate, load};
+use rules::{Aircraft, Level, ProfileSet, Selection, evaluate, load};
 
 fn c172() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/c172-pattern.raw.jsonl.gz")
@@ -29,18 +29,18 @@ fn flight() -> &'static (Flight, Track) {
 }
 
 fn events(yaml: &str) -> Vec<(String, Level, Option<f64>)> {
-    let (flight, track) = flight();
-    // Recorded before aircraft identities: graded with no type profile.
+    // Recorded before aircraft identities and weight: graded with no type
+    // profile, class unknown, so with the transport phase boundaries.
     let profiles = ProfileSet::shipped().unwrap();
-    evaluate(
-        &load(yaml).unwrap(),
-        &profiles.select(flight),
-        flight,
-        track,
-    )
-    .into_iter()
-    .map(|e| (e.rule, e.level, e.value))
-    .collect()
+    graded(yaml, &profiles.select(&flight().0))
+}
+
+fn graded(yaml: &str, selection: &Selection) -> Vec<(String, Level, Option<f64>)> {
+    let (flight, track) = flight();
+    evaluate(&load(yaml).unwrap(), selection, flight, track)
+        .into_iter()
+        .map(|e| (e.rule, e.level, e.value))
+        .collect()
 }
 
 #[test]
@@ -58,6 +58,24 @@ fn core_rules_flag_the_unstable_approach() {
         ("high-sink-below-1000", Level::Low),
     ];
     assert_eq!(found, expected.map(|(r, l)| (r.to_owned(), l)));
+}
+
+/// Graded as the light aircraft it is, the approach runs down to the 20 ft
+/// flare instead of 50 ft: the light hard-landing rule applies, and the
+/// findings stay those of the unstable approach above 500 ft.
+#[test]
+fn light_boundaries_keep_the_findings() {
+    let profiles = ProfileSet::shipped().unwrap();
+    let light = profiles.select_type(None, || Some(Aircraft::Light));
+    let rules: Vec<_> = graded(CORE, &light)
+        .into_iter()
+        .map(|(rule, level, _)| (rule, level))
+        .collect();
+    let found: Vec<_> = events(CORE)
+        .into_iter()
+        .map(|(rule, level, _)| (rule, level))
+        .collect();
+    assert_eq!(rules, found);
 }
 
 #[test]

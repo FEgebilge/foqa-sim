@@ -2,11 +2,12 @@
 //! (`profiles/<ICAO>.yaml`), read by rules as `profile.*`. Every value is
 //! unit-checked at load and names the document it comes from. A flight whose
 //! type has no profile is graded by its class alone: type-specific values
-//! are unknown and the rules using them stay silent.
+//! are unknown and the rules using them stay silent. A profile may also
+//! move its class's phase boundaries (`phases:`).
 
 use std::fmt;
 
-use analyzer::Flight;
+use analyzer::{Flight, PhaseConfig};
 use fdm_core::{AircraftId, Unit};
 use serde::{Deserialize, Serialize};
 
@@ -33,14 +34,30 @@ pub enum ProfileField {
     /// Peak normal load from which the manufacturer requires a hard-landing
     /// inspection, g.
     HardLandingG,
+    /// Maximum operating speed (VMO; VNE without one), kt IAS.
+    Vmo,
+    /// Maximum speed with the landing gear extended (VLE), kt.
+    Vle,
+    /// Maximum speed while the gear moves (VLO; the lower of extension and
+    /// retraction), kt.
+    Vlo,
+    /// Maximum demonstrated crosswind for landing, kt.
+    MaxCrosswind,
+    /// Maximum tailwind for takeoff and landing, kt.
+    MaxTailwind,
 }
 
 impl ProfileField {
-    pub const ALL: [Self; 4] = [
+    pub const ALL: [Self; 9] = [
         Self::Vfe,
         Self::TailTakeoffPitch,
         Self::TailLandingPitch,
         Self::HardLandingG,
+        Self::Vmo,
+        Self::Vle,
+        Self::Vlo,
+        Self::MaxCrosswind,
+        Self::MaxTailwind,
     ];
 
     /// The field named `name` in `profile.<name>`.
@@ -55,17 +72,97 @@ impl ProfileField {
             Self::TailTakeoffPitch => "tail_takeoff_pitch",
             Self::TailLandingPitch => "tail_landing_pitch",
             Self::HardLandingG => "hard_landing_g",
+            Self::Vmo => "vmo",
+            Self::Vle => "vle",
+            Self::Vlo => "vlo",
+            Self::MaxCrosswind => "max_crosswind",
+            Self::MaxTailwind => "max_tailwind",
         }
     }
 
     pub fn unit(self) -> Unit {
         match self {
-            Self::Vfe => Unit::Knots,
+            Self::Vfe
+            | Self::Vmo
+            | Self::Vle
+            | Self::Vlo
+            | Self::MaxCrosswind
+            | Self::MaxTailwind => Unit::Knots,
             Self::TailTakeoffPitch | Self::TailLandingPitch => Unit::Degrees,
             Self::HardLandingG => Unit::G,
         }
     }
 }
+
+/// A phase boundary of `PhaseConfig` that a profile may set (`phases:`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PhaseField {
+    RollKt,
+    ClimbEndFt,
+    ApproachFt,
+    FlareFt,
+    GoAroundRiseFt,
+    GoAroundDropFt,
+}
+
+impl PhaseField {
+    pub const ALL: [Self; 6] = [
+        Self::RollKt,
+        Self::ClimbEndFt,
+        Self::ApproachFt,
+        Self::FlareFt,
+        Self::GoAroundRiseFt,
+        Self::GoAroundDropFt,
+    ];
+
+    /// Its key under `phases:`, as the `PhaseConfig` field.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::RollKt => "roll_kt",
+            Self::ClimbEndFt => "climb_end_ft",
+            Self::ApproachFt => "approach_ft",
+            Self::FlareFt => "flare_ft",
+            Self::GoAroundRiseFt => "go_around_rise_ft",
+            Self::GoAroundDropFt => "go_around_drop_ft",
+        }
+    }
+
+    pub fn unit(self) -> Unit {
+        match self {
+            Self::RollKt => Unit::Knots,
+            _ => Unit::Feet,
+        }
+    }
+
+    fn of(self, c: &mut PhaseConfig) -> &mut f64 {
+        match self {
+            Self::RollKt => &mut c.roll_kt,
+            Self::ClimbEndFt => &mut c.climb_end_ft,
+            Self::ApproachFt => &mut c.approach_ft,
+            Self::FlareFt => &mut c.flare_ft,
+            Self::GoAroundRiseFt => &mut c.go_around_rise_ft,
+            Self::GoAroundDropFt => &mut c.go_around_drop_ft,
+        }
+    }
+
+    /// Its value in `c`.
+    pub fn get(self, mut c: PhaseConfig) -> f64 {
+        *self.of(&mut c)
+    }
+}
+
+/// The phase boundaries of a class; transport where it is unknown, the
+/// values every flight had before boundaries followed the aircraft.
+pub fn class_phases(class: Option<Aircraft>) -> PhaseConfig {
+    match class {
+        Some(Aircraft::Light) => PhaseConfig::LIGHT,
+        _ => PhaseConfig::TRANSPORT,
+    }
+}
+
+/// CICTT ends the initial climb at 1000 ft or the pattern height,
+/// whichever first.
+const CLIMB_END_MAX_FT: f64 = 1000.0;
 
 /// A profile number with the document it comes from.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -73,6 +170,10 @@ pub struct Sourced {
     /// In the unit of its `ProfileField`.
     pub value: f64,
     pub source: String,
+    /// Not the type's own published value but the closest one found (a
+    /// sister variant, a secondary source); `note` says how it was derived.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub approximate: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
 }
@@ -102,8 +203,15 @@ pub struct Profile {
     pub tail_takeoff_pitch: Option<Sourced>,
     pub tail_landing_pitch: Option<Sourced>,
     pub hard_landing_g: Option<Sourced>,
+    pub vmo: Option<Sourced>,
+    pub vle: Option<Sourced>,
+    pub vlo: Option<Sourced>,
+    pub max_crosswind: Option<Sourced>,
+    pub max_tailwind: Option<Sourced>,
     /// VFE bands by increasing flap angle.
     pub flaps: Vec<FlapBand>,
+    /// The class's phase boundaries this type moves.
+    pub phases: Vec<(PhaseField, Sourced)>,
 }
 
 impl Profile {
@@ -139,6 +247,11 @@ impl Profile {
             ProfileField::TailTakeoffPitch => self.tail_takeoff_pitch.as_ref(),
             ProfileField::TailLandingPitch => self.tail_landing_pitch.as_ref(),
             ProfileField::HardLandingG => self.hard_landing_g.as_ref(),
+            ProfileField::Vmo => self.vmo.as_ref(),
+            ProfileField::Vle => self.vle.as_ref(),
+            ProfileField::Vlo => self.vlo.as_ref(),
+            ProfileField::MaxCrosswind => self.max_crosswind.as_ref(),
+            ProfileField::MaxTailwind => self.max_tailwind.as_ref(),
         }
     }
 }
@@ -167,8 +280,39 @@ struct Doc {
     class: Aircraft,
     tail_contact: Option<TailDoc>,
     hard_landing_g: Option<SourcedDoc>,
+    vmo: Option<SourcedDoc>,
+    vle: Option<SourcedDoc>,
+    vlo: Option<SourcedDoc>,
+    max_crosswind: Option<SourcedDoc>,
+    max_tailwind: Option<SourcedDoc>,
     #[serde(default)]
     flaps: Vec<FlapDoc>,
+    #[serde(default)]
+    phases: PhasesDoc,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+struct PhasesDoc {
+    roll_kt: Option<SourcedDoc>,
+    climb_end_ft: Option<SourcedDoc>,
+    approach_ft: Option<SourcedDoc>,
+    flare_ft: Option<SourcedDoc>,
+    go_around_rise_ft: Option<SourcedDoc>,
+    go_around_drop_ft: Option<SourcedDoc>,
+}
+
+impl PhasesDoc {
+    fn take(&mut self, f: PhaseField) -> Option<SourcedDoc> {
+        match f {
+            PhaseField::RollKt => self.roll_kt.take(),
+            PhaseField::ClimbEndFt => self.climb_end_ft.take(),
+            PhaseField::ApproachFt => self.approach_ft.take(),
+            PhaseField::FlareFt => self.flare_ft.take(),
+            PhaseField::GoAroundRiseFt => self.go_around_rise_ft.take(),
+            PhaseField::GoAroundDropFt => self.go_around_drop_ft.take(),
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -183,6 +327,8 @@ struct TailDoc {
 struct SourcedDoc {
     value: Scalar,
     source: String,
+    #[serde(default)]
+    approximate: bool,
     note: Option<String>,
 }
 
@@ -211,19 +357,18 @@ impl Compiler<'_> {
             .map_err(|m| self.err(format!("`{path}`:\n{m}")))
     }
 
-    fn sourced(
-        &self,
-        path: &str,
-        field: ProfileField,
-        doc: SourcedDoc,
-    ) -> Result<Sourced, ProfileError> {
-        let value = self.quantity(path, field.unit(), &doc.value)?;
+    fn sourced(&self, path: &str, unit: Unit, doc: SourcedDoc) -> Result<Sourced, ProfileError> {
+        let value = self.quantity(path, unit, &doc.value)?;
         if doc.source.trim().is_empty() {
             return Err(self.err(format!("`{path}` needs a source")));
+        }
+        if doc.approximate && doc.note.as_deref().is_none_or(|n| n.trim().is_empty()) {
+            return Err(self.err(format!("`{path}` is approximate: its note must say how")));
         }
         Ok(Sourced {
             value,
             source: doc.source,
+            approximate: doc.approximate,
             note: doc.note,
         })
     }
@@ -234,7 +379,7 @@ impl Compiler<'_> {
         field: ProfileField,
         doc: Option<SourcedDoc>,
     ) -> Result<Option<Sourced>, ProfileError> {
-        doc.map(|d| self.sourced(path, field, d)).transpose()
+        doc.map(|d| self.sourced(path, field.unit(), d)).transpose()
     }
 
     fn flaps(&self, flaps: Vec<FlapDoc>) -> Result<Vec<FlapBand>, ProfileError> {
@@ -263,10 +408,37 @@ impl Compiler<'_> {
                         );
                     }
                 };
-                let vfe = self.sourced(&format!("flaps[{i}].vfe"), ProfileField::Vfe, band.vfe)?;
+                let vfe = self.sourced(&format!("flaps[{i}].vfe"), Unit::Knots, band.vfe)?;
                 Ok(FlapBand { up_to, vfe })
             })
             .collect()
+    }
+
+    /// The `phases:` overrides, checked merged with the class's defaults.
+    fn phases(
+        &self,
+        class: Aircraft,
+        mut doc: PhasesDoc,
+    ) -> Result<Vec<(PhaseField, Sourced)>, ProfileError> {
+        let mut set = Vec::new();
+        let mut c = class_phases(Some(class));
+        for f in PhaseField::ALL {
+            if let Some(d) = doc.take(f) {
+                let s = self.sourced(&format!("phases.{}", f.name()), f.unit(), d)?;
+                *f.of(&mut c) = s.value;
+                set.push((f, s));
+            }
+        }
+        let wrong = if c.climb_end_ft > CLIMB_END_MAX_FT {
+            "`climb_end_ft` above 1000 ft, where CICTT ends the initial climb"
+        } else if c.approach_ft < c.climb_end_ft {
+            "`approach_ft` below `climb_end_ft`"
+        } else if c.flare_ft >= c.approach_ft {
+            "`flare_ft` not below `approach_ft`"
+        } else {
+            return Ok(set);
+        };
+        Err(self.err(format!("`phases`: {wrong}")))
     }
 
     fn compile(&self, doc: Doc) -> Result<Profile, ProfileError> {
@@ -295,7 +467,21 @@ impl Compiler<'_> {
                 ProfileField::HardLandingG,
                 doc.hard_landing_g,
             )?,
+            vmo: self.optional("vmo", ProfileField::Vmo, doc.vmo)?,
+            vle: self.optional("vle", ProfileField::Vle, doc.vle)?,
+            vlo: self.optional("vlo", ProfileField::Vlo, doc.vlo)?,
+            max_crosswind: self.optional(
+                "max_crosswind",
+                ProfileField::MaxCrosswind,
+                doc.max_crosswind,
+            )?,
+            max_tailwind: self.optional(
+                "max_tailwind",
+                ProfileField::MaxTailwind,
+                doc.max_tailwind,
+            )?,
             flaps: self.flaps(doc.flaps)?,
+            phases: self.phases(doc.class, doc.phases)?,
             icao: doc.icao,
             name: doc.name,
             class: doc.class,
@@ -312,6 +498,34 @@ pub struct Selection<'a> {
     pub profile: Option<&'a Profile>,
     /// The profile's class, else the class by weight (`aircraft`).
     pub class: Option<Aircraft>,
+    /// The class's phase boundaries with the profile's overrides.
+    pub phases: PhaseConfig,
+}
+
+impl Selection<'_> {
+    /// The phase boundary `f` in effect and where it comes from: the
+    /// profile and its document (`PC12 profile, FAA AIM 4-3-3`) or the
+    /// class default (`light class default`).
+    pub fn phase_value(&self, f: PhaseField) -> Sourced {
+        let set = self
+            .profile
+            .and_then(|p| Some((p, &p.phases.iter().find(|(g, _)| *g == f)?.1)));
+        match set {
+            Some((p, s)) => Sourced {
+                source: format!("{} profile, {}", p.icao, s.source),
+                ..s.clone()
+            },
+            None => Sourced {
+                value: f.get(self.phases),
+                source: match self.class {
+                    Some(class) => format!("{class} class default"),
+                    None => "transport class default (unknown class)".to_owned(),
+                },
+                approximate: false,
+                note: None,
+            },
+        }
+    }
 }
 
 impl fmt::Display for Selection<'_> {
@@ -372,10 +586,16 @@ impl ProfileSet {
         let profile = icao
             .as_deref()
             .and_then(|t| self.0.iter().find(|p| p.icao == t));
+        let class = profile.map_or_else(class, |p| Some(p.class));
+        let mut phases = class_phases(class);
+        for (f, s) in profile.iter().flat_map(|p| &p.phases) {
+            *f.of(&mut phases) = s.value;
+        }
         Selection {
-            class: profile.map_or_else(class, |p| Some(p.class)),
+            class,
             icao,
             profile,
+            phases,
         }
     }
 }
@@ -455,6 +675,23 @@ flaps:
     }
 
     #[test]
+    fn an_approximate_value_says_how_it_was_derived() {
+        let vmo = |extra: &str| {
+            load(&format!(
+                "{PROFILE}vmo: {{ value: 163 kt, source: \"doc D\", approximate: true{extra} }}\n"
+            ))
+        };
+        let p = vmo(", note: \"from the 172R\"").unwrap();
+        let v = p.sourced(ProfileField::Vmo, || None).unwrap();
+        assert_eq!((v.value, v.approximate), (163.0, true));
+        assert!(!p.hard_landing_g.unwrap().approximate);
+        assert_eq!(
+            vmo("").unwrap_err(),
+            "profile `TEST`: `vmo` is approximate: its note must say how"
+        );
+    }
+
+    #[test]
     fn the_type_must_match_the_file_name() {
         let err = ProfileSet::load([("C172", PROFILE)]).unwrap_err();
         assert_eq!(
@@ -481,8 +718,60 @@ flaps:
 
     #[test]
     fn rejects_unknown_fields() {
-        let err = load(&format!("{PROFILE}vmo: 163 kt\n")).unwrap_err();
-        assert!(err.contains("unknown field `vmo`"), "{err}");
+        let err = load(&format!("{PROFILE}vne: 163 kt\n")).unwrap_err();
+        assert!(err.contains("unknown field `vne`"), "{err}");
+    }
+
+    #[test]
+    fn phases_override_the_class_defaults_and_are_checked() {
+        let with = |phases: &str| {
+            let yaml = format!("{PROFILE}phases:\n{phases}");
+            ProfileSet::load([("TEST", yaml.as_str())]).map_err(|e| e.to_string())
+        };
+        let set = with("  approach_ft: { value: 1500 ft, source: AIM }\n").unwrap();
+        let s = set.select_type(Some("TEST".into()), || None);
+        let light = PhaseConfig::LIGHT;
+        assert_eq!(
+            s.phases,
+            PhaseConfig {
+                approach_ft: 1500.0,
+                ..light
+            }
+        );
+        let approach = s.phase_value(PhaseField::ApproachFt);
+        assert_eq!(
+            (approach.value, approach.source.as_str()),
+            (1500.0, "TEST profile, AIM")
+        );
+        let flare = s.phase_value(PhaseField::FlareFt);
+        assert_eq!(
+            (flare.value, flare.source.as_str()),
+            (20.0, "light class default")
+        );
+
+        let err = |phases: &str| with(phases).unwrap_err();
+        assert!(err("  climb_end_ft: { value: 1500 ft, source: x }\n").contains("above 1000 ft"));
+        assert!(
+            err("  approach_ft: { value: 800 ft, source: x }\n").contains("below `climb_end_ft`")
+        );
+        assert!(
+            err("  flare_ft: { value: 1000 ft, source: x }\n").contains("`flare_ft` not below")
+        );
+        assert!(
+            err("  roll_kt: { value: 30 ft, source: x }\n").contains("is ft, but the field is kt")
+        );
+        assert!(err("  flare: { value: 30 ft, source: x }\n").contains("unknown field `flare`"));
+    }
+
+    #[test]
+    fn an_unknown_class_keeps_the_transport_boundaries() {
+        let set = ProfileSet::load([]).unwrap();
+        let s = set.select_type(None, || None);
+        assert_eq!(s.phases, PhaseConfig::TRANSPORT);
+        let source = s.phase_value(PhaseField::FlareFt).source;
+        assert_eq!(source, "transport class default (unknown class)");
+        let s = set.select_type(None, || Some(Aircraft::Light));
+        assert_eq!(s.phases, PhaseConfig::LIGHT);
     }
 
     #[test]
@@ -493,11 +782,28 @@ flaps:
         assert_eq!(
             classes,
             [
+                ("A20N", Aircraft::Transport),
+                ("A21N", Aircraft::Transport),
+                ("A310", Aircraft::Transport),
+                ("A333", Aircraft::Transport),
+                ("AT76", Aircraft::Transport),
                 ("B38M", Aircraft::Transport),
                 ("B738", Aircraft::Transport),
+                ("B748", Aircraft::Transport),
+                ("B78X", Aircraft::Transport),
+                ("BE36", Aircraft::Light),
+                ("BE58", Aircraft::Light),
                 ("C172", Aircraft::Light),
+                ("C208", Aircraft::Light),
                 ("C25C", Aircraft::Transport),
                 ("C700", Aircraft::Transport),
+                ("DA62", Aircraft::Light),
+                ("PC12", Aircraft::Light),
+                ("PC24", Aircraft::Transport),
+                ("SF34", Aircraft::Transport),
+                ("SF50", Aircraft::Transport),
+                ("SR22", Aircraft::Light),
+                ("TBM9", Aircraft::Light),
             ]
         );
         let vfe = |icao: &str| -> Vec<_> {
@@ -508,6 +814,13 @@ flaps:
         assert_eq!(vfe("C172"), [None, Some(110.0), Some(85.0), Some(85.0)]);
         assert_eq!(vfe("C25C"), [None, Some(200.0), Some(200.0), Some(160.0)]);
         assert_eq!(vfe("C700"), [None, Some(230.0), Some(230.0), Some(180.0)]);
-        assert_eq!(vfe("B738"), [None; 4]);
+        assert_eq!(vfe("B738"), [None, Some(210.0), Some(200.0), Some(175.0)]);
+        let approach = |icao: &str| {
+            let s = set.select_type(Some(icao.into()), || None);
+            s.phases.approach_ft
+        };
+        // Turbine patterns at 1500 ft (FAA AIM 4-3-3).
+        let turbines = ["PC12", "TBM9", "C208", "C172"].map(approach);
+        assert_eq!(turbines, [1500.0, 1500.0, 1500.0, 1000.0]);
     }
 }

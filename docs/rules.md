@@ -80,6 +80,7 @@ false).
 | `td.bounce` | condition | A touchdown after a short hop |
 | `td.distance` | ft | Touchdown distance past the landing threshold; negative = before it |
 | `td.cross` | ft | Offset from the runway centreline, right positive (`abs(td.cross)` for a limit) |
+| `td.crosswind`, `td.tailwind` | kt | Wind at contact resolved on the runway heading: crosswind from either side; tailwind, negative for a headwind |
 | `td.lda`, `td.tdz` | ft | Landing distance available; touchdown zone length min(3000 ft, LDA/3) |
 | `td.in_tdz`, `td.long_landing`, `td.short_landing` | condition | Inside the touchdown zone; beyond it; before the threshold |
 
@@ -97,6 +98,10 @@ rules using them stay silent.
 | `profile.tail_takeoff_pitch` | deg | Pitch at which the tail touches the runway, main gear struts extended (rotation) |
 | `profile.tail_landing_pitch` | deg | The same with the struts compressed (touchdown) |
 | `profile.hard_landing_g` | g | Manufacturer's hard-landing maintenance inspection load |
+| `profile.vmo` | kt | Maximum operating speed (VNE for types without one), IAS |
+| `profile.vle`, `profile.vlo` | kt | Maximum speed with the gear extended; while it moves (the lower of extension and retraction) |
+| `profile.max_crosswind` | kt | Maximum demonstrated crosswind for landing (not a limit) |
+| `profile.max_tailwind` | kt | Certified maximum tailwind for takeoff and landing |
 
 ## Type profiles
 
@@ -117,25 +122,49 @@ tail_contact:                   # optional; body pitch at tail contact
   takeoff: { value: 11 deg, source: "...", note: "..." }   # struts extended
   landing: { value: 9 deg, source: "..." }                 # struts compressed
 hard_landing_g: { value: 2.2 g, source: "..." }            # optional
+vmo: { value: 163 kt, source: "...", note: "VNE" }          # optional, as the next four
+vle: { value: 200 kt, source: "..." }
+vlo: { value: 180 kt, source: "...", approximate: true, note: "sister variant's value" }
+max_crosswind: { value: 15 kt, source: "..." }
+max_tailwind: { value: 10 kt, source: "..." }
 flaps:                          # VFE bands by flap angle, increasing
   - { up_to: 10 deg, vfe: { value: 110 kt, source: "..." } }
   - { vfe: { value: 85 kt, source: "..." } }   # last band: no up_to = any larger
+phases:                         # optional; moves the class's phase boundaries
+  approach_ft: { value: 1500 ft, source: "FAA AIM 4-3-3 ..." }
 ```
+
+`phases:` overrides the class defaults of `docs/phases.md` where the type
+differs, each value sourced like the others: `roll_kt` (kt), `climb_end_ft`,
+`approach_ft`, `flare_ft`, `go_around_rise_ft`, `go_around_drop_ft` (ft).
+Merged with the defaults, `climb_end_ft` may not exceed 1000 ft (where CICTT
+ends the initial climb), `approach_ft` may not be below `climb_end_ft`, and
+`flare_ft` must be below `approach_ft`. A flight of unknown class takes the
+transport defaults. The debrief lists the values in effect and where each
+comes from (`phase_values`). The shipped turbine singles (PC12, TBM9, C208)
+start the approach at their 1500 ft pattern (FAA AIM 4-3-3).
 
 VFE is looked up by the flap surface angle (`flap.te_angle`), as a flight data
 recorder samples it and as VFE limits are defined, not by the handle index,
 whose detent order the sim does not guarantee. At 0.5 deg or less the flaps
 count as retracted and there is no VFE. Otherwise the first band whose `up_to`
 plus 0.5 deg (flap travel and rounding) reaches the angle applies; beyond a
-closed last band the VFE is unknown. Shipped: C172, C25C, C700 (flaps),
-B38M, B738 (tail contact; B738 also hard landing). B78X and SF50 have no
-verified type values and use the class default.
+closed last band the VFE is unknown. The shipped profiles are listed by the
+`shipped_profiles_load` test in `crates/rules/src/profile.rs`.
 
 Every value carries its unit, checked at load like a rule threshold, and a
 non-empty `source` (document or URL); `note` is optional. A wrong unit, a
 missing source, a `type` that does not match the file name, `up_to` not
-strictly increasing or missing on a band that is not the last, or an unknown
-field fails the load. Values without a published source are left out, never estimated.
+strictly increasing or missing on a band that is not the last, phase
+boundaries out of order, or an unknown field fails the load.
+
+A value is the type's own published one where that was found (AFM/POH, type
+certificate data sheet, FCOM/FCTM, maintenance manual). Otherwise the
+closest one found is used, marked `approximate: true`, and its `note` must
+say how it was derived (a sister variant, a secondary source, a TCDS value in
+KEAS); the debrief shows it as `≈`. A value with no basis at all is left out.
+Speeds from a TCDS in KCAS are used as IAS (within a few knots at these
+speeds).
 
 ## Events
 

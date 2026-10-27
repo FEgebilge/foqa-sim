@@ -4,9 +4,12 @@
 # NTSB ERA21LA202 documents 172S tailstrikes but gives no angle.
 # No hard_landing_g: the 172S maintenance manual sets no numeric
 # hard-landing inspection load.
+# No vle/vlo: fixed gear.
 type: C172
 name: Cessna 172S Skyhawk SP (G1000)
 class: light
+vmo: { value: 163 kt, source: "FAA TCDS 3A12 / EASA TCDS IM.A.051 Issue 11 (172S): Never Exceed 163 KIAS (160 KCAS), https://www.easa.europa.eu/en/downloads/7423/en", note: "VNE (never exceed); Va 105 KIAS" }
+max_crosswind: { value: 15 kt, source: "Max demonstrated crosswind, Cessna 172 (Boldmethod list https://www.boldmethod.com/learn-to-fly/maneuvers/maximum-demonstrated-crosswind/; matches 172S POH)" }
 flaps:
   - up_to: 10 deg
     vfe: { value: 110 kt, source: &poh "Cessna 172S POH, Section 2, Fig. 2-1 Airspeed Limitations, p. 2-4, https://aerocadet.com/cbts/pdf/172S-POH.pdf#page=42", note: "FLAPS 10 deg: 110 KIAS" }

@@ -1,6 +1,7 @@
 # Boeing 737-800 type profile (e.g. third-party add-ons). Schema: docs/rules.md.
 #
-# No flaps: the VFE table is not confirmed against a primary source.
+# Flaps, vle, vlo are 737 NG placard values from secondary sources that
+# describe the NG directly (not approximate). vmo and crosswind stay approximate.
 type: B738
 name: Boeing 737-800
 class: transport
@@ -11,3 +12,15 @@ hard_landing_g:
   value: 2.2 g
   source: 'ATSB AO-2023-010 quoting the Boeing 737 AMM: "an indication of a hard landing on the main landing gear is a peak recorded vertical acceleration that exceeds 2.2 G", https://www.atsb.gov.au/sites/default/files/2023-12/AO-2023-010%20Final.pdf#page=9'
   note: "for main-gear-first touchdowns with roll <= 2 deg; assumes a 16 samples/s DFDR (Flight Safety Digest Aug 2004, flightsafety.org/fsd/fsd_aug04.pdf), so a maintenance-indication proxy at our frame rate"
+vmo: { value: 340 kt, source: "EASA TCDS IM.A.120 Issue 29 Sec 8 (NG sections equivalent) says 'See Airplane Flight Manual'; FAA TCDS A16WE also defers to the AFM; value from 737 NG FCOM limitations (340 KCAS/0.82M)", approximate: true, note: "TCDS defers to the AFM; 340 KCAS is the widely published 737 NG value, not read from a primary document" }
+vle: { value: 320 kt, source: &ng "b737.org.uk/limitations.htm + Boeing 737 NG flashcards (NG placards)", note: "gear extended 320 kt/0.82M; secondary source describing the NG directly" }
+vlo: { value: 235 kt, source: *ng, note: "retract 235 kt, extend 270 kt; lower value given" }
+max_crosswind: { value: 33 kt, source: "Boeing 737 FCTM max demonstrated crosswind (dry runway, 10 m wind), from memory", approximate: true, note: "demonstrated value, not a limitation; not re-verified online" }
+max_tailwind: { value: 15 kt, source: "EASA TCDS IM.A.120 Issue 29 (shared with FAA TCDS A16WE), https://www.easa.europa.eu/en/downloads/7297/en", note: "TCDS 'Max takeoff and landing tailwind 15 knots'; EASA operational approval only up to 10 kt without further approval" }
+flaps:
+  - { up_to: 5 deg, vfe: { value: 250 kt, source: *ng, note: "flaps 1, 2, 5" } }
+  - { up_to: 10 deg, vfe: { value: 210 kt, source: *ng, note: "flaps 10" } }
+  - { up_to: 15 deg, vfe: { value: 200 kt, source: *ng, note: "flaps 15" } }
+  - { up_to: 25 deg, vfe: { value: 190 kt, source: *ng, note: "flaps 25" } }
+  - { up_to: 30 deg, vfe: { value: 175 kt, source: *ng, note: "flaps 30" } }
+  - { vfe: { value: 162 kt, source: *ng, note: "flaps 40" } }
