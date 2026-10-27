@@ -3,6 +3,7 @@
 //! only shown under "Details". Also what each error means for a retry.
 
 use crate::api::{ApiError, AttemptStatus, Error};
+use crate::sites::SiteRecord;
 
 /// What a message is about: the site as shown (its ASCII host), the
 /// local upload deadline and the site's upload limit.
@@ -109,6 +110,35 @@ fn api_error(api: &ApiError, ctx: Ctx) -> String {
         },
         (500.., _) => unreachable(ctx),
         _ => format!("{site} refused: {}", api.message),
+    }
+}
+
+/// The pre-flight card's ranking line (B8) for a challenge from `site`:
+/// `(state, text, fix)`. A signed-in account without a display name can't
+/// be issued an attempt (`handle_required`), so it reads as a warning.
+pub fn ranking(site: &SiteRecord, signed_in: bool) -> (&'static str, String, Option<String>) {
+    let host = site.origin.host();
+    let handle = site.user.as_ref().and_then(|u| u.handle.as_deref());
+    match (signed_in, handle) {
+        (true, Some(handle)) => (
+            "ok",
+            format!("Ranked on {} as {handle}.", site.label()),
+            None,
+        ),
+        (true, None) => (
+            "warn",
+            format!("No display name on {host} yet: this attempt can't be ranked."),
+            Some(format!(
+                "Pick a display name on {host} first, or fly it as practice."
+            )),
+        ),
+        (false, _) => (
+            "warn",
+            format!(
+                "Signed out of {host}: this attempt will be graded here but won't appear on the leaderboard."
+            ),
+            Some("Sign in under Sites, or fly it as practice.".into()),
+        ),
     }
 }
 
@@ -290,6 +320,33 @@ mod tests {
         assert_eq!(retry(&Error::Network("down".into())), Retry::Backoff);
         assert!(error(&Error::Network("down".into()), CTX).starts_with("Can't reach"));
         assert_eq!(retry(&Error::SignedOut), Retry::SignIn);
+    }
+
+    #[test]
+    fn the_ranking_line_names_the_account_or_says_what_is_missing() {
+        let mut site: SiteRecord = serde_json::from_value(serde_json::json!({
+            "origin": "https://example.org",
+            "well_known": crate::mock::well_known("https://example.org"),
+            "fetched_at_ms": 0,
+            "user": { "id": "u1", "handle": null }
+        }))
+        .unwrap();
+        let (state, text, fix) = ranking(&site, true);
+        assert_eq!(state, "warn");
+        assert!(text.starts_with("No display name on example.org"), "{text}");
+        assert!(
+            fix.unwrap()
+                .starts_with("Pick a display name on example.org")
+        );
+        site.user.as_mut().unwrap().handle = Some("ege".into());
+        let (state, text, fix) = ranking(&site, true);
+        assert_eq!((state, fix), ("ok", None));
+        assert!(text.ends_with("(example.org) as ege."), "{text}");
+        assert!(
+            ranking(&site, false)
+                .1
+                .starts_with("Signed out of example.org")
+        );
     }
 
     #[test]

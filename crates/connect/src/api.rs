@@ -10,7 +10,9 @@ use crate::http::{NetError, Response};
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct User {
     pub id: String,
-    pub handle: String,
+    /// `None` until the user picks a display name on the site.
+    #[serde(default)]
+    pub handle: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

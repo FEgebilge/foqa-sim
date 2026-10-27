@@ -140,7 +140,7 @@ impl Connect {
             origin: origin.to_owned(),
             host: r.origin.host().to_owned(),
             name: r.well_known.name.clone(),
-            handle: r.user.as_ref().map(|u| u.handle.clone()),
+            handle: r.user.as_ref().and_then(|u| u.handle.clone()),
             signed_in: self.sites.signed_in(origin),
             pending: self.uploader.pending(origin),
             device: lock(&self.device).get(origin).cloned(),
@@ -163,22 +163,8 @@ impl AttemptHooks for Connect {
 
     fn ranking(&self, key: &str) -> Option<(&'static str, String, Option<String>)> {
         let (site, _) = self.sites.source(key)?;
-        let label = site.label();
-        Some(
-            match (&site.user, self.sites.signed_in(site.origin.as_str())) {
-                (Some(user), true) => {
-                    ("ok", format!("Ranked on {label} as {}.", user.handle), None)
-                }
-                _ => (
-                    "warn",
-                    format!(
-                        "Signed out of {}: this attempt will be graded here but won't appear on the leaderboard.",
-                        site.origin.host()
-                    ),
-                    Some("Sign in under Sites, or fly it as practice.".into()),
-                ),
-            },
-        )
+        let signed_in = self.sites.signed_in(site.origin.as_str());
+        Some(copy::ranking(&site, signed_in))
     }
 }
 

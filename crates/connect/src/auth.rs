@@ -419,8 +419,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            (t.access_token.as_str(), t.user.unwrap().handle.as_str()),
-            ("access-1", "ege")
+            (t.access_token.as_str(), t.user.unwrap().handle.as_deref()),
+            ("access-1", Some("ege"))
         );
         let body = mock.requests()[0].json();
         assert_eq!(body["grant_type"], "authorization_code");

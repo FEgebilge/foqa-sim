@@ -339,7 +339,7 @@ mod tests {
         assert!(s.has_grant());
         thread::scope(|scope| {
             for _ in 0..6 {
-                scope.spawn(|| assert_eq!(s.me().unwrap().handle, "ege"));
+                scope.spawn(|| assert_eq!(s.me().unwrap().handle.as_deref(), Some("ege")));
             }
         });
         assert_eq!(mock.hits("/api/token"), 1, "single-flight");
@@ -381,7 +381,11 @@ mod tests {
             .unwrap();
         assert!(!stored && s.has_grant());
         *lock(&s.access) = None;
-        assert_eq!(s.me().unwrap().handle, "ege", "refreshed from memory");
+        assert_eq!(
+            s.me().unwrap().handle.as_deref(),
+            Some("ege"),
+            "refreshed from memory"
+        );
     }
 
     #[test]

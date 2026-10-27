@@ -378,7 +378,7 @@ pub(crate) mod tests {
                 }),
             )
             .unwrap();
-        assert_eq!(user.handle, "ege");
+        assert_eq!(user.handle.as_deref(), Some("ege"));
         let (code, page) = lock(&shown).clone().unwrap();
         assert_eq!(code, "ABCD-EFGH");
         assert!(
