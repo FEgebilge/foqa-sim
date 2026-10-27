@@ -5,7 +5,8 @@ import { Tooltip } from "@ui/components/tooltip/tooltip";
 import { clock, number } from "../../lib/format";
 import { APPROACH_GATES, hardLanding, SINK_LIMIT, type Mark } from "../../lib/references";
 import { alpha, cssVar, levelColor, phaseColor, type Theme } from "../../lib/palette";
-import { indexAt, useHover, type TimeBus, type TimeRange } from "../../lib/time";
+import { indexAt } from "../../lib/series";
+import { useHover, type TimeBus, type TimeRange } from "../../lib/time";
 import type { Debrief, FlightEvent, Series } from "../../types";
 
 type Key = Exclude<keyof Series, "t_s" | "lat" | "lon">;
