@@ -32,6 +32,8 @@ pub struct Event {
     pub unit: Option<Unit>,
     /// The measure as written in the rule.
     pub measure: String,
+    /// The event in words, from the rule's `detail`.
+    pub detail: Option<String>,
 }
 
 /// Light or transport by the highest recorded gross weight; `None` without
@@ -83,10 +85,16 @@ struct Point<'a> {
     td: Option<&'a Touchdown>,
 }
 
+impl Point<'_> {
+    fn t(&self) -> SimTime {
+        self.td.map_or(self.track.t[self.i], |td| td.t)
+    }
+}
+
 impl Values<Var> for Point<'_> {
     fn get(&self, var: Var) -> Option<f64> {
         let finite = |x: f64| x.is_finite().then_some(x);
-        let t = self.td.map_or(self.track.t[self.i], |td| td.t);
+        let t = self.t();
         match var {
             Var::Param(id) => self.flight.value(id, t).and_then(finite),
             Var::Vs => finite(self.track.vs_fpm[self.i]),
@@ -152,7 +160,7 @@ impl<'a> Evaluation<'a> {
             Trigger::Touchdown => tds
                 .iter()
                 .filter_map(|td| {
-                    self.settle(&self.point(self.track.index_at(td.t), Some(td)), td.t)
+                    self.settle(&self.point(self.track.index_at(td.t), Some(td)))
                         .event()
                 })
                 .collect(),
@@ -206,7 +214,7 @@ impl<'a> Evaluation<'a> {
             if fired || open != Some(true) {
                 continue;
             }
-            let settled = self.settle(&point, t);
+            let settled = self.settle(&point);
             if !matches!(settled, Settled::Unknown) {
                 fired = true;
                 events.extend(settled.event());
@@ -216,7 +224,7 @@ impl<'a> Evaluation<'a> {
     }
 
     /// A single evaluation (gate or touchdown).
-    fn settle(&self, point: &Point, t: SimTime) -> Settled {
+    fn settle(&self, point: &Point) -> Settled {
         match self.admitted(point) {
             None => return Settled::Unknown,
             Some(false) => return Settled::Quiet,
@@ -225,11 +233,10 @@ impl<'a> Evaluation<'a> {
         let Some(m) = self.rule.measure.eval(point) else {
             return Settled::Unknown;
         };
-        let event = self
-            .rule
-            .limits
-            .crossed(m)
-            .map(|(level, thr)| self.event(level, t, t, thr.map(|thr| (t, m, thr))));
+        let event = self.rule.limits.crossed(m).map(|(level, thr)| {
+            let t = point.t();
+            self.event(level, t, t, point, thr.map(|thr| (m, thr)))
+        });
         event.map_or(Settled::Quiet, Settled::Event)
     }
 
@@ -280,7 +287,7 @@ impl<'a> Evaluation<'a> {
                         self.spanning(
                             level,
                             span,
-                            worst.map(|(k, (_, value, thr))| (self.track.t[k], value, thr)),
+                            worst.map(|(k, (_, value, thr))| (k, value, thr)),
                         )
                     })
                     .collect::<Vec<_>>()
@@ -289,25 +296,30 @@ impl<'a> Evaluation<'a> {
     }
 
     /// An event from the first to the last point of `span`; `worst` is
-    /// where the value was measured, the value and the threshold it crossed.
+    /// the point where the value was measured, the value and the threshold
+    /// it crossed.
     fn spanning(
         &self,
         level: Level,
         span: Range<usize>,
-        worst: Option<(SimTime, f64, f64)>,
+        worst: Option<(usize, f64, f64)>,
     ) -> Event {
         let (t0, t1) = (self.track.t[span.start], self.track.t[span.end - 1]);
-        self.event(level, t0, t1, worst)
+        let peak = self.point(worst.map_or(span.start, |w| w.0), None);
+        self.event(level, t0, t1, &peak, worst.map(|w| (w.1, w.2)))
     }
 
+    /// `worst` is the value measured at `peak` and the threshold it crossed.
     fn event(
         &self,
         level: Level,
         start: SimTime,
         end: SimTime,
-        worst: Option<(SimTime, f64, f64)>,
+        peak: &Point,
+        worst: Option<(f64, f64)>,
     ) -> Event {
         let unit = self.rule.limits.unit();
+        let detail = self.rule.detail.as_ref();
         Event {
             rule: self.rule.id.clone(),
             version: self.rule.version,
@@ -315,11 +327,12 @@ impl<'a> Evaluation<'a> {
             level,
             start,
             end,
-            peak: worst.map_or(start, |w| w.0),
-            value: worst.map(|w| w.1),
-            threshold: worst.map(|w| w.2),
+            peak: peak.t(),
+            value: worst.map(|w| w.0),
+            threshold: worst.map(|w| w.1),
             unit,
             measure: self.rule.measure_src.clone(),
+            detail: detail.and_then(|d| d.render(unit, worst, |e| e.eval(peak))),
         }
     }
 }

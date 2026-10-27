@@ -16,6 +16,7 @@ phase: [Approach, Landing]      # CICTT phases the rule applies to
 aircraft: transport             # optional: light | transport
 when: height < 500 ft           # optional precondition
 measure: abs(roll)              # what is measured
+detail: "{value} bank, limit {threshold}"   # optional, the event in words
 sustain: 2 s                    # how long a level must hold
 above: { low: 15 deg, medium: 20 deg, high: 30 deg }
 ```
@@ -144,3 +145,12 @@ it crossed. A debrief can therefore show why an event fired, and against
 which version of its definition, and in plain language what it means
 (`why_it_matters`) and how to avoid it (`advice`); every core rule carries
 both.
+
+`detail` says the event in words, e.g. `{ias} at flaps {flap.te_angle},
+limit {profile.vfe}` reads "111 kt at flaps 12°, limit 85 kt". Each `{…}` is
+`value` (the measured value), `threshold` (the one it crossed) or a numeric
+expression of the rule's names, read where the value was measured; all are
+checked at load and shown with their unit. A value that would read as its
+threshold keeps one more decimal. If a placeholder is unknown there the event
+has no detail. Without `detail` a numeric rule reads `{value}, limit
+{threshold}` and a condition has none.

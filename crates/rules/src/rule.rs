@@ -6,13 +6,13 @@ use std::fmt;
 
 use analyzer::Phase;
 use fdm_core::{Lfl, SignalId, Unit};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::expr::{self, Expr, Scope, Ty};
 use crate::profile::ProfileField;
 
-/// Event severity, lowest first.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+/// Event severity, lowest first: the most severe of several is their `max`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Level {
     Advisory,
@@ -213,6 +213,81 @@ pub struct Rule {
     /// The measure as written, for explaining events.
     pub measure_src: String,
     pub limits: Limits,
+    /// The event in words; `None` for a condition without a `detail`.
+    pub detail: Option<Detail>,
+}
+
+/// A rule's `detail`, e.g. `{value} bank, limit {threshold}`: text with
+/// placeholders, each `value`, `threshold` or an expression of the rule's
+/// names read where the value was measured.
+#[derive(Debug, Clone)]
+pub struct Detail(Vec<Part>);
+
+#[derive(Debug, Clone)]
+enum Part {
+    Text(String),
+    Value,
+    Threshold,
+    Expr(Expr<Var>, Option<Unit>),
+}
+
+/// The `detail` of a numeric measure that has none.
+const DEFAULT_DETAIL: &str = "{value}, limit {threshold}";
+
+impl Detail {
+    /// The text with the measured value and the threshold it crossed in
+    /// `unit`, and `eval` for the expressions; `None` if one is unknown.
+    pub fn render(
+        &self,
+        unit: Option<Unit>,
+        worst: Option<(f64, f64)>,
+        eval: impl Fn(&Expr<Var>) -> Option<f64>,
+    ) -> Option<String> {
+        let (value, threshold) = worst.unzip();
+        // A value that would read as its threshold keeps up to two more
+        // decimals, as few as tell them apart.
+        let extra = worst.map_or(0, |(v, t)| {
+            let (d, t) = (digits(v, unit), round(t, digits(t, unit)));
+            (0..2).find(|&e| round(v, d + e) != t).unwrap_or(2)
+        });
+        self.0
+            .iter()
+            .map(|part| match part {
+                Part::Text(text) => Some(text.clone()),
+                Part::Value => Some(show(value?, unit, extra)),
+                Part::Threshold => Some(show(threshold?, unit, 0)),
+                Part::Expr(e, unit) => Some(show(eval(e)?, *unit, 0)),
+            })
+            .collect()
+    }
+}
+
+/// A number as shown with its unit, `extra` more decimals than `digits`.
+fn show(x: f64, unit: Option<Unit>, extra: usize) -> String {
+    let digits = digits(x, unit) + extra;
+    let x = round(x, digits);
+    match unit.map(Unit::symbol) {
+        Some("deg") => format!("{x:.digits$}°"),
+        Some("") | None => format!("{x:.digits$}"),
+        Some(symbol) => format!("{x:.digits$} {symbol}"),
+    }
+}
+
+/// The decimals `x` is shown with: two in g and dots, one under 10 when
+/// not whole once rounded to it, else none.
+fn digits(x: f64, unit: Option<Unit>) -> usize {
+    let x = round(x, 1);
+    match unit {
+        Some(Unit::G | Unit::Dots) => 2,
+        _ if x.abs() < 10.0 && x.fract() != 0.0 => 1,
+        _ => 0,
+    }
+}
+
+fn round(x: f64, digits: usize) -> f64 {
+    let scale = 10_f64.powi(digits as i32);
+    // `+ 0.0` turns a rounded -0 into 0.
+    (x * scale).round() / scale + 0.0
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -249,6 +324,7 @@ struct Doc {
     gate: Option<String>,
     at: Option<String>,
     measure: String,
+    detail: Option<String>,
     sustain: Option<Scalar>,
     above: Option<Levels>,
     below: Option<Levels>,
@@ -405,6 +481,40 @@ impl<'a> Compiler<'a> {
         }
     }
 
+    /// A `detail` template; `numeric` when the measure has a value and
+    /// thresholds.
+    fn detail(&self, src: &str, numeric: bool) -> Result<Detail, LoadError> {
+        let mut parts = Vec::new();
+        let mut rest = src;
+        while let Some(open) = rest.find('{') {
+            let close = rest[open..]
+                .find('}')
+                .ok_or_else(|| self.err("detail", format!("{src}\nunclosed `{{`")))?
+                + open;
+            parts.push(Part::Text(rest[..open].to_owned()));
+            parts.push(match rest[open + 1..close].trim() {
+                "value" | "threshold" if !numeric => {
+                    return Err(self.err("detail", "a condition measure has no value or threshold"));
+                }
+                "value" => Part::Value,
+                "threshold" => Part::Threshold,
+                name => {
+                    let e = self.expression("detail", name)?;
+                    match e.ty() {
+                        Ty::Num(unit) => Part::Expr(e, unit),
+                        Ty::Bool => {
+                            let message = format!("{name}\nmust be a number, but is a condition");
+                            return Err(self.err("detail", message));
+                        }
+                    }
+                }
+            });
+            rest = &rest[close + 1..];
+        }
+        parts.push(Part::Text(rest.to_owned()));
+        Ok(Detail(parts))
+    }
+
     fn phases(&self, doc: &Doc) -> Result<Vec<Phase>, LoadError> {
         let phases = doc
             .phase
@@ -481,6 +591,13 @@ fn compile(doc: Doc) -> Result<Rule, LoadError> {
         .as_deref()
         .map(|w| c.condition("when", w))
         .transpose()?;
+    let numeric = matches!(limits, Limits::Thresholds { .. });
+    let detail = doc
+        .detail
+        .as_deref()
+        .or(numeric.then_some(DEFAULT_DETAIL))
+        .map(|d| c.detail(d, numeric))
+        .transpose()?;
     Ok(Rule {
         id: doc.rule,
         version: doc.version,
@@ -495,6 +612,7 @@ fn compile(doc: Doc) -> Result<Rule, LoadError> {
         measure,
         measure_src: doc.measure,
         limits,
+        detail,
     })
 }
 
@@ -627,6 +745,43 @@ Medium threshold `30 deg` must be above Low `30 deg`"
             "rule `excessive-bank-low`, `above`:
 needs at least one level (advisory, low, medium or high)"
         );
+    }
+
+    #[test]
+    fn detail_reads_like_the_limit() {
+        let rule = &load(BANK).unwrap()[0];
+        let detail = |v, t| {
+            let d = rule.detail.as_ref().unwrap();
+            d.render(rule.limits.unit(), Some((v, t)), |_| None)
+        };
+        assert_eq!(detail(31.6, 30.0).as_deref(), Some("32°, limit 30°"));
+        // Just past the threshold keeps a decimal.
+        assert_eq!(detail(30.4, 30.0).as_deref(), Some("30.4°, limit 30°"));
+        // Just under a `below` threshold, as many as tell them apart.
+        assert_eq!(detail(9.96, 10.0).as_deref(), Some("9.96°, limit 10°"));
+        assert_eq!(detail(9.94, 10.0).as_deref(), Some("9.9°, limit 10°"));
+    }
+
+    #[test]
+    fn decimals_follow_the_rounded_number() {
+        let deg = Some(Unit::Degrees);
+        assert_eq!(show(9.96, deg, 0), "10°");
+        assert_eq!(show(10.04, deg, 0), "10°");
+        assert_eq!(show(10.96, deg, 0), "11°");
+        assert_eq!(show(9.94, deg, 0), "9.9°");
+        assert_eq!(show(-0.04, None, 0), "0");
+    }
+
+    #[test]
+    fn detail_placeholders_are_checked_at_load() {
+        let with = |d: &str| BANK.replace("sustain:", &format!("detail: \"{d}\"\nsustain:"));
+        assert!(load(&with("{value} at {ias}, limit {threshold}")).is_ok());
+        assert!(error(&with("{ias")).contains("unclosed `{`"));
+        assert!(error(&with("{air_ground}")).contains("must be a number"));
+        assert!(error(&with("{nope}")).contains("unknown parameter `nope`"));
+        let condition =
+            "rule: x\nversion: 1\ntitle: x\nat: touchdown\nmeasure: td.bounce\nlevel: low\n";
+        assert!(error(&format!("{condition}detail: \"{{value}}\"")).contains("no value"));
     }
 
     #[test]

@@ -497,6 +497,7 @@ fn flap_overspeed_uses_the_vfe_of_the_type_profile() {
         (e.rule.as_str(), e.level, e.value, e.threshold),
         ("flap-overspeed", Level::Medium, Some(10.0), Some(5.0))
     );
+    assert_eq!(e.detail.as_deref(), Some("95 kt at flaps 20°, limit 85 kt"));
     assert!(e.end.us_since(e.start) >= 2_000_000);
     let (flight, track) = fly(LIGHT_LB, TD_S + ROLLOUT_S, script);
     assert_eq!(events(CORE, &flight, &track), []);

@@ -33,6 +33,17 @@ fn tdz_m(lda_m: f64) -> f64 {
     TDZ_MAX_M.min(lda_m * TDZ_RUNWAY_FRACTION)
 }
 
+/// Aiming point distance from the threshold by landing distance available,
+/// ICAO Annex 14 Vol I, Table 5-1.
+fn aiming_point_m(lda_m: f64) -> f64 {
+    match lda_m {
+        ..800.0 => 150.0,
+        ..1200.0 => 250.0,
+        ..2400.0 => 300.0,
+        _ => 400.0,
+    }
+}
+
 fn wrap180(deg: f64) -> f64 {
     (deg + 180.0).rem_euclid(360.0) - 180.0
 }
@@ -155,11 +166,26 @@ pub struct RunwayFix {
     pub lda_m: f64,
     /// Touchdown zone length: min(3000 ft, LDA/3).
     pub tdz_m: f64,
+    /// Aiming point distance from the threshold (ICAO Annex 14).
+    pub aiming_point_m: f64,
     pub in_tdz: bool,
     /// Beyond the touchdown zone.
     pub long_landing: bool,
     /// Before the threshold.
     pub short_landing: bool,
+}
+
+impl RunwayFix {
+    /// Where on the runway: `In TDZ`, `Long` or `Short`.
+    pub fn zone(&self) -> &'static str {
+        if self.short_landing {
+            "Short"
+        } else if self.long_landing {
+            "Long"
+        } else {
+            "In TDZ"
+        }
+    }
 }
 
 /// Matches a touchdown (position and true ground track) to a runway end:
@@ -190,6 +216,7 @@ pub fn locate(
                 cross_m,
                 lda_m,
                 tdz_m,
+                aiming_point_m: aiming_point_m(lda_m),
                 in_tdz: (0.0..=tdz_m).contains(&along_m),
                 long_landing: along_m > tdz_m,
                 short_landing: along_m < 0.0,
@@ -264,8 +291,12 @@ mod tests {
         let fix = locate(&ap, lat, lon, 201.0).unwrap();
         assert_eq!(fix.runway, "20");
         assert!((fix.along_m - 400.0).abs() < 0.5 && (fix.cross_m - 7.0).abs() < 0.5);
-        assert_eq!((fix.lda_m, fix.tdz_m), (3000.0, 914.4));
+        assert_eq!(
+            (fix.lda_m, fix.tdz_m, fix.aiming_point_m),
+            (3000.0, 914.4, 400.0)
+        );
         assert!(fix.in_tdz && !fix.long_landing && !fix.short_landing);
+        assert_eq!(fix.zone(), "In TDZ");
         let (lat, lon) = point(20.0, 1500.0, 1000.0, -5.0);
         let fix = locate(&ap, lat, lon, 20.0).unwrap();
         assert_eq!(fix.runway, "02");
@@ -288,8 +319,9 @@ mod tests {
         let ap = airport(vec![runway(200.0, 1500.0, 20, Designator::None)]);
         let (lat, lon) = point(200.0, 750.0, 600.0, 0.0);
         let fix = locate(&ap, lat, lon, 200.0).unwrap();
-        assert_eq!(fix.tdz_m, 500.0);
+        assert_eq!((fix.tdz_m, fix.aiming_point_m), (500.0, 300.0));
         assert!(fix.long_landing && !fix.in_tdz);
+        assert_eq!(fix.zone(), "Long");
     }
 
     #[test]
@@ -297,6 +329,7 @@ mod tests {
         let (lat, lon) = point(200.0, 1500.0, -80.0, 0.0);
         let fix = locate(&one(), lat, lon, 200.0).unwrap();
         assert!(fix.short_landing && !fix.in_tdz);
+        assert_eq!(fix.zone(), "Short");
     }
 
     #[test]

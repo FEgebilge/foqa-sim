@@ -8,7 +8,7 @@ use std::fmt;
 
 use analyzer::Flight;
 use fdm_core::{AircraftId, Unit};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::engine::aircraft;
 use crate::expr;
@@ -36,7 +36,7 @@ pub enum ProfileField {
 }
 
 impl ProfileField {
-    const ALL: [Self; 4] = [
+    pub const ALL: [Self; 4] = [
         Self::Vfe,
         Self::TailTakeoffPitch,
         Self::TailLandingPitch,
@@ -45,14 +45,17 @@ impl ProfileField {
 
     /// The field named `name` in `profile.<name>`.
     pub(crate) fn named(name: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|f| {
-            name == match f {
-                Self::Vfe => "vfe",
-                Self::TailTakeoffPitch => "tail_takeoff_pitch",
-                Self::TailLandingPitch => "tail_landing_pitch",
-                Self::HardLandingG => "hard_landing_g",
-            }
-        })
+        Self::ALL.into_iter().find(|f| f.name() == name)
+    }
+
+    /// Its `<name>` in `profile.<name>`.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Vfe => "vfe",
+            Self::TailTakeoffPitch => "tail_takeoff_pitch",
+            Self::TailLandingPitch => "tail_landing_pitch",
+            Self::HardLandingG => "hard_landing_g",
+        }
     }
 
     pub fn unit(self) -> Unit {
@@ -65,11 +68,12 @@ impl ProfileField {
 }
 
 /// A profile number with the document it comes from.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Sourced {
     /// In the unit of its `ProfileField`.
     pub value: f64,
     pub source: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
 }
 
@@ -112,7 +116,16 @@ impl Profile {
         field: ProfileField,
         flap_angle: impl FnOnce() -> Option<f64>,
     ) -> Option<f64> {
-        let sourced = match field {
+        self.sourced(field, flap_angle).map(|s| s.value)
+    }
+
+    /// `value` with its source.
+    pub fn sourced(
+        &self,
+        field: ProfileField,
+        flap_angle: impl FnOnce() -> Option<f64>,
+    ) -> Option<&Sourced> {
+        match field {
             ProfileField::Vfe => {
                 let angle = flap_angle().filter(|a| *a > FLAP_TOLERANCE_DEG)?;
                 self.flaps
@@ -126,8 +139,7 @@ impl Profile {
             ProfileField::TailTakeoffPitch => self.tail_takeoff_pitch.as_ref(),
             ProfileField::TailLandingPitch => self.tail_landing_pitch.as_ref(),
             ProfileField::HardLandingG => self.hard_landing_g.as_ref(),
-        };
-        sourced.map(|s| s.value)
+        }
     }
 }
 

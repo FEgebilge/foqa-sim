@@ -3,6 +3,8 @@
 # Each document is one event definition. Thresholds name their source in the
 # description; "FOQA-Sim estimate" marks values without a published source.
 # Thresholds are exceeded strictly (`above` > value, `below` < value).
+# `detail` says the event in words; without it a numeric rule reads
+# "{value}, limit {threshold}".
 # Language reference: docs/rules.md
 
 rule: unstable-speed-500
@@ -24,6 +26,7 @@ aircraft: transport
 gate: height <= 500 ft
 when: sel.speed > 0 kt
 measure: ias - sel.speed
+detail: "{value} from the {sel.speed} target, limit {threshold}"
 above: { low: 10 kt, medium: 15 kt, high: 20 kt }
 below: { low: -5 kt, medium: -10 kt, high: -15 kt }
 ---
@@ -43,6 +46,7 @@ advice: >
 phase: Approach
 gate: height <= 500 ft
 measure: -vs
+detail: "{value} sink, limit {threshold}"
 above: { low: 1000 fpm, medium: 1200 fpm, high: 1500 fpm }
 ---
 rule: unstable-bank-500
@@ -60,6 +64,7 @@ advice: >
 phase: Approach
 gate: height <= 500 ft
 measure: abs(roll)
+detail: "{value} bank, limit {threshold}"
 above: { low: 7 deg, medium: 10 deg, high: 15 deg }
 ---
 rule: localizer-deviation-500
@@ -77,6 +82,7 @@ advice: >
 phase: Approach
 gate: height <= 500 ft
 measure: abs(nav.loc_dev)
+detail: "{value} off the localizer, limit {threshold}"
 above: { low: 0.25 dot, medium: 0.5 dot, high: 1 dot }
 ---
 rule: glideslope-deviation-500
@@ -94,6 +100,7 @@ advice: >
 phase: Approach
 gate: height <= 500 ft
 measure: abs(nav.gs_dev)
+detail: "{value} off the glideslope, limit {threshold}"
 above: { low: 1 dot, medium: 1.5 dot, high: 2 dot }
 ---
 rule: gear-not-down-500
@@ -129,6 +136,7 @@ advice: >
 phase: Approach
 when: height < 1000 ft
 measure: -vs
+detail: "{value} sink, limit {threshold}"
 sustain: 3 s
 above: { low: 1000 fpm, medium: 1200 fpm, high: 1500 fpm }
 ---
@@ -149,6 +157,7 @@ advice: >
 phase: [InitialClimb, Approach, Landing, GoAround]
 when: height < 500 ft and not air_ground
 measure: abs(roll)
+detail: "{value} bank, limit {threshold}"
 sustain: 2 s
 above: { low: 15 deg, medium: 20 deg, high: 30 deg }
 ---
@@ -168,6 +177,7 @@ advice: >
 at: touchdown
 aircraft: transport
 measure: td.peak_g
+detail: "{value} at touchdown, limit {threshold}"
 above: { low: 1.6 g, medium: 1.8 g, high: 2.1 g }
 ---
 rule: hard-landing-light
@@ -186,6 +196,7 @@ advice: >
 at: touchdown
 aircraft: light
 measure: td.peak_g
+detail: "{value} at touchdown, limit {threshold}"
 above: { low: 1.8 g, medium: 2.2 g, high: 2.6 g }
 ---
 rule: high-sink-touchdown
@@ -202,6 +213,7 @@ advice: >
   little power if the sink builds, and go around from an unstable flare.
 at: touchdown
 measure: td.sink
+detail: "{value} sink at touchdown, limit {threshold}"
 above: { low: 360 fpm, medium: 480 fpm, high: 600 fpm }
 ---
 rule: bounced-landing
@@ -268,6 +280,7 @@ advice: >
   centreline down to touchdown.
 at: touchdown
 measure: abs(td.cross)
+detail: "{value} off the centreline, limit {threshold}"
 above: { low: 25 ft, medium: 40 ft, high: 60 ft }
 ---
 rule: stall-warning
@@ -319,6 +332,7 @@ advice: >
   flaps, and retract them before accelerating beyond it.
 phase: [InitialClimb, EnRoute, Approach, Landing, GoAround]
 measure: ias - profile.vfe
+detail: "{ias} at flaps {flap.te_angle}, limit {profile.vfe}"
 sustain: 2 s
 above: { low: 0 kt, medium: 5 kt, high: 10 kt }
 ---
@@ -340,6 +354,7 @@ advice: >
 phase: Takeoff
 when: air_ground
 measure: profile.tail_takeoff_pitch - pitch
+detail: "{pitch} pitch, {value} from tail contact, limit {threshold}"
 below: { medium: 2 deg, high: 1 deg }
 ---
 rule: tailstrike-risk-landing
@@ -359,6 +374,7 @@ advice: >
   increase pitch to stop a bounce or a float. If in doubt, go around.
 at: touchdown
 measure: profile.tail_landing_pitch - td.pitch
+detail: "{td.pitch} pitch, {value} from tail contact, limit {threshold}"
 below: { medium: 2 deg, high: 1 deg }
 ---
 rule: hard-landing-inspection
@@ -376,4 +392,5 @@ advice: >
   timely flare; go around from an unstable one.
 at: touchdown
 measure: td.peak_g - profile.hard_landing_g
+detail: "{td.peak_g} at touchdown, inspection above {profile.hard_landing_g}"
 above: { high: 0 g }
