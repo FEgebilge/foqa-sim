@@ -9,10 +9,13 @@ site depends on the protocol, its example fixtures (A11) and the open
 implementer is Pilot Aptitude (Mollymawk `docs/landing-challenges.md`),
 but nothing below names it.
 
-Status: design, nothing implemented. Part A is the wire protocol (what a
-site implements). Part B is the app side (how FOQA-Sim implements the
-client without depending on it). Revised 2026-10-27 after a security and
-a UX review.
+Status: design. Part A is the wire protocol (what a site implements).
+Part B is the app side (how FOQA-Sim implements the client without
+depending on it). Revised 2026-10-27 after a security and a UX review.
+Built (2026-10-28): slices F1 (marker, slice, golden), F3 and F4
+(`crates/connect`, `app/src-tauri/src/connect.rs`, Challenges → Sites);
+see "Implementation notes" at the end. Deep links (F5) and F6 are not
+built.
 
 ## Principles
 
@@ -304,7 +307,10 @@ magic `FQJC`) cut from the flight that contains the attempt:
   window (so values at the window start are known). Sim times are **not**
   rebased.
 - The airport snapshot of the challenge's airport (and of any airport
-  recorded inside the window); the aircraft identity in force at the
+  recorded inside the window): `fdm slice` does not know the challenge, so
+  it keeps the latest earlier snapshot of every airport within 10 km of a
+  position flown inside the window, which includes the challenge's runway
+  ([format.md](format.md), Recording slice); the aircraft identity in force at the
   window start and any change inside it, with `atc_id` (tail number) and
   `title` (the sim title, which can carry a user-named livery) blanked;
   `atc_model`/`atc_type` kept for the aircraft check; sim events inside
@@ -460,14 +466,23 @@ marker** ([format.md](format.md) event table), text a JSON object:
   separately, by `crates/challenge` (`Challenge` fields, `scoring.version`).
   A site serves only definitions its pinned `fdm` accepts (`--check`); a
   client refuses definitions it cannot parse.
-- **Fixtures:** `docs/protocol/examples/` holds one JSON example per
-  type and case (well-known, token response, each A6 error body, a
-  `ChallengeEntry`, an `IssuedAttempt`, an `AttemptStatus` per status).
-  `crates/connect/tests` runs the client against a mock server built from
-  them; a site copies them into its tests and validates its own schemas
-  against them. `crates/challenge/tests/golden/` holds a golden
-  `challenge.json` + `flight.fqz` + expected `Attempt` JSON for a site's
-  scorer CI.
+- **Fixtures:** `fixtures/protocol/` holds one JSON example per type and
+  case, for the example site `https://landings.example`: the well-known
+  document, token responses (one with `handle: null`), `/me`, a device
+  code, `ChallengeEntry` lists, the issue response, an `AttemptStatus` per
+  status (plus scored-unverified and an unknown status), a `/me/attempts`
+  page and each A6 error body as `errors/<http>-<code>.json`. Definitions
+  are embedded byte for byte under their `definition_sha256`.
+  `crates/connect/tests/protocol_fixtures.rs` reads every one with the
+  client's types; a site copies them into its tests and validates its own
+  schemas against them. `fixtures/challenge/` holds a golden `challenge.json`, the
+  synthetic `flight.fqz` it was flown in, that flight's `slice.fqz` and the
+  expected `fdm challenge` output `attempt.json`, for a site's scorer CI:
+  `fdm slice flight.fqz --ref Qe3v1hJ0dEa9fP2kLm7xRw` gives `slice.fqz`
+  byte for byte, and `fdm challenge challenge.json slice.fqz` gives
+  `attempt.json` (compare numbers to 1e-9 relative: another platform's
+  maths may differ in the last bit). `crates/cli/tests/golden.rs` checks
+  both; `FOQA_BLESS=1` rewrites them.
 
 ---
 
@@ -502,9 +517,12 @@ msfs-panel/        toolbar panel strip + EFB Challenges tab (B9)
   attempt, Fly again, local grade, history and logs, the in-sim strip
   and EFB tab with local states. The marker and slice features are
   generic (a slice is also a way to share one landing).
-- HTTP: `reqwest` (already in the lock), rustls, 10 s connect / 60 s
-  upload timeouts, redirects off (a redirect to another origin would leak
-  the token).
+- HTTP: `ureq` 3 (blocking, rustls with ring, webpki roots), 10 s
+  connect / 60 s request timeouts, redirects off (a redirect to another
+  origin would leak the token). `reqwest` is in the lock only through
+  Tauri, without a TLS backend or its blocking client; enabling those
+  pulls aws-lc-rs (CMake to build) and a Tokio runtime per client, while
+  every call here is blocking on a worker thread anyway.
 - Commands (added to [debrief-api.md](debrief-api.md) when built). Core:
   `challenge_open_file(path)`, `challenge_preflight(key)`,
   `attempt_create(key)`, `attempt_place(id)`, `attempt_finish(id)`,
@@ -550,9 +568,12 @@ leaves no network activity at all.
 
 ## B4. Token storage
 
-**OS credential store via `keyring` 3.x (`windows-native`): Windows
-Credential Manager**, service `foqa-sim`, account `<origin>`, value the
-refresh token only. The access token lives in memory.
+**OS credential store via `keyring` 3.x: Windows Credential Manager**
+(`windows-native`; the macOS Keychain and the Linux Secret Service with
+`apple-native` and `sync-secret-service`), service `foqa-sim`, account
+`<origin>`, value the refresh token only. The access token lives in
+memory. A platform without a store that keeps the secret until deleted
+counts as unavailable (below), never as `keyring`'s forgetful mock.
 
 | | Credential Manager (keyring) | File in app data |
 |---|---|---|
@@ -775,3 +796,49 @@ Each slice keeps the app fully usable with no site configured.
   and temperature set by the app, every time; measuring live weather and
   accepting a band is not enough. How the app sets it is under research
   (docs/challenges.md, "What MSFS 2024 allows").
+
+## Implementation notes (F1, F3, F4)
+
+- `crates/connect` depends on no FOQA-Sim crate; the app's `connect`
+  feature (default on) adds it with `open` (system browser). Off
+  (`cargo build -p foqa-sim-app --no-default-features`), the app has no
+  network code for challenges; `cargo tree -i connect` lists only the app.
+- The core joins it through `commands::AttemptHooks` (issue before
+  placing, the pre-flight ranking line) and the attempt change callback
+  (done → upload, abandoned / failed start → site abandon). The core's
+  states and files are unchanged; `site.json` and `site.log.jsonl` sit in
+  the attempt folder (the app keeps attempt folders in its data folder,
+  not `Documents`).
+- Sites come only from the user: Challenges → Sites → Add (deep links are
+  F5). A site's challenge is taken into the library as its exact bytes
+  (checked against `definition_sha256` and by `Challenge::parse`); an
+  attempt at it is issued under the local id, and a definition other
+  than the one issued makes it practice.
+- **Marker (F1):** `SimEvent::Attempt` (journal code 8, format.md),
+  written through `SimRequests::attempt_marker` into the open flight only.
+  `AttemptHooks::before_place` returns the issued `ref` (connect: the
+  sidecar's, when issued and the definition matched), kept in
+  `attempt.json` as `ref`; `begin` follows the placement (or the arming of
+  a `self` start), `end` precedes the grade (`stopped`) or an abandon
+  (`abandoned`, `replaced`) while that flight still records.
+- **Slice (F1):** an attempt with a `ref` goes `graded_local` → `sliced` →
+  `done`: `recorder::slice` cuts `slice.fqz` from the flight (journal or
+  compact) on a thread of its own, waiting up to 15 s for the recording to
+  pass 5 s after the end marker; `sliced` logs bytes, SHA-256 and window.
+  A failed cut is logged and retried at the next start. A local attempt
+  (`ref` null) goes `graded_local` → `done`, with no slice.
+- **Upload:** only `slice.fqz`; an attempt without one is refused
+  (`upload_refused`, `no_slice`), never replaced by the whole flight.
+- **`fdm challenge`** grades only a touchdown after the latest `begin`
+  marker and reports `marker` (`ref`, `begin_s`, `end_s`) and `aircraft`
+  (`icao`, `class`) in the `Attempt`.
+- **Decode cap:** `fdm challenge` and `fdm slice` refuse a compact
+  flight whose body decompresses past 32 MiB
+  (`recorder::CHALLENGE_MAX_BODY`); the app's own flights keep 256 MiB.
+- **Not in F1 yet:** the live `[begin, now]` grading during the rollout
+  (B5).
+- "Allow local sites" is the environment variable
+  `FOQA_ALLOW_LOCAL_SITES=1` until the app has a settings screen; the
+  auto-upload, notifications and links toggles (B3), toasts (B7), the
+  stale-attempt sweep at start-up (B6) and site states in the strip/EFB
+  (B9) are not built yet.

@@ -5,8 +5,9 @@
 use std::collections::BTreeMap;
 
 use analyzer::RunwayFix;
+use assess::{Height, Speeds};
 pub use rules::Level;
-use rules::Sourced;
+use rules::{Domain, ScoringClass, Sourced};
 use serde::{Deserialize, Serialize};
 
 /// What the recorder is doing, as the tray and the app header show it.
@@ -54,16 +55,37 @@ pub struct FlightSummary {
     pub assessment: Assessment,
 }
 
-/// The flight graded as a whole. Each rule it broke counts once, at its
-/// worst level, so a repeated finding does not pile up but different ones
-/// do: high 4 points, medium 2, low 1, advisories (pilot reports among
-/// them) none.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// The flight graded as a whole, as the flight list shows it: by
+/// `landing-2` (docs/scoring.md) when a landing was scored, else by points.
+/// `points` and `findings` are the points method's (each rule it broke
+/// counts once, at its worst level: high 4 points, medium 2, low 1,
+/// advisories none), kept for one release.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Assessment {
     pub grade: Grade,
     pub points: u32,
     /// Rules broken at low or above.
     pub findings: usize,
+    /// `landing-2`, or `points`.
+    #[serde(default = "points_method")]
+    pub method: String,
+    /// 0-100, with a scored landing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub score: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<Confidence>,
+}
+
+fn points_method() -> String {
+    crate::assessment::POINTS.into()
+}
+
+/// Whether every value the score expects was there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Confidence {
+    Full,
+    Partial,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -98,12 +120,141 @@ pub struct GradeBand {
     pub up_to: Option<u32>,
 }
 
-/// How the assessment was reached, for the debrief: the parts, most points
-/// first, and the scale they are read on.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+/// How the assessment was reached (docs/scoring.md §7.5): each landing in
+/// six domains, the caps and the rest of the flight; and, for one release,
+/// the points method's parts and bands.
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct AssessmentDetail {
+    /// `landing-2`, or `points` without a scored landing.
+    pub method: String,
+    pub score: Option<f64>,
+    pub grade: Grade,
+    pub confidence: Option<Confidence>,
+    /// What holds the flight's score down beyond its domains: the grading
+    /// landing's caps, then the flight's own (`kind: flight`).
+    pub caps: Vec<CapNote>,
+    /// The landing in `landings` that sets the grade.
+    pub graded_by: Option<usize>,
+    pub landings: Vec<LandingAssessment>,
+    /// Indices in `Debrief.events` of the findings outside every landing.
+    pub other_findings: Vec<usize>,
+    pub legacy_points: u32,
+    pub legacy_findings: usize,
     pub parts: Vec<AssessmentPart>,
     pub bands: [GradeBand; 3],
+    /// landing-2's grade edges: Good from `good`, Fair from `fair`.
+    pub grades: ScoreBands,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct ScoreBands {
+    pub good: f64,
+    pub fair: f64,
+}
+
+/// A safety cap, or a reason the flight's score is below its landing's.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct CapNote {
+    /// `material`, `unstable`, `inspection`, `undershoot`, `excursion` or
+    /// `flight`.
+    pub kind: String,
+    pub score: f64,
+    pub reason: String,
+    pub source: String,
+    /// The landing in `AssessmentDetail.landings` it comes from.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub landing: Option<usize>,
+}
+
+/// One landing, `scored` or `insufficient` (data any score needs missing).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct LandingAssessment {
+    /// Its first touchdown.
+    pub t_s: f64,
+    pub status: &'static str,
+    pub score: Option<f64>,
+    /// Before the caps.
+    pub raw: Option<f64>,
+    pub grade: Option<Grade>,
+    pub confidence: Option<Confidence>,
+    pub class: Option<ScoringClass>,
+    /// Expected data that was missing.
+    pub partial: Vec<String>,
+    /// Required data that was missing.
+    pub missing: Vec<&'static str>,
+    /// `false` for a touch-and-go: no rollout scored, and it does not set
+    /// the flight's grade.
+    pub full_stop: bool,
+    pub caps: Vec<CapNote>,
+    pub stable_from_ft: Option<f64>,
+    /// The height splitting the approach window into its two halves, by
+    /// class (`windows` of scoring/landing-2.yaml); `None` when insufficient.
+    pub split_ft: Option<f64>,
+    pub speeds: Option<Speeds>,
+    pub domains: Vec<DomainAssessment>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct DomainAssessment {
+    pub id: Domain,
+    pub title: &'static str,
+    pub weight: f64,
+    /// Of the weight, 0 to 1; `None`: n/a, its weight shared out.
+    pub loss: Option<f64>,
+    /// Points it cost, n/a domains' weight shared out.
+    pub points: f64,
+    pub level: u8,
+    pub criteria: Vec<CriterionAssessment>,
+    pub findings: Vec<FindingAssessment>,
+    /// The criterion (`A1 below`) or rule that set the loss.
+    pub sets_by: Option<String>,
+    /// That item in words, as the app and the EFB show it: "Descent rate
+    /// 1,562 fpm at or above 300 ft", or its event's title.
+    pub set_by_text: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct CriterionAssessment {
+    pub id: String,
+    pub title: String,
+    /// The half of the approach window it was graded in, or `all`.
+    pub height: Height,
+    /// The worst value, in `unit` (none: a level).
+    pub value: f64,
+    /// `value` in its unit as shown: "+12 kt", "1.48 g", "0.8 dot", "L2".
+    pub value_text: String,
+    /// The half it was graded in, in words ("at or above 500 ft"); `None`
+    /// for `all`.
+    pub height_text: Option<String>,
+    pub unit: Option<&'static str>,
+    pub ell: f64,
+    pub level: u8,
+    pub loss: f64,
+    pub bands: SideBands,
+    /// Each anchor of `bands` as shown, like `value_text`.
+    pub bands_text: SideBands<String>,
+    pub standard: String,
+    /// It set its domain's loss.
+    pub sets: bool,
+}
+
+/// The anchors [ideal, tolerance, L1, L2, L3] as resolved for the landing:
+/// `above` grades larger values, `below` smaller; `null` where absent.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SideBands<T = f64> {
+    pub above: [Option<T>; 5],
+    pub below: [Option<T>; 5],
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct FindingAssessment {
+    /// Its index in `Debrief.events`.
+    pub event: Option<usize>,
+    pub rule: String,
+    pub level: Level,
+    pub ell: f64,
+    pub loss: f64,
+    pub sets: bool,
 }
 
 impl Grade {
@@ -166,6 +317,7 @@ impl Assessment {
         parts
     }
 
+    /// By the points method alone.
     pub fn of(events: &[Event]) -> Self {
         let parts = Self::parts(events);
         let points = parts.iter().map(|p| p.points).sum();
@@ -173,15 +325,22 @@ impl Assessment {
             grade: Grade::of(points),
             points,
             findings: parts.iter().filter(|p| p.points > 0).count(),
+            method: points_method(),
+            score: None,
+            confidence: None,
         }
     }
 }
 
-impl AssessmentDetail {
-    pub fn of(events: &[Event]) -> Self {
+impl From<&AssessmentDetail> for Assessment {
+    fn from(d: &AssessmentDetail) -> Self {
         Self {
-            parts: Assessment::parts(events),
-            bands: Grade::BANDS,
+            grade: d.grade,
+            points: d.legacy_points,
+            findings: d.legacy_findings,
+            method: d.method.clone(),
+            score: d.score,
+            confidence: d.confidence,
         }
     }
 }
@@ -512,8 +671,72 @@ mod tests {
     }
 }
 
+/// docs/scoring.md §3: one finding grades a clean landing as the points
+/// method grades it alone.
+#[cfg(test)]
+mod grade_band_tests {
+    use super::*;
+    use assess::{Finding, Measures, Method, Value};
+    use rules::{Domain, Level::*, ScoringClass};
+
+    /// A jet landing with every domain at its ideal, plus `findings`.
+    fn landing(findings: &[(Domain, Level)]) -> f64 {
+        let scalar = |id: &str, x: f64| (id.to_owned(), Value::Scalar(Height::All, Some(x)));
+        let m = Measures {
+            class: ScoringClass::Jet,
+            context: Default::default(),
+            heights_ft: Vec::new(),
+            values: vec![
+                scalar("A6", 0.0),
+                scalar("B3", 5.0),
+                scalar("C1", 0.0),
+                scalar("D1", 0.0),
+                scalar("E1", 1.1),
+                scalar("F2", 0.05),
+            ],
+            findings: findings
+                .iter()
+                .map(|&(domain, level)| Finding {
+                    rule: format!("{domain:?}"),
+                    domain,
+                    level,
+                    height_ft: None,
+                    event: None,
+                })
+                .collect(),
+            outcome: Default::default(),
+            partial: Vec::new(),
+        };
+        Method::landing_2().unwrap().score(&m).score
+    }
+
+    #[test]
+    fn single_findings_keep_todays_grade() {
+        let method = Method::landing_2().unwrap();
+        assert_eq!(landing(&[]), 100.0);
+        for domain in assess::DOMAINS {
+            for level in [Low, Medium, High] {
+                let score = landing(&[(domain, level)]);
+                let today = Grade::of(Assessment::points(level));
+                assert_eq!(
+                    Grade::from(method.grade(score)),
+                    today,
+                    "{domain:?} {level:?}: {score}"
+                );
+            }
+        }
+        // One low costs a third of its domain: 91.25 to 96.5.
+        assert_eq!(landing(&[(Domain::Stability, Low)]), 91.3);
+        assert_eq!(landing(&[(Domain::Energy, Low)]), 96.5);
+        // A high loses its domain and caps at 84.9.
+        assert_eq!(landing(&[(Domain::Stability, High)]), 75.0);
+        assert_eq!(landing(&[(Domain::Energy, High)]), 84.9);
+    }
+}
+
 #[cfg(test)]
 mod wind_tests {
+
     use super::TouchdownWind;
 
     #[test]

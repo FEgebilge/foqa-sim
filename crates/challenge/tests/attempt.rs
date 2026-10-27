@@ -2,9 +2,9 @@
 //! approach onto runway 20 of `TEST`, touching down 400 m past the
 //! threshold, starting about 4.6 NM out.
 
-use challenge::{Attempt, Challenge, evaluate};
+use challenge::{Attempt, Begin, Challenge, evaluate, evaluate_after};
 use debrief::Station;
-use recorder::SimEvent;
+use recorder::{AttemptMarker, AttemptPhase, SimEvent};
 use testkit::*;
 
 const CHALLENGE: &str = r#"{
@@ -169,4 +169,114 @@ fn a_position_dropout_on_the_rollout_stays_on_the_runway() {
     let parts = a.score.unwrap().parts;
     let rollout = parts.iter().find(|p| p.name == "rollout").unwrap();
     assert_eq!(rollout.score, 1.0, "{rollout:?}");
+}
+
+const REF: &str = "Qe3v1hJ0dEa9fP2kLm7xRw";
+const OTHER: &str = "Zx9w8v7u6t5s4r3q2p1o0n";
+
+fn marker(phase: AttemptPhase, at_s: f64) -> (f64, SimEvent) {
+    marker_of(Some(REF), phase, at_s)
+}
+
+fn marker_of(reference: Option<&str>, phase: AttemptPhase, at_s: f64) -> (f64, SimEvent) {
+    let m = AttemptMarker {
+        phase,
+        challenge: "test-20".into(),
+        version: 3,
+        reference: reference.map(Into::into),
+        reason: (phase == AttemptPhase::End).then(|| "stopped".into()),
+    };
+    (at_s, SimEvent::Attempt(m))
+}
+
+/// The stable landing with `markers`, graded after `begin`.
+fn graded(markers: &[(f64, SimEvent)], begin: Begin) -> Attempt {
+    let mut events = vec![
+        (0.0, SimEvent::Airport(runway_behind_touchdown(400.0))),
+        (0.0, identity("B738")),
+    ];
+    events.extend(markers.iter().cloned());
+    let journal = journal(&events, AIRLINER_LB, TD_S + ROLLOUT_S, |t| {
+        landing(t, TD_S, 1.2)
+    });
+    let flight = analyzer::Flight::read(&journal[..]).unwrap();
+    let station = Station::core().unwrap();
+    let analysis = station.analyse("flight-1".into(), flight).unwrap();
+    evaluate_after(&Challenge::parse(CHALLENGE).unwrap(), &analysis, begin)
+}
+
+/// The stable landing with an attempt begun at `begin_s`, graded as
+/// `fdm challenge` does.
+fn marked(begin_s: f64) -> Attempt {
+    let markers = [
+        marker(AttemptPhase::Begin, begin_s),
+        marker(AttemptPhase::End, TD_S + 40.0),
+    ];
+    graded(&markers, Begin::Latest)
+}
+
+/// A second attempt begun during the first one's rollout: the whole
+/// flight graded for the first attempt uses its own begin, not the
+/// latest; a slice (`Begin::Latest`) still takes the latest.
+#[test]
+fn an_attempt_of_a_whole_flight_is_graded_after_its_own_begin() {
+    let two = [
+        marker(AttemptPhase::Begin, 10.0),
+        marker_of(Some(OTHER), AttemptPhase::Begin, TD_S + 5.0),
+    ];
+    let mine = Begin::Of {
+        reference: Some(REF),
+        begin_s: Some(5.0),
+    };
+    let a = graded(&two, mine);
+    assert!(a.valid, "{:?}", a.checks);
+    let m = a.marker.unwrap();
+    assert_eq!(m.reference.as_deref(), Some(REF));
+    assert!((m.begin_s - 10.0).abs() < 0.05);
+    let latest = graded(&two, Begin::Latest);
+    assert_eq!(failed(&latest), ["runway"]);
+    assert_eq!(latest.marker.unwrap().reference.as_deref(), Some(OTHER));
+
+    // Local attempts carry no ref: the first begin at or after the start.
+    let local = [
+        marker_of(None, AttemptPhase::Begin, 10.0),
+        marker_of(None, AttemptPhase::End, TD_S + 3.0),
+        marker_of(None, AttemptPhase::Begin, TD_S + 5.0),
+    ];
+    let at = |begin_s| Begin::Of {
+        reference: None,
+        begin_s: Some(begin_s),
+    };
+    let first = graded(&local, at(5.0));
+    assert!(first.valid, "{:?}", first.checks);
+    assert!((first.marker.unwrap().end_s.unwrap() - TD_S - 3.0).abs() < 0.05);
+    assert_eq!(failed(&graded(&local, at(TD_S + 4.0))), ["runway"]);
+    // No marker of its own yet: graded after the start.
+    let unmarked = graded(&[], mine);
+    assert!(unmarked.marker.is_none() && unmarked.valid);
+    assert_eq!(failed(&graded(&[], at(TD_S + 4.0))), ["runway"]);
+}
+
+/// Only a touchdown after the latest begin marker is the attempt's; the
+/// marker and the aircraft graded are reported for the site to compare.
+#[test]
+fn the_attempt_is_graded_after_its_begin_marker() {
+    let a = marked(10.0);
+    assert!(a.valid, "{:?}", a.checks);
+    let m = a.marker.as_ref().unwrap();
+    assert_eq!(m.reference.as_deref(), Some("Qe3v1hJ0dEa9fP2kLm7xRw"));
+    // Events take the last frame's time: within a frame of the script's.
+    assert!((m.begin_s - 10.0).abs() < 0.05 && (m.end_s.unwrap() - TD_S - 40.0).abs() < 0.05);
+    assert_eq!(a.aircraft.icao.as_deref(), Some("B738"));
+    assert_eq!(a.aircraft.class.as_deref(), Some("transport"));
+    let json = serde_json::to_value(&a).unwrap();
+    assert_eq!(json["marker"]["ref"], "Qe3v1hJ0dEa9fP2kLm7xRw");
+
+    let late = marked(TD_S + 5.0);
+    assert!(!late.valid);
+    assert_eq!(
+        failed(&late),
+        ["runway"],
+        "the landing came before the start"
+    );
 }

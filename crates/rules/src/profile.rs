@@ -45,10 +45,22 @@ pub enum ProfileField {
     MaxCrosswind,
     /// Maximum tailwind for takeoff and landing, kt.
     MaxTailwind,
+    /// Stalling speed in the landing configuration at maximum weight, kt
+    /// IAS; gives the approach speed (1.3 VSO) where none is published.
+    Vso,
+    /// Distance between the main gear centrelines, ft.
+    MainGearTrack,
+    /// Vref at the gross weight and flap angle at that point, kt
+    /// (`Profile::ref_speeds`); not a single value, so `value` and
+    /// `sourced` leave it unknown.
+    Vref,
+    /// The approach speed the profile gives at that point (light types),
+    /// kt; read as `Vref`.
+    Vapp,
 }
 
 impl ProfileField {
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 13] = [
         Self::Vfe,
         Self::TailTakeoffPitch,
         Self::TailLandingPitch,
@@ -58,6 +70,10 @@ impl ProfileField {
         Self::Vlo,
         Self::MaxCrosswind,
         Self::MaxTailwind,
+        Self::Vso,
+        Self::MainGearTrack,
+        Self::Vref,
+        Self::Vapp,
     ];
 
     /// The field named `name` in `profile.<name>`.
@@ -77,6 +93,10 @@ impl ProfileField {
             Self::Vlo => "vlo",
             Self::MaxCrosswind => "max_crosswind",
             Self::MaxTailwind => "max_tailwind",
+            Self::Vso => "vso",
+            Self::MainGearTrack => "main_gear_track",
+            Self::Vref => "vref",
+            Self::Vapp => "vapp",
         }
     }
 
@@ -87,8 +107,12 @@ impl ProfileField {
             | Self::Vle
             | Self::Vlo
             | Self::MaxCrosswind
-            | Self::MaxTailwind => Unit::Knots,
+            | Self::MaxTailwind
+            | Self::Vso
+            | Self::Vref
+            | Self::Vapp => Unit::Knots,
             Self::TailTakeoffPitch | Self::TailLandingPitch => Unit::Degrees,
+            Self::MainGearTrack => Unit::Feet,
             Self::HardLandingG => Unit::G,
         }
     }
@@ -193,6 +217,104 @@ pub struct FlapBand {
 /// angle up to which the flaps count as retracted.
 pub const FLAP_TOLERANCE_DEG: f64 = 0.5;
 
+const LB_PER_KG: f64 = 2.204_622_621_8;
+/// Approach speed from the stalling speed where none is published: 1.3
+/// VSO (FAA-S-ACS-6C PA.IV.B.S7).
+const VSO_FACTOR: f64 = 1.3;
+
+/// The class a landing is scored in (docs/scoring.md §2.2); its bands and
+/// leaderboards differ by class.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ScoringClass {
+    Light,
+    /// Transport-category turboprop.
+    Turboprop,
+    Jet,
+}
+
+impl ScoringClass {
+    /// The default of a rule class: light, else jet.
+    pub fn of(class: Aircraft) -> Self {
+        match class {
+            Aircraft::Light => Self::Light,
+            Aircraft::Transport => Self::Jet,
+        }
+    }
+}
+
+/// The document a profile table comes from.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Cited {
+    pub source: String,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub approximate: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
+/// Published final-approach speed ranges by flap angle (POH).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ApproachSpeeds {
+    pub cited: Cited,
+    /// (flap angle deg, [lowest, highest] kt IAS), by increasing angle.
+    pub flaps: Vec<(f64, [f64; 2])>,
+}
+
+/// Vref by gross weight for each landing flap (FCOM/QRH).
+#[derive(Debug, Clone, PartialEq)]
+pub struct VrefTable {
+    pub cited: Cited,
+    /// By increasing angle.
+    pub flaps: Vec<VrefCurve>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct VrefCurve {
+    /// Landing flap angle, deg.
+    pub flap: f64,
+    /// Strictly increasing gross weights, lb, with their Vref in `kt`.
+    pub weights_lb: Vec<f64>,
+    pub kt: Vec<f64>,
+}
+
+/// The entry of `entries` whose flap angle (`flap`) is nearest `angle`,
+/// and whether it is off by more than the flap tolerance.
+fn nearest<T>(entries: &[T], flap: impl Fn(&T) -> f64, angle: f64) -> Option<(&T, bool)> {
+    let off = |e: &T| (flap(e) - angle).abs();
+    entries
+        .iter()
+        .min_by(|a, b| off(a).total_cmp(&off(b)))
+        .map(|e| (e, off(e) > FLAP_TOLERANCE_DEG))
+}
+
+/// Piecewise-linear through the points (`xs` increasing, `ys`), held at
+/// both ends; `NaN` without points.
+pub fn interpolate(xs: &[f64], ys: &[f64], x: f64) -> f64 {
+    let next = xs.partition_point(|&k| k <= x);
+    match (next.checked_sub(1), xs.get(next)) {
+        (Some(i), Some(&x1)) => ys[i] + (x - xs[i]) / (x1 - xs[i]) * (ys[next] - ys[i]),
+        (Some(i), None) => ys[i],
+        (None, Some(_)) => ys[0],
+        (None, None) => f64::NAN,
+    }
+}
+
+/// A landing's reference speeds (docs/scoring.md §5) from the profile.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct RefSpeeds {
+    /// kt IAS.
+    pub vref: f64,
+    /// Target approach speed where the profile gives it (light types: the
+    /// middle of the published range, or 1.3 VSO); `None` for a Vref table,
+    /// whose approach speed adds a wind correction.
+    pub vapp: Option<f64>,
+    /// From the table's or value's own approximation, or read outside the
+    /// table (weight beyond its ends, a flap angle it lacks).
+    pub approximate: bool,
+    pub source: String,
+}
+
 /// The limits of one aircraft type.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Profile {
@@ -208,6 +330,12 @@ pub struct Profile {
     pub vlo: Option<Sourced>,
     pub max_crosswind: Option<Sourced>,
     pub max_tailwind: Option<Sourced>,
+    pub vso: Option<Sourced>,
+    pub main_gear_track: Option<Sourced>,
+    /// The profile's `scoring_class`, else the default of `class`.
+    pub scoring_class: ScoringClass,
+    pub approach_speed: Option<ApproachSpeeds>,
+    pub vref: Option<VrefTable>,
     /// VFE bands by increasing flap angle.
     pub flaps: Vec<FlapBand>,
     /// The class's phase boundaries this type moves.
@@ -252,7 +380,58 @@ impl Profile {
             ProfileField::Vlo => self.vlo.as_ref(),
             ProfileField::MaxCrosswind => self.max_crosswind.as_ref(),
             ProfileField::MaxTailwind => self.max_tailwind.as_ref(),
+            ProfileField::Vso => self.vso.as_ref(),
+            ProfileField::MainGearTrack => self.main_gear_track.as_ref(),
+            ProfileField::Vref | ProfileField::Vapp => None,
         }
+    }
+
+    /// Vref and the approach speed at a gross weight and landing flap
+    /// angle, from the first source that has them, as Data4Safety orders
+    /// them: the Vref table (by weight, linear and held at its ends, on the
+    /// nearest flap angle), the published approach speeds (Vref their lowest,
+    /// the approach speed their middle), 1.3 VSO. `None` without any.
+    pub fn ref_speeds(&self, weight_lb: Option<f64>, flap_deg: Option<f64>) -> Option<RefSpeeds> {
+        let speeds = |vref, vapp, approximate, source: &str| RefSpeeds {
+            vref,
+            vapp,
+            approximate,
+            source: source.to_owned(),
+        };
+        let table = self.vref.as_ref().zip(weight_lb.zip(flap_deg));
+        if let Some((t, (w, flap))) = table
+            && let Some((c, off)) = nearest(&t.flaps, |c| c.flap, flap)
+        {
+            let (lightest, heaviest) = (c.weights_lb[0], c.weights_lb[c.weights_lb.len() - 1]);
+            let outside = off || !(lightest..=heaviest).contains(&w);
+            let kt = interpolate(&c.weights_lb, &c.kt, w);
+            return Some(speeds(
+                kt,
+                None,
+                t.cited.approximate || outside,
+                &t.cited.source,
+            ));
+        }
+        let published = self.approach_speed.as_ref().zip(flap_deg);
+        if let Some((a, flap)) = published
+            && let Some(((_, [low, high]), off)) = nearest(&a.flaps, |e| e.0, flap)
+        {
+            let vapp = Some((low + high) / 2.0);
+            return Some(speeds(
+                *low,
+                vapp,
+                a.cited.approximate || off,
+                &a.cited.source,
+            ));
+        }
+        let vso = self.vso.as_ref()?;
+        let vapp = VSO_FACTOR * vso.value;
+        Some(speeds(
+            vapp,
+            Some(vapp),
+            vso.approximate,
+            &format!("1.3 VSO, {}", vso.source),
+        ))
     }
 }
 
@@ -285,6 +464,11 @@ struct Doc {
     vlo: Option<SourcedDoc>,
     max_crosswind: Option<SourcedDoc>,
     max_tailwind: Option<SourcedDoc>,
+    vso: Option<SourcedDoc>,
+    main_gear_track: Option<SourcedDoc>,
+    scoring_class: Option<ScoringClass>,
+    approach_speed: Option<TableDoc<ApproachDoc>>,
+    vref: Option<TableDoc<VrefDoc>>,
     #[serde(default)]
     flaps: Vec<FlapDoc>,
     #[serde(default)]
@@ -332,6 +516,32 @@ struct SourcedDoc {
     note: Option<String>,
 }
 
+/// A table with one source, one entry per flap angle.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TableDoc<E> {
+    source: String,
+    #[serde(default)]
+    approximate: bool,
+    note: Option<String>,
+    flaps: Vec<E>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ApproachDoc {
+    flap: Scalar,
+    ias: [Scalar; 2],
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct VrefDoc {
+    flap: Scalar,
+    weights_kg: Vec<f64>,
+    ias: Vec<Scalar>,
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct FlapDoc {
@@ -359,18 +569,104 @@ impl Compiler<'_> {
 
     fn sourced(&self, path: &str, unit: Unit, doc: SourcedDoc) -> Result<Sourced, ProfileError> {
         let value = self.quantity(path, unit, &doc.value)?;
-        if doc.source.trim().is_empty() {
-            return Err(self.err(format!("`{path}` needs a source")));
-        }
-        if doc.approximate && doc.note.as_deref().is_none_or(|n| n.trim().is_empty()) {
-            return Err(self.err(format!("`{path}` is approximate: its note must say how")));
-        }
+        let c = self.cited(path, doc.source, doc.approximate, doc.note)?;
         Ok(Sourced {
             value,
-            source: doc.source,
-            approximate: doc.approximate,
-            note: doc.note,
+            source: c.source,
+            approximate: c.approximate,
+            note: c.note,
         })
+    }
+
+    /// A non-empty source, and a note on an approximate value.
+    fn cited(
+        &self,
+        path: &str,
+        source: String,
+        approximate: bool,
+        note: Option<String>,
+    ) -> Result<Cited, ProfileError> {
+        if source.trim().is_empty() {
+            return Err(self.err(format!("`{path}` needs a source")));
+        }
+        if approximate && note.as_deref().is_none_or(|n| n.trim().is_empty()) {
+            return Err(self.err(format!("`{path}` is approximate: its note must say how")));
+        }
+        Ok(Cited {
+            source,
+            approximate,
+            note,
+        })
+    }
+
+    /// A flap table: its citation and its entries (`entry` compiles one
+    /// from its path and flap angle), at strictly increasing angles.
+    fn table<E, T>(
+        &self,
+        path: &str,
+        doc: TableDoc<E>,
+        flap: impl Fn(&E) -> &Scalar,
+        entry: impl Fn(&str, f64, E) -> Result<T, ProfileError>,
+    ) -> Result<(Cited, Vec<T>), ProfileError> {
+        let cited = self.cited(path, doc.source, doc.approximate, doc.note)?;
+        if doc.flaps.is_empty() {
+            return Err(self.err(format!("`{path}.flaps` needs at least one flap angle")));
+        }
+        let mut previous = f64::NEG_INFINITY;
+        let entries = doc
+            .flaps
+            .into_iter()
+            .enumerate()
+            .map(|(i, e)| {
+                let at = format!("{path}.flaps[{i}]");
+                let angle = self.quantity(&format!("{at}.flap"), Unit::Degrees, flap(&e))?;
+                if angle <= previous {
+                    let message = format!("`{at}.flap`: flap angles must be in increasing order");
+                    return Err(self.err(message));
+                }
+                previous = angle;
+                entry(&at, angle, e)
+            })
+            .collect::<Result<_, _>>()?;
+        Ok((cited, entries))
+    }
+
+    fn approach_speed(&self, doc: TableDoc<ApproachDoc>) -> Result<ApproachSpeeds, ProfileError> {
+        let entry = |at: &str, flap, e: ApproachDoc| {
+            let ias = |s| self.quantity(&format!("{at}.ias"), Unit::Knots, s);
+            let [low, high] = [ias(&e.ias[0])?, ias(&e.ias[1])?];
+            if low > high {
+                return Err(self.err(format!("`{at}.ias`: lowest speed first")));
+            }
+            Ok((flap, [low, high]))
+        };
+        let (cited, flaps) = self.table("approach_speed", doc, |e| &e.flap, entry)?;
+        Ok(ApproachSpeeds { cited, flaps })
+    }
+
+    fn vref(&self, doc: TableDoc<VrefDoc>) -> Result<VrefTable, ProfileError> {
+        let entry = |at: &str, flap, e: VrefDoc| {
+            if e.weights_kg.is_empty() || e.weights_kg.len() != e.ias.len() {
+                let message = format!("`{at}`: needs one `ias` per weight, and at least one");
+                return Err(self.err(message));
+            }
+            if e.weights_kg.windows(2).any(|w| w[1] <= w[0]) {
+                let message = format!("`{at}.weights_kg`: weights must be strictly increasing");
+                return Err(self.err(message));
+            }
+            let kt = e
+                .ias
+                .iter()
+                .map(|s| self.quantity(&format!("{at}.ias"), Unit::Knots, s))
+                .collect::<Result<_, _>>()?;
+            Ok(VrefCurve {
+                flap,
+                weights_lb: e.weights_kg.iter().map(|kg| kg * LB_PER_KG).collect(),
+                kt,
+            })
+        };
+        let (cited, flaps) = self.table("vref", doc, |e| &e.flap, entry)?;
+        Ok(VrefTable { cited, flaps })
     }
 
     fn optional(
@@ -480,6 +776,18 @@ impl Compiler<'_> {
                 ProfileField::MaxTailwind,
                 doc.max_tailwind,
             )?,
+            vso: self.optional("vso", ProfileField::Vso, doc.vso)?,
+            main_gear_track: self.optional(
+                "main_gear_track",
+                ProfileField::MainGearTrack,
+                doc.main_gear_track,
+            )?,
+            scoring_class: doc.scoring_class.unwrap_or(ScoringClass::of(doc.class)),
+            approach_speed: doc
+                .approach_speed
+                .map(|d| self.approach_speed(d))
+                .transpose()?,
+            vref: doc.vref.map(|d| self.vref(d)).transpose()?,
             flaps: self.flaps(doc.flaps)?,
             phases: self.phases(doc.class, doc.phases)?,
             icao: doc.icao,
@@ -774,6 +1082,111 @@ flaps:
         assert_eq!(s.phases, PhaseConfig::LIGHT);
     }
 
+    /// `PROFILE` as a transport type with a Vref table: flaps 30 from 40 t
+    /// (120 kt) to 60 t (140 kt), flaps 40 at 50 t (125 kt).
+    fn with_vref(table: &str) -> Result<Profile, String> {
+        load(&format!(
+            "{}vref:\n  source: \"doc E\"\n  flaps:\n{table}",
+            PROFILE.replace("class: light", "class: transport")
+        ))
+    }
+
+    const VREF: &str = "    - { flap: 30 deg, weights_kg: [40000, 60000], ias: [120 kt, 140 kt] }
+    - { flap: 40 deg, weights_kg: [50000], ias: [125 kt] }
+";
+
+    #[test]
+    fn vref_interpolates_by_weight_and_holds_at_the_ends() {
+        let p = with_vref(VREF).unwrap();
+        let at = |kg: f64, flap: f64| {
+            let s = p.ref_speeds(Some(kg * LB_PER_KG), Some(flap)).unwrap();
+            ((s.vref * 1e6).round() / 1e6, s.vapp, s.approximate)
+        };
+        assert_eq!(at(50_000.0, 30.0), (130.0, None, false));
+        assert_eq!(at(60_000.0, 30.0), (140.0, None, false));
+        // Beyond the table: held at its end, marked approximate.
+        assert_eq!(at(30_000.0, 30.0), (120.0, None, true));
+        assert_eq!(at(70_000.0, 30.0), (140.0, None, true));
+        // A flap angle the table lacks reads the nearest, approximate.
+        assert_eq!(at(50_000.0, 40.0), (125.0, None, false));
+        assert_eq!(at(50_000.0, 37.0), (125.0, None, true));
+        assert_eq!(p.ref_speeds(None, Some(30.0)), None);
+        assert_eq!(p.ref_speeds(Some(1e5), Some(30.0)).unwrap().source, "doc E");
+    }
+
+    #[test]
+    fn vref_tables_are_checked() {
+        let err = |table: &str| with_vref(table).unwrap_err();
+        assert_eq!(
+            err("    - { flap: 30 deg, weights_kg: [60000, 40000], ias: [120 kt, 140 kt] }\n"),
+            "profile `TEST`: `vref.flaps[0].weights_kg`: weights must be strictly increasing"
+        );
+        assert!(
+            err("    - { flap: 30 deg, weights_kg: [40000, 60000], ias: [120 kt] }\n")
+                .contains("needs one `ias` per weight")
+        );
+        assert!(err(&VREF.replace("30 deg", "45 deg")).contains("increasing order"));
+        assert!(err(&VREF.replace("125 kt", "125 ft")).contains("`vref.flaps[1].ias`"));
+        let yaml = format!("{PROFILE}vref:\n  source: \" \"\n  flaps:\n{VREF}");
+        assert_eq!(
+            load(&yaml).unwrap_err(),
+            "profile `TEST`: `vref` needs a source"
+        );
+        let yaml = format!("{PROFILE}vref:\n  flaps:\n{VREF}");
+        assert!(load(&yaml).unwrap_err().contains("missing field `source`"));
+    }
+
+    #[test]
+    fn light_speeds_come_from_the_published_range_then_vso() {
+        let speeds = "approach_speed:\n  source: POH\n  flaps:\n    \
+                      - { flap: 0 deg, ias: [65 kt, 75 kt] }\n    \
+                      - { flap: 30 deg, ias: [60 kt, 70 kt] }\nvso: { value: 50 kt, source: POH2 }\n";
+        let p = load(&format!("{PROFILE}{speeds}")).unwrap();
+        let at = |flap: f64| {
+            let s = p.ref_speeds(None, Some(flap)).unwrap();
+            (s.vref, s.vapp, s.approximate)
+        };
+        assert_eq!(at(30.0), (60.0, Some(65.0), false));
+        assert_eq!(at(0.0), (65.0, Some(70.0), false));
+        assert_eq!(at(20.0), (60.0, Some(65.0), true));
+        // Without the flaps the range is unknown: 1.3 VSO.
+        let s = p.ref_speeds(None, None).unwrap();
+        assert_eq!((s.vref, s.vapp), (65.0, Some(65.0)));
+        assert_eq!(s.source, "1.3 VSO, POH2");
+        assert_eq!(
+            load(PROFILE).unwrap().ref_speeds(Some(2000.0), Some(30.0)),
+            None
+        );
+        let err = load(&format!(
+            "{PROFILE}{}",
+            speeds.replace("[65 kt, 75 kt]", "[75 kt, 65 kt]")
+        ));
+        assert!(err.unwrap_err().contains("lowest speed first"));
+    }
+
+    #[test]
+    fn the_scoring_class_defaults_from_the_class() {
+        assert_eq!(load(PROFILE).unwrap().scoring_class, ScoringClass::Light);
+        let transport = PROFILE.replace("class: light", "class: transport");
+        assert_eq!(load(&transport).unwrap().scoring_class, ScoringClass::Jet);
+        let turboprop = format!("{transport}scoring_class: turboprop\n");
+        assert_eq!(
+            load(&turboprop).unwrap().scoring_class,
+            ScoringClass::Turboprop
+        );
+        let err = load(&format!("{PROFILE}scoring_class: piston\n")).unwrap_err();
+        assert!(err.contains("unknown variant `piston`"), "{err}");
+    }
+
+    #[test]
+    fn interpolation_holds_at_the_ends() {
+        let (xs, ys) = ([1.0, 3.0], [10.0, 30.0]);
+        assert_eq!(interpolate(&xs, &ys, 2.0), 20.0);
+        assert_eq!(interpolate(&xs, &ys, 0.0), 10.0);
+        assert_eq!(interpolate(&xs, &ys, 9.0), 30.0);
+        assert!(interpolate(&[], &[], 1.0).is_nan());
+    }
+
     #[test]
     fn shipped_profiles_load() {
         let set = ProfileSet::shipped().unwrap_or_else(|e| panic!("{e}"));
@@ -822,5 +1235,12 @@ flaps:
         // Turbine patterns at 1500 ft (FAA AIM 4-3-3).
         let turbines = ["PC12", "TBM9", "C208", "C172"].map(approach);
         assert_eq!(turbines, [1500.0, 1500.0, 1500.0, 1000.0]);
+        let scoring = ["C172", "AT76", "SF34", "B738"].map(|t| find(t).scoring_class);
+        use ScoringClass::*;
+        assert_eq!(scoring, [Light, Turboprop, Turboprop, Jet]);
+        // C172S POH: flaps FULL 60-70 KIAS; VSO 40 KIAS.
+        let c172 = find("C172").ref_speeds(None, Some(30.0)).unwrap();
+        assert_eq!((c172.vref, c172.vapp), (60.0, Some(65.0)));
+        assert_eq!(find("C172").value(ProfileField::Vso, || None), Some(40.0));
     }
 }

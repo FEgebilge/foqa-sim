@@ -12,6 +12,7 @@ import { indexAt, TimeBus, useHover, type TimeRange } from "../../lib/time";
 import { useDebrief } from "../../lib/use-backend";
 import type { Debrief, Series } from "../../types";
 import { useOpenFolder } from "../use-open-folder";
+import { AssessmentPanel } from "./AssessmentPanel";
 import { DebriefHeader } from "./DebriefHeader";
 import { EventList, LevelLegend } from "./EventList";
 import { LandingCard } from "./LandingCard";
@@ -141,6 +142,8 @@ function DebriefView({ debrief, refreshing, onRefresh, onOpenFolder }: { debrief
     <>
       <DebriefHeader flight={flight} refreshing={refreshing} onRefresh={onRefresh} onOpenFolder={onOpenFolder} />
       <Verdict debrief={debrief} />
+      <AssessmentPanel debrief={debrief} onSelectEvent={selectEvent} />
+
 
       {flight.damaged_at !== undefined ? (
         <Banner tone="danger" icon={<FileWarning size={16} />} title="This recording was cut off">

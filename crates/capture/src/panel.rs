@@ -29,6 +29,9 @@ pub const LANDING: &str = "FOQA_SIM_LANDING";
 pub const LANDINGS: &str = "FOQA_SIM_LANDINGS";
 pub const FLIGHTS: &str = "FOQA_SIM_FLIGHTS";
 pub const DEBRIEF: &str = "FOQA_SIM_DEBRIEF";
+/// App to the EFB: set the weather (`WeatherSpec`); the EFB answers on `CMD`.
+#[allow(dead_code)] // not wired into a flow yet
+pub const WEATHER: &str = "FOQA_SIM_WEATHER";
 /// View to app.
 pub const CMD: &str = "FOQA_SIM_CMD";
 /// Payload version, `v` in every message.
@@ -166,6 +169,125 @@ impl Request {
             }
             _ => return Err(fail("unknown command")),
         }))
+    }
+}
+
+/// Largest message: 6 KB as UTF-8 JSON, the terminating NUL included.
+#[allow(dead_code)]
+const MESSAGE_MAX_BYTES: usize = 6 * 1024 - 1;
+
+/// The base preset of a `WeatherSpec`: `"clear"` or a preset index.
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Serialize, serde::Deserialize)]
+#[serde(untagged)]
+pub enum WeatherBase {
+    Index(u32),
+    Name(String),
+}
+
+/// One wind layer: where the wind blows from, no gusts.
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Serialize, serde::Deserialize)]
+pub struct WindLayer {
+    pub alt_ft: f64,
+    pub from_deg: f64,
+    pub kt: f64,
+}
+
+/// What the EFB sets (`set_weather`, docs/ingame-panel.md): a preset with
+/// its wind layers, QNH and temperature replaced.
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Serialize, serde::Deserialize)]
+pub struct WeatherSpec {
+    pub base: WeatherBase,
+    pub wind: Vec<WindLayer>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qnh_hpa: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temp_c: Option<f64>,
+}
+
+#[allow(dead_code)]
+impl WeatherSpec {
+    pub fn validate(&self) -> Result<(), String> {
+        if let WeatherBase::Name(n) = &self.base
+            && n != "clear"
+        {
+            return Err(format!("unknown base preset \"{n}\""));
+        }
+        if self.wind.is_empty() || self.wind.len() > 8 {
+            return Err("wind needs 1 to 8 layers".into());
+        }
+        for w in &self.wind {
+            let ok = w.alt_ft.is_finite()
+                && (-1000.0..=60000.0).contains(&w.alt_ft)
+                && (0.0..=360.0).contains(&w.from_deg)
+                && (0.0..=150.0).contains(&w.kt);
+            if !ok {
+                return Err("wind layer out of range".into());
+            }
+        }
+        if self.qnh_hpa.is_some_and(|q| !(850.0..=1085.0).contains(&q)) {
+            return Err("qnh_hpa out of range".into());
+        }
+        if self.temp_c.is_some_and(|t| !(-80.0..=60.0).contains(&t)) {
+            return Err("temp_c out of range".into());
+        }
+        Ok(())
+    }
+
+    /// The `FOQA_SIM_WEATHER` message for request `req`, within the size cap.
+    pub fn message(&self, req: &str) -> Result<String, String> {
+        self.validate()?;
+        let data =
+            json!({ "v": VERSION, "cmd": "set_weather", "req": req, "spec": self }).to_string();
+        if data.len() > MESSAGE_MAX_BYTES {
+            return Err("message too long".into());
+        }
+        Ok(data)
+    }
+}
+
+/// Values the EFB read back (the preset) or measured (SimVars).
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, serde::Deserialize)]
+pub struct WeatherReading {
+    #[serde(default)]
+    pub wind: Vec<WindLayer>,
+    pub qnh_hpa: Option<f64>,
+    pub temp_c: Option<f64>,
+    /// Measured only: the ambient wind at the aircraft.
+    pub wind_dir_deg: Option<f64>,
+    pub wind_kt: Option<f64>,
+    pub alt_ft: Option<f64>,
+}
+
+/// The EFB's answer to `set_weather` (`FOQA_SIM_CMD`, `cmd: "weather_result"`).
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, serde::Deserialize)]
+pub struct WeatherResult {
+    pub req: String,
+    pub ok: bool,
+    pub applied: Option<WeatherReading>,
+    pub measured: Option<WeatherReading>,
+    #[serde(default)]
+    pub mismatches: Vec<String>,
+    pub error: Option<String>,
+}
+
+#[allow(dead_code)]
+impl WeatherResult {
+    /// From the view's JSON, with or without trailing NULs.
+    pub fn parse(data: &str) -> Result<Self, String> {
+        let v: Value = serde_json::from_str(data.trim_end_matches('\0'))
+            .map_err(|e| format!("not JSON: {e}"))?;
+        if v["v"] != VERSION {
+            return Err("unsupported version".into());
+        }
+        if v["cmd"] != "weather_result" {
+            return Err("not a weather_result".into());
+        }
+        serde_json::from_value(v).map_err(|e| e.to_string())
     }
 }
 
@@ -715,5 +837,62 @@ mod tests {
         let unknown = failed(r#"{"v":2,"cmd":"eject"}"#);
         assert_eq!((unknown.cmd.as_str(), unknown.ok), ("eject", false));
         assert_eq!(failed("mark").cmd, "?");
+    }
+
+    #[test]
+    fn weather_spec_message_and_result() {
+        let spec = WeatherSpec {
+            base: WeatherBase::Name("clear".into()),
+            wind: vec![WindLayer {
+                alt_ft: 0.0,
+                from_deg: 270.0,
+                kt: 18.0,
+            }],
+            qnh_hpa: Some(1013.0),
+            temp_c: None,
+        };
+        let msg = spec.message("w1").unwrap();
+        let v: Value = serde_json::from_str(&msg).unwrap();
+        assert_eq!(v["v"], 2);
+        assert_eq!(v["cmd"], "set_weather");
+        assert_eq!(v["spec"]["base"], "clear");
+        assert_eq!(v["spec"]["wind"][0]["from_deg"], 270.0);
+        assert!(v["spec"].get("temp_c").is_none());
+        let back: WeatherSpec = serde_json::from_value(v["spec"].clone()).unwrap();
+        assert_eq!(back, spec);
+        let by_index: WeatherSpec =
+            serde_json::from_str(r#"{"base":3,"wind":[{"alt_ft":0,"from_deg":0,"kt":0}]}"#)
+                .unwrap();
+        assert_eq!(by_index.base, WeatherBase::Index(3));
+        let mut bad = spec.clone();
+        bad.base = WeatherBase::Name("storm".into());
+        assert!(bad.validate().is_err());
+        bad = spec.clone();
+        bad.wind[0].kt = 900.0;
+        assert!(bad.message("w").is_err());
+        bad = spec.clone();
+        bad.wind = vec![spec.wind[0].clone(); 8];
+        bad.wind.push(spec.wind[0].clone());
+        assert!(bad.validate().is_err());
+    }
+
+    #[test]
+    fn weather_result_parses() {
+        let ok = r#"{"v":2,"cmd":"weather_result","req":"w1","ok":false,
+            "applied":{"wind":[{"alt_ft":0,"from_deg":270,"kt":18}],"qnh_hpa":1013.2},
+            "measured":{"wind_dir_deg":268,"wind_kt":17.5},"mismatches":["temp"]}"#;
+        let r = WeatherResult::parse(&format!("{ok}\0\0")).unwrap();
+        assert_eq!((r.req.as_str(), r.ok), ("w1", false));
+        assert_eq!(r.mismatches, ["temp"]);
+        assert_eq!(r.measured.unwrap().wind_kt, Some(17.5));
+        assert_eq!(r.applied.unwrap().wind[0].from_deg, 270.0);
+        assert!(
+            WeatherResult::parse(r#"{"v":1,"cmd":"weather_result","req":"a","ok":true}"#).is_err()
+        );
+        assert!(WeatherResult::parse(r#"{"v":2,"cmd":"mark"}"#).is_err());
+        let e = WeatherResult::parse(
+            r#"{"v":2,"cmd":"weather_result","req":"a","ok":false,"error":"no listener"}"#,
+        );
+        assert_eq!(e.unwrap().error.as_deref(), Some("no listener"));
     }
 }

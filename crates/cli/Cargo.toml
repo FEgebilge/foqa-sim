@@ -27,6 +27,12 @@ analyzer = { path = "../analyzer" }
 challenge = { path = "../challenge" }
 debrief = { path = "../debrief" }
 fdm-core = { path = "../fdm-core" }
+recorder = { path = "../recorder" }
 rules = { path = "../rules" }
 serde_json = "1"
 sim-link = { path = "../sim-link", optional = true }
+
+[dev-dependencies]
+tempfile = "3"
+testkit = { path = "../testkit" }
+zstd = "0.14"

@@ -1,0 +1,8 @@
+{
+  "device_code": "dc_Wq3nV8pR2tYk",
+  "user_code": "BDWP-HQPK",
+  "verification_uri": "https://landings.example/#/device",
+  "verification_uri_complete": "https://landings.example/#/device?code=BDWP-HQPK",
+  "expires_in": 600,
+  "interval": 5
+}

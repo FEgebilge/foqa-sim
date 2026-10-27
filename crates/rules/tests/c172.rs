@@ -49,40 +49,43 @@ fn core_rules_flag_the_unstable_approach() {
         .into_iter()
         .map(|(rule, level, _)| (rule, level))
         .collect();
+    // Graded as transport (unknown class): Data4Safety's second thresholds
+    // above 500 ft (SL2A) for the bank and the descent, the first below it
+    // (SL2B) for the bank; the 500 ft gate notes the ALAR limits.
     let expected = [
-        ("high-sink-below-1000", Level::High),
-        ("unstable-sink-500", Level::High),
-        ("unstable-bank-500", Level::High),
+        ("bank-above-500", Level::Medium),
+        ("high-sink-above-500", Level::Medium),
         ("bank-below-500", Level::Medium),
-        ("high-sink-below-1000", Level::Medium),
-        ("high-sink-below-1000", Level::Low),
+        ("unstable-sink-500", Level::Advisory),
+        ("unstable-bank-500", Level::Advisory),
     ];
     assert_eq!(found, expected.map(|(r, l)| (r.to_owned(), l)));
 }
 
-/// Graded as the light aircraft it is, the approach runs down to the 20 ft
-/// flare instead of 50 ft: the light hard-landing rule applies, and the
-/// findings stay those of the unstable approach above 500 ft.
+/// Graded as the light aircraft it is, the approach is judged from the
+/// 500 ft VMC gate (FSF ALAR) and the bank from 300 ft: the steep, banked
+/// descent above 500 ft is no light finding, and below it the sink and bank
+/// were not held long enough. Only the gate notes remain.
 #[test]
-fn light_boundaries_keep_the_findings() {
+fn light_boundaries_judge_from_the_vmc_gate() {
     let profiles = ProfileSet::shipped().unwrap();
     let light = profiles.select_type(None, || Some(Aircraft::Light));
     let rules: Vec<_> = graded(CORE, &light)
         .into_iter()
         .map(|(rule, level, _)| (rule, level))
         .collect();
-    let found: Vec<_> = events(CORE)
-        .into_iter()
-        .map(|(rule, level, _)| (rule, level))
-        .collect();
-    assert_eq!(rules, found);
+    let gate = |rule: &str| (rule.to_owned(), Level::Advisory);
+    assert_eq!(
+        rules,
+        [gate("unstable-sink-500"), gate("unstable-bank-500")]
+    );
 }
 
 #[test]
 fn peak_descent_matches_the_sims_own_vertical_speed() {
     let (_, _, peak) = events(CORE)
         .into_iter()
-        .find(|(rule, ..)| rule == "high-sink-below-1000")
+        .find(|(rule, ..)| rule == "high-sink-above-500")
         .unwrap();
     let peak = peak.unwrap();
     // The sim's own VERTICAL SPEED peaked at 2787 fpm in this descent.
@@ -94,6 +97,7 @@ fn touchdown_and_condition_rules_fire_on_their_trigger() {
     let yaml = "
 rule: firm-touchdown
 version: 1
+domain: other
 title: Touchdown firmer than 50 fpm
 at: touchdown
 measure: td.sink
@@ -101,6 +105,7 @@ above: { low: 50 fpm }
 ---
 rule: airborne-past-200s
 version: 1
+domain: other
 title: Airborne after 200 s
 phase: [EnRoute, Approach]
 when: not air_ground

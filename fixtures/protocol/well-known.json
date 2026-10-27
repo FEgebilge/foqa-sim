@@ -1,0 +1,22 @@
+{
+  "protocol": "foqa-challenges",
+  "versions": [
+    1
+  ],
+  "name": "Example Landings",
+  "api": {
+    "1": "https://landings.example/api/foqa/v1"
+  },
+  "auth": {
+    "authorize": "https://landings.example/#/foqa/authorize",
+    "device_verification": "https://landings.example/#/device"
+  },
+  "links": {
+    "challenge": "https://landings.example/#/challenges/{id}",
+    "attempt": "https://landings.example/#/challenges/{id}/attempts/{attempt}",
+    "account": "https://landings.example/#/account"
+  },
+  "limits": {
+    "max_upload_bytes": 2097152
+  }
+}

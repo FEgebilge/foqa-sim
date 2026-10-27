@@ -51,6 +51,36 @@ pub enum SimEvent {
     /// A moment the pilot marked from the in-sim panel, with an optional
     /// note: a pilot report for the debrief.
     PilotReport(String),
+    /// Where an attempt at a landing challenge begins or ends.
+    Attempt(AttemptMarker),
+}
+
+/// The start or end of an attempt, tied to it by an opaque `reference`
+/// the caller chose (docs/challenge-protocol.md A7). The recorder gives it
+/// no meaning; ground tools grade and slice by it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AttemptMarker {
+    pub phase: AttemptPhase,
+    pub challenge: String,
+    pub version: u32,
+    /// `^[A-Za-z0-9_-]{8,64}$` (`is_reference`), or `None` for a local attempt.
+    pub reference: Option<String>,
+    /// Why it ended (`stopped`, `abandoned`, `timeout`, `replaced`); `None` at the begin.
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AttemptPhase {
+    Begin,
+    End,
+}
+
+/// Whether `s` can be an attempt marker's reference: 8 to 64 of
+/// `A-Z a-z 0-9 _ -`.
+pub fn is_reference(s: &str) -> bool {
+    (8..=64).contains(&s.len())
+        && s.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
 }
 
 /// MSFS 2024 flow events (`SIMCONNECT_FLOW_EVENT`, same numbering). They

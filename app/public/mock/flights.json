@@ -12,32 +12,36 @@
     "landings": 1,
     "worst_level": "high",
     "event_counts": {
-      "advisory": 0,
+      "advisory": 1,
       "low": 0,
-      "medium": 0,
-      "high": 3
+      "medium": 1,
+      "high": 1
     },
     "assessment": {
-      "grade": "poor",
-      "points": 12,
-      "findings": 3
+      "grade": "fair",
+      "points": 6,
+      "findings": 2,
+      "method": "landing-2",
+      "score": 77.4,
+      "confidence": "full"
     }
   },
   {
     "id": "c172-pattern",
     "duration_s": 303.5,
     "landings": 1,
-    "worst_level": "high",
+    "worst_level": "medium",
     "event_counts": {
-      "advisory": 0,
-      "low": 1,
-      "medium": 2,
-      "high": 3
+      "advisory": 2,
+      "low": 0,
+      "medium": 3,
+      "high": 0
     },
     "assessment": {
       "grade": "poor",
-      "points": 14,
-      "findings": 4
+      "points": 6,
+      "findings": 3,
+      "method": "points"
     }
   }
 ]

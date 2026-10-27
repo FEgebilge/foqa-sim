@@ -46,6 +46,10 @@ pub struct Pt {
     pub gear: f64,
     /// Wind direction (from, true) and speed, (deg, kt).
     pub wind: (f64, f64),
+    /// Magnetic heading (the airports have no variation), deg.
+    pub heading: f64,
+    /// Direction flown over the ground, true, deg.
+    pub track: f64,
     /// Simulation rate, 1 = real time.
     pub sim_rate: f64,
     /// Autopilot engaged.
@@ -53,6 +57,9 @@ pub struct Pt {
     pub ground: bool,
     /// SimVars missing from this frame (a dropout), recorded as `NaN`.
     pub lost: &'static [&'static str],
+    /// Other SimVars and their raw values in this frame (reversers,
+    /// brakes, spoilers, ILS needles).
+    pub set: Vec<(&'static str, f64)>,
 }
 
 /// Piecewise-linear interpolation through `(t, value)` keys, held at both ends.
@@ -88,10 +95,13 @@ pub fn landing(t: f64, td: f64, peak_g: f64) -> Pt {
         flaps: 0.0,
         gear: 100.0,
         wind: (0.0, 0.0),
+        heading: TRACK_DEG,
+        track: TRACK_DEG,
         sim_rate: 1.0,
         ap: false,
         ground: t >= td,
         lost: &[],
+        set: Vec::new(),
     }
 }
 
@@ -103,14 +113,29 @@ pub fn fly(weight_lb: f64, duration_s: f64, script: impl Fn(f64) -> Pt) -> (Flig
 }
 
 /// `fly`, with `events` (airport snapshots, aircraft identity) recorded at
-/// the start. The aircraft flies straight along `TRACK_DEG` from `START` at
-/// its ground speed.
+/// the start. The aircraft flies from `START` along its `track` at its
+/// ground speed.
 pub fn fly_to(
     events: &[SimEvent],
     weight_lb: f64,
     duration_s: f64,
     script: impl Fn(f64) -> Pt,
 ) -> (Flight, Track) {
+    let at_start: Vec<_> = events.iter().map(|e| (0.0, e.clone())).collect();
+    let journal = journal(&at_start, weight_lb, duration_s, script);
+    let flight = Flight::read(&journal[..]).unwrap();
+    let track = Track::new(&flight).unwrap();
+    (flight, track)
+}
+
+/// The journal `fly_to` analyses, with each event recorded before the
+/// first frame at or after its time (s from the start).
+pub fn journal(
+    events: &[(f64, SimEvent)],
+    weight_lb: f64,
+    duration_s: f64,
+    script: impl Fn(f64) -> Pt,
+) -> Vec<u8> {
     let mut recorder = Recorder::new(&Lfl::V1, Vec::new()).unwrap();
     let columns: HashMap<_, _> = recorder
         .acquisition()
@@ -119,17 +144,19 @@ pub fn fly_to(
         .enumerate()
         .map(|(i, c)| (c.simvar, i))
         .collect();
-    for e in events {
-        recorder.record(&Telemetry::Event(e.clone())).unwrap();
-    }
+    let mut events = events.iter().peekable();
     let frame = LocalFrame::new(START.0, START.1);
-    let (sin, cos) = TRACK_DEG.to_radians().sin_cos();
-    let mut flown_m = 0.0;
+    let (mut east, mut north) = (0.0, 0.0);
     for k in 0..=(duration_s * FRAME_HZ) as usize {
         let t = k as f64 / FRAME_HZ;
+        while let Some((_, e)) = events.next_if(|(at, _)| *at <= t) {
+            recorder.record(&Telemetry::Event(e.clone())).unwrap();
+        }
         let p = script(t);
-        flown_m += p.speed * KT_MS / FRAME_HZ;
-        let (lat, lon) = frame.point(flown_m * sin, flown_m * cos);
+        let (sin, cos) = p.track.to_radians().sin_cos();
+        let step_m = p.speed * KT_MS / FRAME_HZ;
+        (east, north) = (east + step_m * sin, north + step_m * cos);
+        let (lat, lon) = frame.point(east, north);
         let mut raw = vec![f64::NAN; columns.len()];
         for (simvar, value) in [
             ("SIMULATION TIME", SIM_START_S + t),
@@ -142,6 +169,7 @@ pub fn fly_to(
             ("G FORCE", p.g),
             ("PLANE PITCH DEGREES", -p.pitch),
             ("PLANE BANK DEGREES", 0.0),
+            ("PLANE HEADING DEGREES MAGNETIC", p.heading),
             ("SIM ON GROUND", f64::from(u8::from(p.ground))),
             ("GEAR TOTAL PCT EXTENDED", p.gear),
             ("AMBIENT WIND DIRECTION", p.wind.0),
@@ -156,14 +184,15 @@ pub fn fly_to(
         ] {
             raw[columns[simvar]] = value;
         }
+        for &(simvar, value) in &p.set {
+            raw[columns[simvar]] = value;
+        }
         for simvar in p.lost {
             raw[columns[simvar]] = f64::NAN;
         }
         recorder.record(&Telemetry::Frame(raw)).unwrap();
     }
-    let flight = Flight::read(&recorder.into_inner()[..]).unwrap();
-    let track = Track::new(&flight).unwrap();
-    (flight, track)
+    recorder.into_inner()
 }
 
 /// Runway 20 whose threshold lies `along_m` behind where the stable

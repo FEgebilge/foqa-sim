@@ -6,7 +6,7 @@ use analyzer::{
 use fdm_core::{SimTime, Unit};
 
 use crate::expr::{Expr, Values};
-use crate::profile::{Profile, Selection};
+use crate::profile::{Profile, ProfileField, Selection};
 use crate::rule::{Aircraft, Level, Limits, Rule, Side, TdField, Trigger, Var};
 
 const FEET_PER_METRE: f64 = 3.280_839_895;
@@ -39,7 +39,8 @@ pub struct Event {
 }
 
 /// Light or transport by the highest recorded gross weight; `None` without
-/// weight data, in which case aircraft-specific rules are skipped.
+/// weight data, in which case the flight is graded with the transport
+/// rules, as with the transport phase boundaries.
 pub fn aircraft(flight: &Flight) -> Option<Aircraft> {
     flight
         .series("weight.gross")
@@ -60,9 +61,10 @@ pub fn evaluate(
 ) -> Vec<Event> {
     let phases = phase_labels(track, &selection.phases);
     let tds = touchdowns(flight, track);
+    let class = selection.class.unwrap_or(Aircraft::Transport);
     let mut events: Vec<Event> = rules
         .iter()
-        .filter(|r| r.aircraft.is_none() || r.aircraft == selection.class)
+        .filter(|r| r.aircraft.is_none_or(|a| a == class))
         .flat_map(|rule| {
             Evaluation {
                 rule,
@@ -111,6 +113,16 @@ impl Values<Var> for Point<'_> {
             Var::Vs => finite(self.track.vs_fpm[self.i]),
             Var::Height => finite(self.track.aal_ft[self.i]),
             Var::Ra => finite(self.track.ra_ft[self.i]),
+            Var::Profile(field @ (ProfileField::Vref | ProfileField::Vapp)) => {
+                let flight = self.flight;
+                let speeds = self
+                    .profile?
+                    .ref_speeds(flight.at("weight.gross", t), flight.at("flap.te_angle", t))?;
+                match field {
+                    ProfileField::Vref => Some(speeds.vref),
+                    _ => speeds.vapp,
+                }
+            }
             Var::Profile(field) => self
                 .profile?
                 .value(field, || self.flight.at("flap.te_angle", t)),
@@ -416,7 +428,7 @@ mod tests {
 
     fn continuous(sustain: &str, vs: &[f64]) -> Vec<Event> {
         let yaml = format!(
-            "rule: x\nversion: 1\ntitle: x\nphase: Approach\nmeasure: vs\n{sustain}\n\
+            "rule: x\nversion: 1\ntitle: x\ndomain: other\nphase: Approach\nmeasure: vs\n{sustain}\n\
              above: {{ low: 100 fpm, high: 1000 fpm }}"
         );
         let track = Track {
@@ -458,7 +470,7 @@ mod tests {
     }
 
     fn gate(phases: &[Phase], aal: &[f64], ra: &[f64], vs: &[f64]) -> Vec<Event> {
-        let yaml = "rule: x\nversion: 1\ntitle: x\nphase: Approach\ngate: height <= 500 ft\n\
+        let yaml = "rule: x\nversion: 1\ntitle: x\ndomain: other\nphase: Approach\ngate: height <= 500 ft\n\
                     when: ra > 100 ft\nmeasure: vs\nabove: { low: 100 fpm }";
         let track = Track {
             aal_ft: aal.to_vec(),

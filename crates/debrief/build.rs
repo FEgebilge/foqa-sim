@@ -6,7 +6,9 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::Path;
 use std::{fs, io};
 
-const CRATES: [&str; 5] = ["analyzer", "debrief", "fdm-core", "recorder", "rules"];
+const CRATES: [&str; 6] = [
+    "analyzer", "assess", "debrief", "fdm-core", "recorder", "rules",
+];
 
 fn main() -> io::Result<()> {
     let mut h = DefaultHasher::new();

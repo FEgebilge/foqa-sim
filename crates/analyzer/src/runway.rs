@@ -44,7 +44,7 @@ fn aiming_point_m(lda_m: f64) -> f64 {
     }
 }
 
-fn wrap180(deg: f64) -> f64 {
+pub(crate) fn wrap180(deg: f64) -> f64 {
     (deg + 180.0).rem_euclid(360.0) - 180.0
 }
 
@@ -178,6 +178,12 @@ pub struct RunwayFix {
     pub tdz_m: f64,
     /// Aiming point distance from the threshold (ICAO Annex 14).
     pub aiming_point_m: f64,
+    /// Paved width (m).
+    pub width_m: f64,
+    /// (lat, lon) of the landing threshold.
+    pub threshold: (f64, f64),
+    /// Magnetic variation at the airport, MSFS convention (`magnetic_deg`).
+    pub magvar_deg: f64,
     pub in_tdz: bool,
     /// Beyond the touchdown zone.
     pub long_landing: bool,
@@ -186,6 +192,14 @@ pub struct RunwayFix {
 }
 
 impl RunwayFix {
+    /// (along, cross) metres of a point from the landing threshold, as
+    /// `along_m` and `cross_m`: for the approach and the rollout.
+    pub fn offsets(&self, lat_deg: f64, lon_deg: f64) -> (f64, f64) {
+        let (east, north) = Frame::new(self.threshold.0, self.threshold.1).enu(lat_deg, lon_deg);
+        let (sin, cos) = self.heading_deg.to_radians().sin_cos();
+        (east * sin + north * cos, east * cos - north * sin)
+    }
+
     /// Where on the runway: `In TDZ`, `Long` or `Short`.
     pub fn zone(&self) -> &'static str {
         if self.short_landing {
@@ -219,6 +233,7 @@ pub fn locate(
             let on_runway = (-ALONG_BEFORE_M..=lda_m + ALONG_AFTER_M).contains(&along_m)
                 && cross_m.abs() <= e.runway.width_m / 2.0 + CROSS_MARGIN_M;
             let tdz_m = tdz_m(lda_m);
+            let (east, north) = e.threshold(&frame);
             (aligned && on_runway).then(|| RunwayFix {
                 icao: a.icao.clone(),
                 runway: e.name,
@@ -228,6 +243,9 @@ pub fn locate(
                 lda_m,
                 tdz_m,
                 aiming_point_m: aiming_point_m(lda_m),
+                width_m: e.runway.width_m,
+                threshold: frame.point(east, north),
+                magvar_deg: a.magvar_deg,
                 in_tdz: (0.0..=tdz_m).contains(&along_m),
                 long_landing: along_m > tdz_m,
                 short_landing: along_m < 0.0,
@@ -302,6 +320,11 @@ mod tests {
         let fix = locate(&ap, lat, lon, 201.0).unwrap();
         assert_eq!(fix.runway, "20");
         assert!((fix.along_m - 400.0).abs() < 0.5 && (fix.cross_m - 7.0).abs() < 0.5);
+        let (along, cross) = fix.offsets(lat, lon);
+        assert!((along - fix.along_m).abs() < 0.05 && (cross - fix.cross_m).abs() < 0.05);
+        let (lat, lon) = point(200.0, 1500.0, -900.0, -3.0);
+        let (along, cross) = fix.offsets(lat, lon);
+        assert!((along + 900.0).abs() < 0.5 && (cross + 3.0).abs() < 0.5);
         assert_eq!(
             (fix.lda_m, fix.tdz_m, fix.aiming_point_m),
             (3000.0, 914.4, 400.0)

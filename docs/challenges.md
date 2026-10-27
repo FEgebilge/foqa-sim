@@ -6,10 +6,10 @@ the start, records the attempt and grades it locally; that works with no
 site at all. A site is optional: through the
 [FOQA Challenge Protocol](challenge-protocol.md) it can publish challenges,
 receive attempts, re-score them and keep a leaderboard (the first one is
-Pilot Aptitude). Status: the definition, the start and the grading are
-implemented (`crates/challenge`, `fdm challenge`, the app's
-`place_challenge`); the challenge screen, the marker and slice, and the
-site client are not.
+Pilot Aptitude). Status: the definition, the start, the grading, the
+attempt marker and the recording slice are implemented
+(`crates/challenge`, `fdm challenge`, `fdm slice`, the app's Challenges
+screen) and the site client (`crates/connect`); deep links are not.
 
 Research behind it (2026-10-27): SimConnect, MSFS 2024 SDK, DevSupport
 threads, BeatMyLanding, OnAir and others; sources are linked inline.
@@ -30,6 +30,55 @@ Hence the principle: **set what can be set (position, configuration),
 measure everything else, and accept an attempt only if the measured
 conditions are inside the challenge's bands.** Fairness then becomes a
 verified property of the attempt, not a hope about the user's settings.
+
+## Setting the weather (experiment, 2026-10-27)
+
+Ranked attempts must start with the same weather every time (Ege). The sim's
+own weather service is reachable from any Coherent page that has
+`RegisterViewListenerT` (our EFB app's page does), as the sim's weather
+toolbar does it (`fs-base-ui/html_ui/JS/Services/Weather.js`):
+
+```js
+const l = RegisterViewListenerT("JS_LISTENER_WEATHER", ready, ViewListener.ViewListener);
+l.on("SetWeatherList", list => ...);           // presets: index, name, wind summary
+l.on("UpdatePreset", preset => ...);           // the selected preset, full data
+l.trigger("ASK_WEATHER_LIST");
+l.trigger("CUSTOM_WEATHER_PRESET_CHANGED", 1); // select by index
+l.call("UpdateTempWeatherPreset", preset);     // edited copy, resolves with the result
+```
+
+Verified on the running sim (MS Store build, paused before Ready to fly):
+the listener answers with 11 presets (live, clear sky, ..., last custom);
+selecting index 1 pushes the full preset (`tWindLayers` with `dvAltitude`,
+`dvAngleRad`, `dvSpeed`, `gustWaveData`; up to 3 `tCloudLayers`;
+`oSettings` with `dvMSLPressure`, `dvMSLGLTemperature`, `dvPrecipitation`,
+`dvPollution`, ...); editing wind layer 0 to 270 deg / 18 kt with no gust
+and calling `UpdateTempWeatherPreset` is accepted and echoed back exactly.
+Values carry the user's display units (`inHg`, `°F` here): convert from each
+value's `unit`, never assume.
+
+Not yet verified: that the aircraft then flies in that wind. While frozen
+before Ready to fly the ambient wind SimVars kept the previous weather.
+Next: in flight, select a preset, set wind layer 0, then compare
+`AMBIENT WIND DIRECTION` / `VELOCITY`, `SEA LEVEL PRESSURE` and temperature
+with the challenge before the attempt starts. Gusts stay off for ranked
+challenges: their phase is random, so identical gust settings do not give
+identical wind.
+
+### Implementation status
+
+Built, verified in flight: pending. `FoqaWeather` (`msfs-panel/efb/foqa-weather.js`)
+selects the base preset ("clear" is found by the name containing
+`CLEAR_SKY`), edits a copy (wind layers, QNH, temperature, converted from
+each field's `unit`; unknown unit fails), calls `UpdateTempWeatherPreset`,
+reads back the echoed preset and, after 4 s, the four SimVars, and reports
+`{ ok, applied, measured, mismatches }`. The app asks over the Comm Bus
+(`set_weather`, [ingame-panel.md](ingame-panel.md#weather-efb-app)); no
+challenge flow uses it yet. Assumptions to check in flight: that
+`gustWaveData.dvSpeedMultiplier = 1` means no gust, that `dvAngleRad` is the
+direction the wind blows from, and that the SimVars follow within 4 s.
+Visibility has no direct preset field and is not set; clouds stay the
+base preset's.
 
 ## Challenge definition
 
@@ -85,7 +134,10 @@ Field reasons:
 
 `Challenge::parse` rejects unknown fields, a gate not closer than the
 start, flaps outside 0 to 1, a runway not written like `06` or `27L` and an
-unknown scoring version.
+unknown scoring version. A `landing-2` challenge must list
+`aircraft.types`, each with a Vref source in its profile (Vref table, POH
+approach speeds or VSO): the pilot's selected speed never counts for a
+ranked attempt ([scoring.md](scoring.md) §5, Decision 1).
 
 ## Attempt lifecycle
 
@@ -138,8 +190,25 @@ not prevention, which matches the stakes.
 
 ## Scoring
 
-`landing-1`, 0 to 100, sum of smooth sub-scores (curves, not
-bands), per aircraft class:
+`scoring.version` names the method, and the server re-scores an upload
+with the one its challenge names, so app updates never move a board.
+
+**`landing-2`** is the method for new challenges, specified in
+[scoring.md](scoring.md): the same assessment the debrief shows (six
+domains, ideal and tolerance from the checkride standard, levels from the
+FDM thresholds, safety caps), run as a ranked attempt from the gate.
+`challenge::evaluate` takes it from `crates/assess`; the attempt's
+`score.total` is the landing's score and its `parts` are the six domains
+(weight shared out where a domain is n/a; a safety cap holds the total
+below their sum). It adds two checks: `data` (every expected value
+recorded, `confidence: full`; a landing without a runway fix, peak g or
+sink is not scored at all) and `go_around` (an attempt that went around
+after the gate is not ranked: fly again). Boards should be split by
+scoring class (light, turboprop, jet); the attempt does not carry the
+class yet, the site reads it from the type.
+
+**`landing-1`** (frozen, for the challenges that name it), 0 to 100, sum of
+smooth sub-scores (curves, not bands), per aircraft class:
 
 | Part | Weight | Full marks (transport / light) | Zero |
 |---|---|---|---|
@@ -171,12 +240,19 @@ Leaderboards are the site's business, not part of the protocol.
 ## Decisions (Ege, 2026-10-27)
 
 1. **Start:** `teleport` by default, `self` as the fallback.
-2. **Scoring:** `landing-1` above.
+2. **Scoring:** `landing-1` above; `landing-2` ([scoring.md](scoring.md))
+   for new challenges since 2026-10-27.
+
 3. **Server analysis:** the Rust analysis on the home server:
    `fdm challenge <challenge.json> <flight.fqz>` prints the `Attempt`
-   (checks, validity, score) as JSON, the same `challenge::evaluate` the app
-   runs. It takes a compact flight only, whose decompressed body is capped
-   (256 MiB); a journal or a raw capture is refused by its extension, since
+   (checks, validity, score, the `aircraft` type and class graded, the
+   `marker` it graded after) as JSON, the same `challenge::evaluate` the
+   app runs. Only a touchdown after the latest `begin` marker is graded.
+   `fdm slice <flight> --ref <ref> [-o out.fqz]` cuts the attempt's slice
+   the app uploads ([format.md](format.md), Recording slice); the golden
+   example a site's CI checks is in `fixtures/challenge/`. It takes a compact flight only, whose decompressed body is capped
+   at 32 MiB for `fdm challenge` and `fdm slice` (256 MiB for the app's own
+   flights); a journal or a raw capture is refused by its extension, since
    a raw capture's gzip lets a small upload expand. The raw replay is capped
    too (1 GiB decompressed, 64 KiB a line) for local use.
 4. **Accounts:** site accounts; the app signs in through the browser

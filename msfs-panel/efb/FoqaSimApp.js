@@ -40,6 +40,7 @@
         this.root = root;
         this.board = FoqaSim.attach(root.querySelector('[data-pane="live"]'), bus);
         this.history = FoqaHistory.attach(root.querySelector('[data-pane="flights"]'), bus);
+        FoqaWeather.attach(bus);   // idle until the app sends set_weather
         root.querySelector(".efb-tabs").addEventListener("click", function (e) {
             var tab = e.target.getAttribute("data-tab");
             if (tab) self.show(tab);

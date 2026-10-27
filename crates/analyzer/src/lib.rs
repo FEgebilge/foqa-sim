@@ -1,11 +1,13 @@
 //! Ground segment. Mirrors FDM software: decode the recording against its
 //! LFL (`flight`), calibrate and derive parameters on a common time base
-//! (`track`, `vs`), then find flight phases (`phase`) and touchdowns
-//! (`landing`). Runs after the flight, so it may look ahead in time;
+//! (`track`, `vs`), then find flight phases (`phase`), touchdowns
+//! (`landing`) and the approach and rollout values a landing is graded
+//! on (`approach`). Runs after the flight, so it may look ahead in time;
 //! `live` follows a flight still being flown, for the in-sim panel.
 
 #![forbid(unsafe_code)]
 
+mod approach;
 pub mod export;
 mod flight;
 mod landing;
@@ -16,6 +18,9 @@ mod runway;
 mod track;
 mod vs;
 
+pub use approach::{
+    Approach, Config, ConfigChange, Crossing, Slowed, Window, held, stable_from, sustained_worst,
+};
 pub use flight::Flight;
 pub use landing::{Touchdown, touchdowns};
 pub use live::{LiveInput, LivePoint, LiveTrack};

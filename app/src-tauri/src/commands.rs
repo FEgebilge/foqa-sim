@@ -1,19 +1,29 @@
 //! The commands of `docs/debrief-api.md` and the state they share with the
 //! recorder.
 
-use std::io;
+use std::fs::File;
+use std::io::{self, BufReader};
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::thread::JoinHandle;
+use std::thread::{self, JoinHandle};
+use std::time::{Duration, Instant};
 
-use ::debrief::{Debrief, FlightSummary, Index, RecorderStatus, Station, StorageUsage};
+use ::debrief::{
+    Debrief, FlightSummary, Index, LandingNotice, RecorderStatus, Station, StorageUsage,
+};
 use capture::{ASK_TIMEOUT, InitPosition, SimRequests, Start, Stopper};
-use challenge::{Challenge, Mode, StartState};
+use challenge::{Attempt, Begin, Challenge, Mode, StartState};
+use recorder::{AttemptMarker, AttemptPhase};
+use serde::Serialize;
+use serde_json::json;
 use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
 
+use crate::attempts::{Attempts, Cut, Record, State as AttemptState, Uncut, View};
+use crate::library::{Briefing, Entry, Library};
 use crate::setup::{Setup, SetupStatus};
 
 /// What the commands, the tray and the recorder thread share.
@@ -30,9 +40,28 @@ pub struct Shared {
     index: Arc<Index>,
     /// Requests to the sim through the recorder's connection.
     sim: SimRequests,
+    /// Challenge files the user opened.
+    library: Library,
+    attempts: Attempts,
+    /// What an optional module adds to an attempt (the site client).
+    hooks: Option<Arc<dyn AttemptHooks>>,
+    /// A pass over the slices still to cut is running.
+    reslicing: AtomicBool,
+}
+
+/// Where an optional module joins the attempt lifecycle; the core knows
+/// no site, token or upload (docs/challenge-protocol.md B1).
+pub trait AttemptHooks: Send + Sync {
+    /// After the attempt is created, before the aircraft is placed: the
+    /// opaque reference its markers carry, if the module has one for it.
+    fn before_place(&self, record: &Record) -> Option<String>;
+    /// The pre-flight card's ranking line for library entry `key`, when it
+    /// is not a local file: `(state, text, fix)`.
+    fn ranking(&self, key: &str) -> Option<(&'static str, String, Option<String>)>;
 }
 
 impl Shared {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         station: Arc<Station>,
         dir: PathBuf,
@@ -41,8 +70,12 @@ impl Shared {
         recorder: JoinHandle<()>,
         setup: Setup,
         sim: SimRequests,
+        library: Library,
+        attempts: Attempts,
     ) -> Self {
         Self {
+            library,
+            attempts,
             sim,
             station,
             status: Mutex::new(RecorderStatus::WaitingForSim),
@@ -51,6 +84,8 @@ impl Shared {
             index,
             dir,
             setup,
+            hooks: None,
+            reslicing: AtomicBool::new(false),
         }
     }
 
@@ -91,6 +126,20 @@ impl Shared {
             return Err(format!("no flight {id:?}"));
         }
         ::debrief::flight_path(&self.dir, id).ok_or_else(|| format!("no flight {id:?}"))
+    }
+}
+
+/// What optional modules use.
+#[cfg_attr(not(feature = "connect"), allow(dead_code))]
+impl Shared {
+    pub fn with_hooks(mut self, hooks: Arc<dyn AttemptHooks>) -> Self {
+        self.hooks = Some(hooks);
+        self
+    }
+
+    /// Imports a challenge's exact bytes into the library.
+    pub fn import_challenge(&self, json: &str) -> Result<Entry, String> {
+        self.library.import(json)
     }
 }
 
@@ -137,13 +186,16 @@ pub async fn place_challenge(
     shared: State<'_, Arc<Shared>>,
 ) -> Result<StartState, String> {
     let shared = Arc::clone(&shared);
-    blocking(move || {
-        let challenge = Challenge::parse(&definition)?;
+    blocking(move || shared.place(&Challenge::parse(&definition)?)).await
+}
+
+impl Shared {
+    fn place(&self, challenge: &Challenge) -> Result<StartState, String> {
         if challenge.start.mode != Mode::Teleport {
             return Err("this challenge starts wherever you fly it from".into());
         }
-        let airport = answer(shared.sim.airport(&challenge.airport))?;
-        let s = challenge::start_state(&challenge, &airport)
+        let airport = answer(self.sim.airport(&challenge.airport))?;
+        let s = challenge::start_state(challenge, &airport)
             .ok_or_else(|| format!("{} has no runway {}", challenge.airport, challenge.runway))?;
         let pos = InitPosition {
             latitude_deg: s.lat_deg,
@@ -160,10 +212,478 @@ pub async fn place_challenge(
             gear_down: challenge.start.gear_down,
             flaps: Some(challenge.start.flaps),
         };
-        answer(shared.sim.place(start))?;
+        answer(self.sim.place(start))?;
         Ok(s)
+    }
+
+    /// The pre-flight card (protocol B8) and the flight being recorded,
+    /// with the sim time it has reached.
+    fn preflight(&self, key: &str, c: &Challenge) -> (Vec<Line>, Option<(String, Option<f64>)>) {
+        let status = lock(&self.status).clone();
+        let load = if c.start.mode == Mode::Teleport {
+            "Load a flight in MSFS 2024 at any airport; Place moves you to the start."
+        } else {
+            "Load a flight in MSFS 2024."
+        };
+        let (sim, flight) = match status {
+            RecorderStatus::Recording { flight_id, .. } => (
+                Line::ok("sim", format!("MSFS connected, recording {flight_id}.")),
+                Some(flight_id),
+            ),
+            RecorderStatus::Connected => (
+                Line::fail("sim", "MSFS is connected but no flight is loaded.", load),
+                None,
+            ),
+            RecorderStatus::WaitingForSim => (
+                Line::fail(
+                    "sim",
+                    "MSFS isn't connected.",
+                    "Start MSFS 2024, then load a flight.",
+                ),
+                None,
+            ),
+            RecorderStatus::Error { message } => (
+                Line::fail(
+                    "sim",
+                    format!("The recorder stopped: {message}."),
+                    "Restart FOQA-Sim; if it happens again, open Installation.",
+                ),
+                None,
+            ),
+        };
+        let analysis = flight.as_ref().map(|id| {
+            self.flight(id)
+                .and_then(|p| self.station.open(&p).map_err(|e| e.to_string()))
+        });
+        let rule = &c.aircraft;
+        let aircraft = match &analysis {
+            _ if rule.classes.is_empty() && rule.types.is_empty() => {
+                Line::ok("aircraft", "Any aircraft.")
+            }
+            None => Line::unknown("aircraft", "Checked once a flight is loaded."),
+            Some(Err(_)) => Line::unknown(
+                "aircraft",
+                "Checked once the flight has data; give it a few seconds.",
+            ),
+            Some(Ok(a)) => {
+                let check = challenge::aircraft_check(c, a);
+                let needs = if rule.types.is_empty() {
+                    let classes: Vec<_> = rule.classes.iter().map(|k| k.to_string()).collect();
+                    format!("a {} aircraft", classes.join(" or "))
+                } else {
+                    format!("a {}", rule.types.join(" or "))
+                };
+                if check.ok {
+                    Line::ok("aircraft", format!("{} is loaded.", check.detail))
+                } else {
+                    Line::fail(
+                        "aircraft",
+                        format!(
+                            "A {} is loaded; this challenge needs {needs}.",
+                            check.detail
+                        ),
+                        "Load one; flown as it is, the attempt won't count.",
+                    )
+                }
+            }
+        };
+        let conditions = &c.conditions;
+        let weather = if conditions.wind.is_none()
+            && conditions.crosswind_kt.is_none()
+            && conditions.tailwind_kt.is_none()
+        {
+            Line::ok("weather", "Any weather.")
+        } else {
+            Line::unknown(
+                "weather",
+                "Set by the challenge (pending in-flight verification).",
+            )
+        };
+        let hooked = self.hooks.as_ref().and_then(|h| h.ranking(key));
+        let ranking = match hooked {
+            Some((state, text, fix)) => Line::new("ranking", state, text, fix.as_deref()),
+            None => Line::ok("ranking", "Local challenge file: graded here only."),
+        };
+        let begin = analysis.and_then(|a| a.ok()?.track.t.last().map(|t| t.as_secs_f64()));
+        (
+            vec![sim, aircraft, weather, ranking],
+            flight.map(|id| (id, begin)),
+        )
+    }
+
+    /// Grades an attempt from its whole flight: only a landing after its
+    /// own begin marker (or its start), not another attempt's.
+    fn grade(&self, r: &Record, definition: &str) -> Result<Attempt, String> {
+        let c = Challenge::parse(definition)?;
+        let id = r.flight_id.as_deref().ok_or("the attempt has no flight")?;
+        let a = self
+            .station
+            .open(&self.flight(id)?)
+            .map_err(|e| format!("{id}: {e}"))?;
+        let begin = Begin::Of {
+            reference: r.marker_ref.as_deref(),
+            begin_s: r.begin_s,
+        };
+        Ok(challenge::evaluate_after(&c, &a, begin))
+    }
+
+    /// Creates an attempt at `definition` and places it.
+    fn start_attempt(&self, key: &str, definition: &str) -> Result<Record, String> {
+        let c = Challenge::parse(definition)?;
+        let (lines, flight) = self.preflight(key, &c);
+        let (flight_id, begin_s) = flight.ok_or_else(|| lines[0].text.clone())?;
+        let record = self.attempts.create(key, definition)?;
+        let marker_ref = self
+            .hooks
+            .as_ref()
+            .and_then(|hooks| hooks.before_place(&record))
+            .filter(|r| recorder::is_reference(r));
+        let checks: serde_json::Map<_, _> = lines
+            .iter()
+            .map(|l| (l.name.to_owned(), l.state.into()))
+            .collect();
+        let reference = marker_ref.as_deref();
+        self.attempts
+            .place(&record.id, &flight_id, begin_s, reference, |c| {
+                let start = match c.start.mode {
+                    Mode::Teleport => {
+                        serde_json::to_value(self.place(c)?).map_err(|e| e.to_string())?
+                    }
+                    Mode::SelfFlown => "self".into(),
+                };
+                let begin = marker(&c.id, c.version, AttemptPhase::Begin, reference, None);
+                self.sim.attempt_marker(begin);
+                Ok(json!({ "start": start, "preflight": checks }))
+            })
+    }
+
+    /// Writes the end marker of an attempt still open, into its flight if
+    /// that is the one recording.
+    fn end_marker(&self, r: &Record, reason: &str) {
+        let open = matches!(
+            r.state,
+            AttemptState::Flying | AttemptState::Approach | AttemptState::Rollout
+        );
+        if !open || !r.flight_id.as_deref().is_some_and(|f| self.recording(f)) {
+            return;
+        }
+        let reason = match reason {
+            "finish" | "stopped" => "stopped",
+            "cancelled" => "abandoned",
+            other => other,
+        };
+        let reference = r.marker_ref.as_deref();
+        let end = marker(
+            &r.challenge,
+            r.version,
+            AttemptPhase::End,
+            reference,
+            Some(reason),
+        );
+        self.sim.attempt_marker(end);
+    }
+
+    fn recording(&self, flight: &str) -> bool {
+        matches!(&*lock(&self.status), RecorderStatus::Recording { flight_id, .. } if flight_id == flight)
+    }
+
+    /// Abandons attempt `id` (`cancelled`, `replaced`), ending its marker.
+    fn abandon(&self, id: &str, reason: &str) -> Result<Record, String> {
+        self.end_marker(&self.attempts.get(id)?, reason);
+        self.attempts.abandon(id, reason)
+    }
+
+    /// The slice of an attempt from its flight (A5). While the flight
+    /// records, waits up to `SLICE_WAIT` for the data past the end marker
+    /// (and for a begin marker not on disk yet); a failed read is tried
+    /// again after `READ_BACKOFF`, doubling, `READ_TRIES` times.
+    fn cut(&self, r: &Record) -> Result<Cut, Uncut> {
+        let never = |code, e: &str| Uncut::Never(code, e.to_owned());
+        let reference = r.marker_ref.as_deref();
+        let reference = reference.ok_or_else(|| never("no_marker", "the attempt has no marker"))?;
+        let id = r.flight_id.as_deref();
+        let id = id.ok_or_else(|| never("no_flight", "the attempt has no flight"))?;
+        let until = Instant::now() + SLICE_WAIT;
+        loop {
+            let path = self.flight(id).map_err(|e| never("no_flight", &e))?;
+            let read = || {
+                let file = File::open(&path)?;
+                recorder::slice(BufReader::new(file), recorder::Cut::Attempt(reference))
+            };
+            let read = retried(read, READ_BACKOFF, READ_TRIES);
+            let read = read.map_err(|e| Uncut::Later(format!("{id}: {e}")))?;
+            let waiting = self.recording(id) && Instant::now() < until;
+            match read {
+                None if !waiting => {
+                    let e = format!("{id} has no begin marker for this attempt");
+                    return Err(never("no_marker", &e));
+                }
+                Some(slice) if slice.complete || !waiting => {
+                    let bytes = slice.to_bytes().map_err(|e| Uncut::Later(e.to_string()))?;
+                    return Ok(Cut {
+                        bytes,
+                        from_s: slice.from.as_secs_f64(),
+                        to_s: slice.to.as_secs_f64(),
+                    });
+                }
+                _ => thread::sleep(Duration::from_secs(1)),
+            }
+        }
+    }
+
+    /// A landing in the recorded flight: attempts flying in it go to the
+    /// rollout and are finished `ROLLOUT` later unless finished sooner.
+    pub fn landed(self: &Arc<Self>, notice: &LandingNotice) {
+        let td = &notice.touchdown;
+        for id in self
+            .attempts
+            .landed(&notice.flight_id, td.t_s, td.sink_fpm, td.peak_g)
+        {
+            let shared = Arc::clone(self);
+            thread::spawn(move || {
+                thread::sleep(ROLLOUT);
+                if shared
+                    .attempts
+                    .get(&id)
+                    .is_ok_and(|r| r.state == AttemptState::Rollout)
+                {
+                    let _ = shared.finish(&id, "stopped");
+                }
+            });
+        }
+    }
+
+    /// A flight closed: its attempts in the air are abandoned, those
+    /// rolling out finished.
+    pub fn flight_closed(self: &Arc<Self>, flight_id: &str) {
+        for id in self.attempts.flight_closed(flight_id) {
+            let shared = Arc::clone(self);
+            thread::spawn(move || shared.finish(&id, "flight_closed"));
+        }
+    }
+
+    /// Ends attempt `id` (its end marker first) and grades it; its slice is
+    /// then cut on a thread of its own.
+    fn finish(self: &Arc<Self>, id: &str, reason: &str) -> Result<Record, String> {
+        if let Ok(r) = self.attempts.get(id) {
+            self.end_marker(&r, reason);
+        }
+        let record = self
+            .attempts
+            .finish(id, reason, &|r, d| self.grade(r, d))
+            .inspect_err(|e| eprintln!("attempt {id}: {e}"))?;
+        if record.state == AttemptState::GradedLocal {
+            let (shared, id) = (Arc::clone(self), id.to_owned());
+            thread::spawn(move || shared.slice(&id));
+        }
+        Ok(record)
+    }
+
+    fn slice(&self, id: &str) {
+        if let Err(e) = self.attempts.slice(id, |r| self.cut(r)) {
+            eprintln!("attempt {id}: not sliced: {e}");
+        }
+    }
+
+    /// Cuts again, on a thread of its own, the slices a failed cut or a
+    /// crash left: at start-up, every `RESLICE` and when the Challenges
+    /// screen lists the attempts. One pass at a time.
+    fn reslice(self: &Arc<Self>) {
+        if self.reslicing.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let shared = Arc::clone(self);
+        thread::spawn(move || {
+            for id in shared.attempts.unsliced() {
+                shared.slice(&id);
+            }
+            shared.reslicing.store(false, Ordering::SeqCst);
+        });
+    }
+
+    /// At start-up: attempts a crash left open, resolved from their
+    /// flights; then the graded ones still to slice, every `RESLICE`.
+    pub fn recover(self: &Arc<Self>) {
+        self.attempts.recover(&|r, d| self.grade(r, d));
+        let shared = Arc::clone(self);
+        thread::spawn(move || {
+            loop {
+                shared.reslice();
+                thread::sleep(RESLICE);
+            }
+        });
+    }
+}
+
+/// After a landing, how long the rollout runs before the attempt is graded
+/// on its own (protocol B5).
+const ROLLOUT: Duration = Duration::from_secs(120);
+/// How long a slice waits for the recording to pass its end marker.
+const SLICE_WAIT: Duration = Duration::from_secs(15);
+/// A failed read of the flight is tried again this much later, doubling.
+const READ_BACKOFF: Duration = Duration::from_secs(1);
+const READ_TRIES: u32 = 3;
+/// How often the slices still to cut are tried again.
+const RESLICE: Duration = Duration::from_secs(300);
+
+/// `read`, tried again while it fails up to `tries` more times, after
+/// `pause`, doubling: a flight file briefly locked is read all the same.
+fn retried<T>(
+    mut read: impl FnMut() -> io::Result<T>,
+    pause: Duration,
+    tries: u32,
+) -> io::Result<T> {
+    let mut pause = pause;
+    for _ in 0..tries {
+        if let Ok(v) = read() {
+            return Ok(v);
+        }
+        thread::sleep(pause);
+        pause *= 2;
+    }
+    read()
+}
+
+fn marker(
+    challenge: &str,
+    version: u32,
+    phase: AttemptPhase,
+    reference: Option<&str>,
+    reason: Option<&str>,
+) -> AttemptMarker {
+    AttemptMarker {
+        phase,
+        challenge: challenge.to_owned(),
+        version,
+        reference: reference.map(Into::into),
+        reason: reason.map(Into::into),
+    }
+}
+
+/// A line of the pre-flight card.
+#[derive(Debug, Clone, Serialize)]
+pub struct Line {
+    name: &'static str,
+    state: &'static str,
+    text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fix: Option<String>,
+}
+
+impl Line {
+    fn new(
+        name: &'static str,
+        state: &'static str,
+        text: impl Into<String>,
+        fix: Option<&str>,
+    ) -> Self {
+        let (text, fix) = (text.into(), fix.map(str::to_owned));
+        Self {
+            name,
+            state,
+            text,
+            fix,
+        }
+    }
+    fn ok(name: &'static str, text: impl Into<String>) -> Self {
+        Self::new(name, "ok", text, None)
+    }
+    fn unknown(name: &'static str, text: impl Into<String>) -> Self {
+        Self::new(name, "unknown", text, None)
+    }
+    fn fail(name: &'static str, text: impl Into<String>, fix: &str) -> Self {
+        Self::new(name, "fail", text, Some(fix))
+    }
+}
+
+#[tauri::command]
+pub fn challenges_list(shared: State<'_, Arc<Shared>>) -> Vec<Entry> {
+    shared.library.list()
+}
+
+/// Asks for a challenge file and keeps it; `None` when cancelled.
+#[tauri::command]
+pub async fn challenge_import(
+    app: AppHandle,
+    shared: State<'_, Arc<Shared>>,
+) -> Result<Option<Entry>, String> {
+    let shared = Arc::clone(&shared);
+    blocking(move || {
+        let picked = app
+            .dialog()
+            .file()
+            .set_title("Open a challenge file")
+            .add_filter("Challenge", &["json"])
+            .blocking_pick_file();
+        let Some(file) = picked else { return Ok(None) };
+        let path = file.into_path().map_err(|e| e.to_string())?;
+        shared.library.import_file(&path).map(Some)
     })
     .await
+}
+
+#[tauri::command]
+pub fn challenge_remove(key: String, shared: State<'_, Arc<Shared>>) -> Result<(), String> {
+    shared.library.remove(&key)
+}
+
+#[tauri::command]
+pub fn challenge_briefing(key: String, shared: State<'_, Arc<Shared>>) -> Result<Briefing, String> {
+    shared.library.briefing(&key)
+}
+
+#[tauri::command]
+pub async fn challenge_preflight(
+    key: String,
+    shared: State<'_, Arc<Shared>>,
+) -> Result<Vec<Line>, String> {
+    let shared = Arc::clone(&shared);
+    blocking(move || Ok(shared.preflight(&key, &shared.library.get(&key)?.0).0)).await
+}
+
+/// Creates an attempt at a library challenge and places the aircraft.
+#[tauri::command]
+pub async fn attempt_start(key: String, shared: State<'_, Arc<Shared>>) -> Result<Record, String> {
+    let shared = Arc::clone(&shared);
+    blocking(move || shared.start_attempt(&key, &shared.library.get(&key)?.1)).await
+}
+
+/// Abandons the attempt if it is still open (`replaced`) and starts the
+/// same definition again.
+#[tauri::command]
+pub async fn attempt_fly_again(
+    id: String,
+    shared: State<'_, Arc<Shared>>,
+) -> Result<Record, String> {
+    let shared = Arc::clone(&shared);
+    blocking(move || {
+        let record = shared.attempts.get(&id)?;
+        if record.state.can_become(AttemptState::Abandoned) {
+            shared.abandon(&id, "replaced")?;
+        }
+        shared.start_attempt(&record.key, &shared.attempts.definition(&id)?)
+    })
+    .await
+}
+
+/// Ends the attempt now and grades it from its flight.
+#[tauri::command]
+pub async fn attempt_finish(id: String, shared: State<'_, Arc<Shared>>) -> Result<Record, String> {
+    let shared = Arc::clone(&shared);
+    blocking(move || shared.finish(&id, "finish")).await
+}
+
+#[tauri::command]
+pub fn attempt_abandon(id: String, shared: State<'_, Arc<Shared>>) -> Result<Record, String> {
+    shared.abandon(&id, "cancelled")
+}
+
+/// Every attempt; the Challenges screen listing them also cuts again the
+/// slices still to cut.
+#[tauri::command]
+pub fn attempts_list(shared: State<'_, Arc<Shared>>) -> Vec<View> {
+    shared.reslice();
+    shared.attempts.list()
 }
 
 /// The sim's answer to a request; an error without one in `ASK_TIMEOUT`,
@@ -248,4 +768,41 @@ pub async fn setup_pick_community(
         }
     })
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_failed_read_is_tried_again_with_backoff() {
+        let pause = Duration::from_millis(5);
+        let mut calls = 0;
+        let flaky = retried(
+            || {
+                calls += 1;
+                if calls < 3 {
+                    Err(io::Error::other("locked"))
+                } else {
+                    Ok(calls)
+                }
+            },
+            pause,
+            READ_TRIES,
+        );
+        assert_eq!(flaky.unwrap(), 3);
+        let mut calls = 0;
+        let started = Instant::now();
+        let locked: io::Result<()> = retried(
+            || {
+                calls += 1;
+                Err(io::Error::other("locked"))
+            },
+            pause,
+            READ_TRIES,
+        );
+        assert!(locked.is_err());
+        assert_eq!(calls, READ_TRIES + 1);
+        assert!(started.elapsed() >= pause * 7, "5, 10 and 20 ms apart");
+    }
 }
