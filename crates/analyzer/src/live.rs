@@ -4,18 +4,19 @@
 //! altitude on the ground, the inertial VS filter, the parked RA bias, the
 //! CICTT phase boundaries) but without look-ahead: a phase that the ground
 //! segment decides from what follows (the top of a climb, a go-around, a
-//! bounce) is decided here once it has happened, so the debrief can differ
-//! by a few seconds.
+//! bounce, the lowest speed of a touch-and-go) is decided here once it has
+//! happened, so the debrief can differ by a few seconds.
 
 use fdm_core::SimTime;
 
-use crate::Phase;
-use crate::phase::{
-    APPROACH_START_FT, FLARE_FT, GO_AROUND_DROP_FT, GO_AROUND_RISE_FT, INITIAL_CLIMB_END_FT,
-    ROLL_MIN_GS_KT, STANDING_MAX_GS_KT, TAKEOFF_END_FT,
-};
+use crate::phase::{STANDING_MAX_GS_KT, TAKEOFF_END_FT};
 use crate::track::{BOUNCE_MAX_US, RA_BIAS_MAX_GS_KT, RA_MAX_FT};
 use crate::vs::Inertial;
+use crate::{Phase, PhaseConfig};
+
+/// A rise in ground speed this far above the landing roll's lowest takes
+/// it for takeoff power: a touch-and-go, past the noise of a slowing roll.
+const TOUCH_AND_GO_RISE_KT: f64 = 5.0;
 
 /// One recorded frame's parameters; `NaN` where missing.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -52,8 +53,11 @@ pub struct LiveTrack {
     ra_bias: f64,
     vs: Option<Inertial>,
     touchdown: Option<SimTime>,
-    /// Lowest height of an approach, highest of a climb or go-around.
+    /// Lowest height of an approach, highest of a climb, go-around or
+    /// cruise.
     extreme_ft: f64,
+    /// Lowest ground speed since the last touchdown.
+    roll_min_kt: f64,
 }
 
 impl Default for LiveTrack {
@@ -66,6 +70,7 @@ impl Default for LiveTrack {
             vs: None,
             touchdown: None,
             extreme_ft: f64::NAN,
+            roll_min_kt: f64::NAN,
         }
     }
 }
@@ -76,7 +81,9 @@ impl LiveTrack {
         self.last
     }
 
-    pub fn step(&mut self, x: &LiveInput) -> LivePoint {
+    /// Follows frame `x` with the boundaries of `cfg`, which may change
+    /// between frames as the aircraft's identity or weight arrives.
+    pub fn step(&mut self, x: &LiveInput, cfg: &PhaseConfig) -> LivePoint {
         let dt = self
             .last_t
             .map_or(0.0, |t| x.t.us_since(t).max(0) as f64 / 1e6);
@@ -106,7 +113,7 @@ impl LiveTrack {
         let vs_fpm = self.vs.as_mut().map_or(f64::NAN, |f| {
             f.step(x.alt_ft, x.nz_g, x.pitch_deg, x.roll_deg, on_ground, dt)
         });
-        let phase = self.phase(x, was, on_ground, aal_ft, ra_ft);
+        let phase = self.phase(x, cfg, was, on_ground, aal_ft, ra_ft);
         let point = LivePoint {
             phase,
             on_ground,
@@ -121,6 +128,7 @@ impl LiveTrack {
     fn phase(
         &mut self,
         x: &LiveInput,
+        cfg: &PhaseConfig,
         was: Option<bool>,
         on_ground: bool,
         aal: f64,
@@ -132,13 +140,19 @@ impl LiveTrack {
         if on_ground {
             if was == Some(false) {
                 self.touchdown = Some(x.t);
+                self.roll_min_kt = gs;
                 p = Landing;
             }
+            self.roll_min_kt = self.roll_min_kt.min(gs);
             return match p {
+                // Power applied on the rollout: a touch-and-go.
+                Landing if gs >= cfg.roll_kt.max(self.roll_min_kt + TOUCH_AND_GO_RISE_KT) => {
+                    Takeoff
+                }
                 // The rollout, or a dropout in ground speed.
-                Landing if gs >= ROLL_MIN_GS_KT || gs.is_nan() => Landing,
+                Landing if gs >= cfg.roll_kt || gs.is_nan() => Landing,
                 _ if gs.is_nan() => p,
-                _ if gs >= ROLL_MIN_GS_KT => Takeoff,
+                _ if gs >= cfg.roll_kt => Takeoff,
                 _ if gs >= STANDING_MAX_GS_KT => Taxi,
                 _ => Standing,
             };
@@ -156,13 +170,27 @@ impl LiveTrack {
         let (low, high) = (self.extreme_ft.min(aal), self.extreme_ft.max(aal));
         let next = match p {
             Takeoff if height >= TAKEOFF_END_FT => InitialClimb,
-            InitialClimb | GoAround if aal >= INITIAL_CLIMB_END_FT => EnRoute,
-            // Past the top of a climb below 1000 ft: an approach.
-            InitialClimb | GoAround if aal <= high - GO_AROUND_DROP_FT => Approach,
-            EnRoute if aal < APPROACH_START_FT => Approach,
-            Approach | Landing if aal >= low + GO_AROUND_RISE_FT => GoAround,
-            Approach if aal >= APPROACH_START_FT => EnRoute,
-            Approach if height < FLARE_FT => Landing,
+            InitialClimb if aal >= cfg.climb_end_ft => EnRoute,
+            GoAround if aal >= cfg.approach_ft => EnRoute,
+            // Entered from above only: a climb through it stays en route.
+            EnRoute if aal < cfg.approach_ft && high >= cfg.approach_ft => Approach,
+            // Past the top of a go-around under the approach height, or of a
+            // climb or cruise under it once below the climb end: a dip in a
+            // low cruise between the two is not an approach (docs/phases.md).
+            InitialClimb | GoAround | EnRoute
+                if aal <= high - cfg.go_around_drop_ft
+                    && aal
+                        < if p == GoAround {
+                            cfg.approach_ft
+                        } else {
+                            cfg.climb_end_ft
+                        } =>
+            {
+                Approach
+            }
+            Approach | Landing if aal >= low + cfg.go_around_rise_ft => GoAround,
+            Approach if aal >= cfg.approach_ft => EnRoute,
+            Approach if height < cfg.flare_ft => Landing,
             // Airborne with no liftoff seen: the flight started in the air.
             Standing | Taxi => EnRoute,
             _ => p,
@@ -170,7 +198,7 @@ impl LiveTrack {
         self.extreme_ft = match next {
             _ if next != p => aal,
             Approach | Landing => low,
-            InitialClimb | GoAround => high,
+            InitialClimb | GoAround | EnRoute => high,
             _ => self.extreme_ft,
         };
         next
@@ -183,21 +211,28 @@ mod tests {
 
     /// 8 Hz frames of (on ground, pressure altitude, ground speed), level.
     fn run(frames: &[(bool, f64, f64)]) -> Vec<LivePoint> {
+        run_with(frames, &PhaseConfig::TRANSPORT)
+    }
+
+    fn run_with(frames: &[(bool, f64, f64)], cfg: &PhaseConfig) -> Vec<LivePoint> {
         let mut track = LiveTrack::default();
         frames
             .iter()
             .enumerate()
             .map(|(i, &(g, alt, gs))| {
-                track.step(&LiveInput {
-                    t: SimTime::from_micros(i as i64 * 125_000),
-                    on_ground: Some(g),
-                    alt_ft: alt,
-                    gs_kt: gs,
-                    ra_ft: f64::NAN,
-                    nz_g: 1.0,
-                    pitch_deg: 0.0,
-                    roll_deg: 0.0,
-                })
+                track.step(
+                    &LiveInput {
+                        t: SimTime::from_micros(i as i64 * 125_000),
+                        on_ground: Some(g),
+                        alt_ft: alt,
+                        gs_kt: gs,
+                        ra_ft: f64::NAN,
+                        nz_g: 1.0,
+                        pitch_deg: 0.0,
+                        roll_deg: 0.0,
+                    },
+                    cfg,
+                )
             })
             .collect()
     }
@@ -266,6 +301,84 @@ mod tests {
                 Standing
             ]
         );
+    }
+
+    #[test]
+    fn a_climb_through_a_higher_approach_height_stays_en_route() {
+        use Phase::*;
+        let cfg = PhaseConfig {
+            approach_ft: 1500.0,
+            ..PhaseConfig::LIGHT
+        };
+        let points = run_with(&circuit(3000.0), &cfg);
+        let seq = [
+            Standing,
+            Taxi,
+            Takeoff,
+            InitialClimb,
+            EnRoute,
+            Approach,
+            Landing,
+            Taxi,
+            Standing,
+        ];
+        assert_eq!(phases(&points), seq);
+        // Through 1275 ft on the climb.
+        assert_eq!(points[12 + 16].phase, EnRoute);
+        // A pattern topping between 1000 and 1500 ft approaches through 1000 ft.
+        let points = run_with(&circuit(1200.0), &cfg);
+        assert_eq!(phases(&points), seq);
+        let first = points.iter().position(|p| p.phase == Approach).unwrap();
+        assert!(points[first].aal_ft < 1000.0, "{}", points[first].aal_ft);
+    }
+
+    #[test]
+    fn a_dip_in_a_low_cruise_under_a_higher_approach_height_is_not_an_approach() {
+        use Phase::*;
+        let cfg = PhaseConfig {
+            approach_ft: 1500.0,
+            ..PhaseConfig::LIGHT
+        };
+        // Up to 1200 ft, level, a 60 ft dip, on up to 1400 ft (260 ft above
+        // the dip), level at 1300 ft, then down and land.
+        let mut f = circuit(1200.0)[..12 + 40].to_vec();
+        f.extend([(false, 1700.0, 90.0); 16]);
+        f.extend([(false, 1640.0, 90.0); 8]);
+        f.extend((1..=20).map(|i| (false, 1640.0 + 13.0 * f64::from(i), 90.0)));
+        f.extend([(false, 1800.0, 90.0); 16]);
+        f.extend(circuit(1300.0)[12 + 40..].iter().copied());
+        let points = run_with(&f, &cfg);
+        let seq = [
+            Standing,
+            Taxi,
+            Takeoff,
+            InitialClimb,
+            EnRoute,
+            Approach,
+            Landing,
+            Taxi,
+            Standing,
+        ];
+        assert_eq!(phases(&points), seq);
+        let first = points.iter().position(|p| p.phase == Approach).unwrap();
+        assert!(points[first].aal_ft < 1000.0, "{}", points[first].aal_ft);
+    }
+
+    #[test]
+    fn a_touch_and_go_takes_off_once_the_speed_rises() {
+        use Phase::*;
+        let mut f = circuit(800.0)[..12 + 80].to_vec();
+        f.extend((0..16).map(|i| (true, 500.0, 50.0 - f64::from(i))));
+        f.extend((1..=16).map(|i| (true, 500.0, 35.0 + 2.0 * f64::from(i))));
+        f.extend((1..=8).map(|i| (false, 500.0 + 10.0 * f64::from(i), 70.0)));
+        let points = run(&f);
+        assert_eq!(
+            phases(&points)[4..],
+            [Approach, Landing, Takeoff, InitialClimb]
+        );
+        // The first frame 5 kt above the lowest (35 kt).
+        let go = (12 + 80..f.len()).find(|&i| points[i].phase == Takeoff);
+        assert_eq!(go.map(|i| f[i].2), Some(41.0));
     }
 
     #[test]

@@ -55,6 +55,14 @@ pub fn ground_track_deg(a: (f64, f64), b: (f64, f64)) -> f64 {
     east.atan2(north).to_degrees().rem_euclid(360.0)
 }
 
+/// The wind on a runway as (headwind, crosswind from the right), kt.
+/// `from_deg` is where the wind blows from, true, as the runway's
+/// `heading_deg`.
+pub fn wind_components(speed_kt: f64, from_deg: f64, heading_deg: f64) -> (f64, f64) {
+    let (sin, cos) = (from_deg - heading_deg).to_radians().sin_cos();
+    (speed_kt * cos, speed_kt * sin)
+}
+
 /// Degrees from the direction a painted runway number stands for to a
 /// magnetic heading; `None` for the sim's compass-point codes (37-45).
 fn off_number_deg(magnetic_deg: f64, number: u8) -> Option<f64> {
@@ -158,6 +166,8 @@ pub fn thresholds(runway: &Runway, magvar_deg: f64) -> [Threshold; 2] {
 pub struct RunwayFix {
     pub icao: String,
     pub runway: String,
+    /// True heading of the landing direction.
+    pub heading_deg: f64,
     /// Distance past the landing threshold (m); negative = before it.
     pub along_m: f64,
     /// Offset from the centreline (m), positive right of it.
@@ -212,6 +222,7 @@ pub fn locate(
             (aligned && on_runway).then(|| RunwayFix {
                 icao: a.icao.clone(),
                 runway: e.name,
+                heading_deg: e.heading_deg,
                 along_m,
                 cross_m,
                 lda_m,

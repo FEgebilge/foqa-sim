@@ -10,6 +10,15 @@ use crate::{Flight, Track};
 /// landing a bounced one. Longer than track.rs's `BOUNCE_MAX_US`, which only
 /// decides whether a brief ground contact still belongs to the same leg.
 const BOUNCE_AIRBORNE_MAX_US: i64 = 5_000_000;
+/// A flight loaded in the air that is on the ground within this long was
+/// placed there by the sim (spawn, slew), not landed.
+const SETTLE_MAX_US: i64 = 5_000_000;
+/// A hop off the ground shorter than this that rises less than
+/// `HOP_MIN_FT` of radio height is a wheel lifting for a moment (a bump,
+/// gear rebound, a stationary aircraft's flickering state): it stayed on
+/// the ground, so the hop is no liftoff and its end no touchdown.
+const HOP_MIN_US: i64 = 1_000_000;
+const HOP_MIN_FT: f64 = 3.0;
 /// Window for the touchdown load: just before contact to gear compression.
 const PEAK_G_BEFORE_US: i64 = 500_000;
 const PEAK_G_AFTER_US: i64 = 1_500_000;
@@ -59,14 +68,14 @@ struct Contact {
 /// liftoffs so a bounce's hard impact does not grade the light one before it.
 pub fn touchdowns(flight: &Flight, track: &Track) -> Vec<Touchdown> {
     let airports = flight.airports();
-    contacts(flight)
+    contacts(flight, track)
         .into_iter()
         .map(|c| grade(flight, track, &airports, c))
         .collect()
 }
 
 /// Edge pass: states alternate, so every touchdown's neighbours are liftoffs.
-fn contacts(flight: &Flight) -> Vec<Contact> {
+fn contacts(flight: &Flight, track: &Track) -> Vec<Contact> {
     let valid: Vec<_> = flight
         .series("air_ground")
         .iter()
@@ -78,6 +87,9 @@ fn contacts(flight: &Flight) -> Vec<Contact> {
         .filter(|w| (w[0].value >= 0.5) != (w[1].value >= 0.5))
         .map(|w| (w[1].t, w[1].value >= 0.5))
         .collect();
+    let settled = matches!((valid.first(), edges.first()), (Some(s), Some(&(t, true)))
+        if t.us_since(s.t) < SETTLE_MAX_US);
+    let edges = without_hops(track, &edges[usize::from(settled)..]);
     let mut out = Vec::new();
     let (mut prev, mut liftoff): (Option<SimTime>, Option<SimTime>) = (None, None);
     for (i, &(t, is_touchdown)) in edges.iter().enumerate() {
@@ -104,6 +116,30 @@ fn contacts(flight: &Flight) -> Vec<Contact> {
         prev = Some(t);
     }
     out
+}
+
+/// `edges` less each liftoff and touchdown pair that is no real hop.
+fn without_hops(track: &Track, edges: &[(SimTime, bool)]) -> Vec<(SimTime, bool)> {
+    let flown = |off: SimTime, on: SimTime| {
+        let (from, to) = (
+            track.t.partition_point(|&t| t < off),
+            track.t.partition_point(|&t| t <= on),
+        );
+        on.us_since(off) >= HOP_MIN_US || track.ra_ft[from..to].iter().any(|&h| h >= HOP_MIN_FT)
+    };
+    let mut kept = Vec::with_capacity(edges.len());
+    let mut i = 0;
+    while i < edges.len() {
+        if let ((off, false), Some(&(on, true))) = (edges[i], edges.get(i + 1))
+            && !flown(off, on)
+        {
+            i += 2;
+            continue;
+        }
+        kept.push(edges[i]);
+        i += 1;
+    }
+    kept
 }
 
 /// The values that grade one touchdown.
@@ -250,11 +286,30 @@ mod tests {
     }
 
     #[test]
+    fn settling_after_load_is_not_a_landing() {
+        // Loaded in the air, on the ground 1 s later: placed by the sim.
+        assert!(run(&rows(&[(0.0, false), (1.0, true)], &[])).is_empty());
+        // Then a real circuit: that landing counts.
+        let ground = [(0.0, false), (1.0, true), (3.0, false), (12.0, true)];
+        let td = run(&rows(&ground, &[]));
+        assert_eq!(td.len(), 1);
+        assert!(!td[0].bounce);
+    }
+
+    #[test]
+    fn a_wheel_lifting_for_a_moment_is_no_bounce() {
+        // 0.4 s off the ground with no radio height: one touchdown.
+        let ground = [(0.0, false), (10.0, true), (12.0, false), (12.4, true)];
+        let td = run(&rows(&ground, &[]));
+        assert_eq!(td.len(), 1);
+        assert!((td[0].t.as_secs_f64() - 10.0).abs() < 0.11);
+    }
+
+    #[test]
     fn a_bounce_grades_each_impact_on_its_own() {
-        // Light first impact (1.2 g), liftoff at 10.4 s, hard second (2.5 g)
-        // whose pre-contact window would otherwise reach back at the first.
-        let ground = [(0.0, false), (10.0, true), (10.4, false), (11.0, true)];
-        let g = [(10.1, 1.2), (10.9, 2.5), (11.1, 2.5)];
+        // Light first impact (1.2 g), a 1.1 s hop, hard second (2.5 g).
+        let ground = [(0.0, false), (10.0, true), (10.4, false), (11.5, true)];
+        let g = [(10.1, 1.2), (11.1, 2.5), (11.6, 2.5)];
         let td = run(&rows(&ground, &g));
         assert_eq!(td.len(), 2);
         assert!((td[0].peak_g - 1.2).abs() < 1e-9, "{}", td[0].peak_g);

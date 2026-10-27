@@ -19,7 +19,9 @@ mod vs;
 pub use flight::Flight;
 pub use landing::{Touchdown, touchdowns};
 pub use live::{LiveInput, LivePoint, LiveTrack};
-pub use phase::{Phase, Span, phase_labels, phases};
+pub use phase::{Basis, Cause, Phase, PhaseConfig, Span, Trigger, phase_labels, phases};
 pub use runs::runs;
-pub use runway::{RunwayFix, Threshold, ground_track_deg, locate, magnetic_deg, thresholds};
+pub use runway::{
+    RunwayFix, Threshold, ground_track_deg, locate, magnetic_deg, thresholds, wind_components,
+};
 pub use track::{Leg, TRACK_HZ, Track};

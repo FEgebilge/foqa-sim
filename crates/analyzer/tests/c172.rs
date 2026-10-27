@@ -4,7 +4,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-use analyzer::{Flight, Phase, Track, phases, touchdowns};
+use analyzer::{Flight, Phase, PhaseConfig, Track, phases, touchdowns};
 use fdm_core::Lfl;
 use recorder::{Recorder, ReplaySource};
 
@@ -28,7 +28,7 @@ fn flight() -> &'static (Flight, Track) {
 #[test]
 fn phases_follow_a_traffic_pattern() {
     let (_, track) = flight();
-    let spans = phases(track);
+    let spans = phases(track, &PhaseConfig::LIGHT);
     for s in &spans {
         eprintln!(
             "{:>7.1} {:>7.1}  {:?}",
