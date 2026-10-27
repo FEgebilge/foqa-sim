@@ -12,7 +12,7 @@ use fdm_core::geo::LocalFrame;
 use rules::Aircraft;
 use serde::{Deserialize, Serialize};
 
-pub use attempt::{Attempt, Check, evaluate};
+pub use attempt::{Attempt, Check, aircraft_check, evaluate};
 pub use score::{Part, SCORING, Score};
 
 const M_PER_NM: f64 = 1852.0;

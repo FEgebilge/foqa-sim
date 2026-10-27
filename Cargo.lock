@@ -1236,15 +1236,19 @@ version = "0.2.0"
 dependencies = [
  "capture",
  "challenge",
+ "chrono",
  "debrief",
  "serde",
  "serde_json",
+ "sha2",
  "tauri",
  "tauri-build",
  "tauri-plugin-autostart",
  "tauri-plugin-dialog",
  "tauri-plugin-notification",
  "tauri-plugin-single-instance",
+ "tempfile",
+ "uuid",
 ]
 
 [[package]]

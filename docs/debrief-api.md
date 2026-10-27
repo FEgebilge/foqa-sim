@@ -23,6 +23,16 @@ the recording; units are in the field names.
 | `setup_remove(package: string)` | `SetupStatus` | Removes an in-sim package from the Community folder |
 | `setup_use_community(path: string \| null)` | `SetupStatus` | Uses that Community folder from now on; `null` goes back to the found install's |
 | `setup_pick_community()` | `SetupStatus` | Asks for the Community folder in a folder dialog; cancelling changes nothing |
+| `challenges_list()` | `ChallengeEntry[]` | The local challenge library, by title |
+| `challenge_import()` | `ChallengeEntry \| null` | Asks for a challenge file, checks it with `Challenge::parse` and keeps it; `null` when cancelled; errors in plain words |
+| `challenge_remove(key)` | `void` | Forgets a challenge; its attempts stay |
+| `challenge_briefing(key)` | `Briefing` | The entry and its definition as written |
+| `challenge_preflight(key)` | `PreflightLine[]` | The pre-flight card ([protocol](challenge-protocol.md) B8): sim, aircraft, weather, ranking |
+| `attempt_start(key)` | `AttemptRecord` | Creates an attempt and places the aircraft (`place_challenge`'s path), or arms a `self` start; a failed placement leaves it `failed_start` |
+| `attempt_fly_again(id)` | `AttemptRecord` | Abandons the attempt if still open (`replaced`) and starts the same definition again |
+| `attempt_finish(id)` | `AttemptRecord` | Ends the attempt and grades it from its flight (`challenge::evaluate`) |
+| `attempt_abandon(id)` | `AttemptRecord` | Abandons an open attempt (`cancelled`) |
+| `attempts_list()` | `AttemptView[]` | Every attempt with its local grade and log, newest first |
 
 ## Events (backend → frontend)
 
@@ -32,6 +42,9 @@ the recording; units are in the field names.
 | `flight-saved` | `FlightSummary` | A flight was closed and analysed |
 | `landing` | `LandingNotice` | Seconds after a touchdown (also a Windows notification) |
 | `open-flight` | `{ flight_id: string }` | The window was opened on a flight (a landing notification was clicked): show its debrief |
+| `attempt-changed` | `AttemptRecord` | An attempt changed state |
+
+Challenges and attempts are kept in `%APPDATA%\com.egebilge.foqa-sim`: `challenges\<id>-v<version>.json` (the bytes imported) and `attempts\<uuid>\` with `attempt.json`, `challenge.json`, `result.local.json` and the append-only `log.jsonl` (protocol B5; the types are in `app/src/types.ts`). Until the recording carries the attempt marker, an attempt grades only a landing after the sim time its flight had reached when it was placed (`begin_s`). After a landing the attempt is graded 120 s later, on Finish, or when the flight closes; a flight closed before the landing abandons it. At start-up an attempt left between placing and its grade is graded from its flight (`recovered`) if it landed, else abandoned (`interrupted`).
 
 Flights are recorded to `Documents\FOQA-Sim\flights`. A closed flight's
 journal is compacted to a `.fqz` file (about a tenth of the size) and the

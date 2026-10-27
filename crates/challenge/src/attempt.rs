@@ -57,7 +57,7 @@ struct Graded {
 
 /// Grades the analysed flight as an attempt at `challenge`.
 pub fn evaluate(challenge: &Challenge, a: &Analysis) -> Attempt {
-    let mut checks = vec![aircraft(challenge, a)];
+    let mut checks = vec![aircraft_check(challenge, a)];
     let graded = landing(challenge, a, &mut checks);
     Attempt {
         challenge: challenge.id.clone(),
@@ -70,7 +70,9 @@ pub fn evaluate(challenge: &Challenge, a: &Analysis) -> Attempt {
     }
 }
 
-fn aircraft(c: &Challenge, a: &Analysis) -> Check {
+/// Whether the flight's aircraft is one the challenge allows; also the
+/// app's pre-flight check on the flight being recorded.
+pub fn aircraft_check(c: &Challenge, a: &Analysis) -> Check {
     let (class, icao) = (a.selection.class, a.selection.icao.as_deref());
     let rule = &c.aircraft;
     let class_ok = rule.classes.is_empty() || class.is_some_and(|k| rule.classes.contains(&k));

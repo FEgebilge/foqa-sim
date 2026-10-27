@@ -6,7 +6,9 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod attempts;
 mod commands;
+mod library;
 mod setup;
 
 use std::sync::Arc;
@@ -15,8 +17,10 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use ::debrief::{LandingNotice, RecorderStatus, Station};
+use attempts::Attempts;
 use capture::{Happening, Service};
 use commands::{Shared, lock};
+use library::Library;
 use serde::Serialize;
 use setup::Setup;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
@@ -47,6 +51,16 @@ fn main() {
             commands::debrief,
             commands::delete_flight,
             commands::place_challenge,
+            commands::challenges_list,
+            commands::challenge_import,
+            commands::challenge_remove,
+            commands::challenge_briefing,
+            commands::challenge_preflight,
+            commands::attempt_start,
+            commands::attempt_fly_again,
+            commands::attempt_finish,
+            commands::attempt_abandon,
+            commands::attempts_list,
             commands::recorder_status,
             commands::open_flights_folder,
             commands::storage_usage,
@@ -69,10 +83,21 @@ fn main() {
                 .name("recorder".into())
                 .spawn(move || service.run(tx))?;
             let setup = Setup::new(app.path().app_config_dir()?, app.path().resource_dir().ok());
+            // Challenges and attempts live with the app's data, out of synced Documents.
+            let data = app.path().app_data_dir()?;
+            let library = Library::new(data.join("challenges"))?;
+            let handle = app.handle().clone();
+            let attempts = Attempts::new(data.join("attempts"))?.on_change(move |record| {
+                if let Err(e) = handle.emit("attempt-changed", record) {
+                    eprintln!("event not sent: {e}");
+                }
+            });
             let shared = Arc::new(Shared::new(
-                station, dir, stopper, index, recorder, setup, sim,
+                station, dir, stopper, index, recorder, setup, sim, library, attempts,
             ));
             app.manage(Arc::clone(&shared));
+            let recover = Arc::clone(&shared);
+            thread::spawn(move || recover.recover());
             // After an update, the in-sim packages follow the app's version.
             let refresh = Arc::clone(&shared);
             thread::spawn(move || {
@@ -114,7 +139,7 @@ fn main() {
 
 /// Hands what the recorder reports to the tray, the window and the
 /// notification centre, until the recorder is gone.
-fn relay(app: &AppHandle, shared: &Shared, tray: &Tray, happenings: Receiver<Happening>) {
+fn relay(app: &AppHandle, shared: &Arc<Shared>, tray: &Tray, happenings: Receiver<Happening>) {
     for happening in happenings {
         let sent = match happening {
             Happening::Status(status) => {
@@ -122,8 +147,12 @@ fn relay(app: &AppHandle, shared: &Shared, tray: &Tray, happenings: Receiver<Hap
                 *lock(&shared.status) = status.clone();
                 app.emit("recorder-status", status)
             }
-            Happening::FlightSaved(summary) => app.emit("flight-saved", summary),
+            Happening::FlightSaved(summary) => {
+                shared.flight_closed(&summary.id);
+                app.emit("flight-saved", summary)
+            }
             Happening::Landing(notice) => {
+                shared.landed(&notice);
                 notify(app, &notice);
                 app.emit("landing", notice)
             }
