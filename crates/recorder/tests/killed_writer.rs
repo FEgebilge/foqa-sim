@@ -34,7 +34,8 @@ fn writer_until_killed() {
 
 #[test]
 fn killed_writer_leaves_a_readable_journal() {
-    let path = env::temp_dir().join(format!("foqa-kill-{}.fqj", std::process::id()));
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("kill.fqj");
     let mut child = Command::new(env::current_exe().unwrap())
         .args(["writer_until_killed", "--exact", "--ignored"])
         .env(PATH_VAR, &path)
@@ -60,6 +61,5 @@ fn killed_writer_leaves_a_readable_journal() {
         count += 1;
     }
     drop(reader);
-    fs::remove_file(&path).unwrap();
     assert!(count > 3000, "only {count} samples survived");
 }

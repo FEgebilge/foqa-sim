@@ -1,21 +1,21 @@
 //! Records the M1 C172 traffic pattern through the whole on-board chain
 //! (wiring, FDAU, journal) and checks what reads back.
 
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use fdm_core::{Lfl, Sample, SimTime};
 use recorder::{JournalReader, Record, Recorder, ReplaySource, TOUCHDOWN_WINDOW_US};
 
-const C172: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../fixtures/c172-pattern.raw.jsonl.gz"
-);
+fn c172() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/c172-pattern.raw.jsonl.gz")
+}
 
 fn recorded() -> &'static [Sample] {
     static OUT: OnceLock<Vec<Sample>> = OnceLock::new();
     OUT.get_or_init(|| {
         let mut recorder = Recorder::new(&Lfl::V1, Vec::new()).unwrap();
-        let mut source = ReplaySource::open(C172, recorder.acquisition()).unwrap();
+        let mut source = ReplaySource::open(c172(), recorder.acquisition()).unwrap();
         recorder.run(&mut source).unwrap();
         let journal = recorder.into_inner();
         let mut reader = JournalReader::new(&journal[..]).unwrap();

@@ -187,8 +187,6 @@ fn invalid(msg: &str) -> io::Error {
 
 #[cfg(test)]
 mod tests {
-    use std::{env, fs, process};
-
     use fdm_core::Lfl;
 
     use super::*;
@@ -209,7 +207,8 @@ mod tests {
             Telemetry::Event(SimEvent::Aircraft(crate::aircraft_json::tests::c172())),
             Telemetry::Event(SimEvent::PilotReport("go-around, traffic".into())),
         ];
-        let path = env::temp_dir().join(format!("foqa-raw-{}.jsonl.gz", process::id()));
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("raw.jsonl.gz");
         let mut writer = RawWriter::create(&path, acq.columns()).unwrap();
         items.iter().for_each(|item| writer.write(item).unwrap());
         writer.finish().unwrap();
@@ -219,7 +218,6 @@ mod tests {
         while let Some(item) = source.recv().unwrap() {
             replayed.push(item);
         }
-        fs::remove_file(&path).unwrap();
         // NaN != NaN, so compare frames through their debug text.
         assert_eq!(format!("{replayed:?}"), format!("{items:?}"));
     }

@@ -1,23 +1,23 @@
 //! Ground-segment analysis of the M1 C172 traffic pattern, recorded through
 //! the on-board chain from its raw capture.
 
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use analyzer::{Flight, Phase, Track, phases, touchdowns};
 use fdm_core::Lfl;
 use recorder::{Recorder, ReplaySource};
 
-const C172: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../fixtures/c172-pattern.raw.jsonl.gz"
-);
+fn c172() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/c172-pattern.raw.jsonl.gz")
+}
 
 fn flight() -> &'static (Flight, Track) {
     static FLIGHT: OnceLock<(Flight, Track)> = OnceLock::new();
     FLIGHT.get_or_init(|| {
         let mut recorder = Recorder::new(&Lfl::V1, Vec::new()).unwrap();
         recorder
-            .run(&mut ReplaySource::open(C172, recorder.acquisition()).unwrap())
+            .run(&mut ReplaySource::open(c172(), recorder.acquisition()).unwrap())
             .unwrap();
         let flight = Flight::read(&recorder.into_inner()[..]).unwrap();
         let track = Track::new(&flight).unwrap();

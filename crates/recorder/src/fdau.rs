@@ -163,6 +163,12 @@ fn emit(out: &mut Vec<Sample>, t: SimTime, i: usize, value: f64, ssm: Ssm) {
 mod tests {
     use super::*;
 
+    #[test]
+    fn v1_has_the_signals_the_fdau_needs() {
+        // `new` panics on a signal the LFL lacks.
+        Fdau::new(&Lfl::V1);
+    }
+
     fn frame(secs: f64, on_ground: f64) -> Conditioned {
         let mut values = vec![None; Lfl::V1.signals().len()];
         for name in ["alt.pressure", "air_ground"] {

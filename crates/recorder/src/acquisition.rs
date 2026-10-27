@@ -248,6 +248,12 @@ impl Acquisition {
 mod tests {
     use super::*;
 
+    #[test]
+    fn v1_resolves_every_wire() {
+        // `new` panics on a wire naming an unknown signal.
+        Acquisition::new(&Lfl::V1);
+    }
+
     fn frame(acq: &Acquisition, set: &[(&str, f64)]) -> Vec<f64> {
         let mut raw = vec![f64::NAN; acq.columns().len()];
         for &(simvar, v) in set {

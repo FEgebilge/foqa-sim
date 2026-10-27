@@ -122,7 +122,7 @@ impl Recording {
             let id = u16::try_from(get(&mut c)?).ok()?;
             let n = usize::try_from(get(&mut c)?).ok()?;
             // Every sample takes at least a time byte, 8 value bytes and an SSM.
-            if n > body.len() - c.position() as usize {
+            if n > (body.len() - c.position() as usize) / 10 {
                 return None;
             }
             let times: Vec<i64> = (0..n).map(|_| get_signed(&mut c)).collect::<Option<_>>()?;
@@ -291,7 +291,12 @@ fn get(c: &mut Cursor<&[u8]>) -> Option<u64> {
     let (mut n, mut shift) = (0u64, 0);
     loop {
         let byte = take(c, 1)?[0];
-        n |= u64::from(byte & 0x7f).checked_shl(shift)?;
+        let bits = u64::from(byte & 0x7f);
+        // The tenth byte may carry only the top bit of a u64.
+        if shift == 63 && bits > 1 || shift > 63 {
+            return None;
+        }
+        n |= bits << shift;
         if byte < 0x80 {
             return Some(n);
         }
@@ -395,8 +400,8 @@ mod tests {
 
     #[test]
     fn compacting_a_file_swaps_it_for_the_compact_flight() {
-        let dir = std::env::temp_dir().join(format!("foqa-compact-{}", std::process::id()));
-        fs::create_dir_all(&dir).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
         let path = dir.join("flight-1.fqj");
         let bytes = journal();
         fs::write(&path, &bytes).unwrap();
@@ -409,7 +414,17 @@ mod tests {
         fs::write(&path, &bytes[..bytes.len() - 5]).unwrap();
         assert_eq!(compact_file(&path).unwrap(), None);
         assert!(path.exists());
-        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn overlong_varints_are_rejected() {
+        let mut max = Vec::new();
+        put(&mut max, u64::MAX);
+        assert_eq!(get(&mut Cursor::new(&max[..])), Some(u64::MAX));
+        let mut over = vec![0xff; 9];
+        over.push(0x02);
+        assert_eq!(get(&mut Cursor::new(&over[..])), None);
+        assert_eq!(get(&mut Cursor::new(&[0x80; 11][..])), None);
     }
 
     #[test]

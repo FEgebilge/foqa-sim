@@ -2,6 +2,7 @@
 //! genuinely unstable (sim's own data: ~2800 fpm descent in a 42° banked
 //! turn through 1000 ft at 105–114 kt), and the events must say so.
 
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use analyzer::{Flight, Track};
@@ -9,10 +10,9 @@ use fdm_core::Lfl;
 use recorder::{Recorder, ReplaySource};
 use rules::{Level, ProfileSet, evaluate, load};
 
-const C172: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../fixtures/c172-pattern.raw.jsonl.gz"
-);
+fn c172() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/c172-pattern.raw.jsonl.gz")
+}
 const CORE: &str = include_str!("../../../rules/core.yaml");
 
 fn flight() -> &'static (Flight, Track) {
@@ -20,7 +20,7 @@ fn flight() -> &'static (Flight, Track) {
     FLIGHT.get_or_init(|| {
         let mut recorder = Recorder::new(&Lfl::V1, Vec::new()).unwrap();
         recorder
-            .run(&mut ReplaySource::open(C172, recorder.acquisition()).unwrap())
+            .run(&mut ReplaySource::open(c172(), recorder.acquisition()).unwrap())
             .unwrap();
         let flight = Flight::read(&recorder.into_inner()[..]).unwrap();
         let track = Track::new(&flight).unwrap();

@@ -138,8 +138,6 @@ fn describe(event: &SimEvent) -> (String, String) {
 
 #[cfg(test)]
 mod tests {
-    use std::{env, fs, process};
-
     use fdm_core::{Lfl, Sample, SignalId, SimTime};
     use parquet::file::reader::{FileReader, SerializedFileReader};
     use recorder::JournalWriter;
@@ -163,7 +161,8 @@ mod tests {
             .unwrap();
         let flight = Flight::read(&journal.into_inner()[..]).unwrap();
 
-        let path = env::temp_dir().join(format!("foqa-export-{}.parquet", process::id()));
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("export.parquet");
         write_samples(&flight, &path).unwrap();
         let reader = SerializedFileReader::new(File::open(&path).unwrap()).unwrap();
         let meta = reader.metadata().file_metadata();
@@ -173,7 +172,5 @@ mod tests {
             kv.iter()
                 .any(|kv| kv.key == "lfl_version" && kv.value.as_deref() == Some("1"))
         );
-        drop(reader);
-        fs::remove_file(path).unwrap();
     }
 }

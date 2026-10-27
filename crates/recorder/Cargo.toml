@@ -13,3 +13,6 @@ fdm-core = { path = "../fdm-core" }
 flate2 = "1"
 serde_json = "1"
 zstd = "0.14"
+
+[dev-dependencies]
+tempfile = "3"

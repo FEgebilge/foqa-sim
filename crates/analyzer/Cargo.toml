@@ -13,3 +13,6 @@ arrow-schema = "60.0.0"
 fdm-core = { path = "../fdm-core" }
 parquet = { version = "60.0.0", default-features = false, features = ["arrow", "snap"] }
 recorder = { path = "../recorder" }
+
+[dev-dependencies]
+tempfile = "3"
