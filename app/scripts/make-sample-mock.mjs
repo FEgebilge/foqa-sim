@@ -359,7 +359,7 @@ function landing2({ touchdowns, events, samples, phases, lastT, cls, legacy }) {
       const unit = { A1: "kt", A2: "fpm", A3: "deg", B1: "ft", B2: "kt", C1: "ft", D1: "ft", E1: "g", E2: "fpm", E5: "deg", F2: "g" }[id]
       const text = (x) => (x === null ? null : valueText(id, unit, x))
       value = round1(value * 100) / 100
-      crit.push({ id, title: CRITERIA[id].title, height, value, value_text: text(value),
+      crit.push({ id, title: CRITERIA[id].title, height, value, value_text: id === "C1" && value && text(value) !== "0.0 ft" ? `${text(Math.abs(value)).replace(/^\+/, "")} ${value < 0 ? "before" : "past"} the target` : text(value),
         height_text: height === "all" ? null : height === "above" ? `above ${split} ft` : `below ${split} ft`, unit,
         ell, level: Math.min(3, Math.floor(ell)), loss: curveAt(LOSS, ell), bands: { above, below }, bands_text: { above: above.map(text), below: below.map(text) }, standard: CRITERIA[id].source, sets: false })
     }

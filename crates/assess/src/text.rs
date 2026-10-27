@@ -58,6 +58,17 @@ pub fn number(x: f64, digits: usize) -> String {
     format!("{sign}{grouped}{frac}")
 }
 
+/// A criterion's measured value as read in an item: `value_text`, except the
+/// touchdown point, which says its side ("46 ft before the target").
+pub fn reading_text(id: &str, unit: Option<&str>, x: f64) -> String {
+    let text = value_text(id, unit, x);
+    if id != "C1" || text.starts_with('0') {
+        return text;
+    }
+    let side = if x < 0.0 { "before" } else { "past" };
+    format!("{} {side} the target", text.trim_start_matches(['+', '-']))
+}
+
 /// Where in the approach window a criterion was graded: "above 300 ft",
 /// "below 300 ft"; `None` for one graded over the whole window.
 pub fn height_text(height: Height, split_ft: f64) -> Option<String> {
@@ -133,6 +144,16 @@ mod tests {
         for (id, unit, x, want) in cases {
             assert_eq!(value_text(id, unit, x), want, "{id} {x}");
         }
+        assert_eq!(
+            reading_text("C1", Some("ft"), -46.4),
+            "46 ft before the target"
+        );
+        assert_eq!(
+            reading_text("C1", Some("ft"), 558.0),
+            "558 ft past the target"
+        );
+        assert_eq!(reading_text("C1", Some("ft"), 0.02), "0.0 ft");
+        assert_eq!(reading_text("A1", Some("kt"), 12.4), "+12 kt");
         assert_eq!(number(1_234_567.891, 2), "1,234,567.89");
         assert_eq!(number(-0.4, 0), "0");
         assert_eq!(number(-0.04, 1), "0.0");

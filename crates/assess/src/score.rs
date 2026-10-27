@@ -8,7 +8,7 @@ use serde::Serialize;
 
 use crate::method::{Context, Criterion, Height, Method};
 use crate::scale::{ell, level, sides};
-use crate::text::{height_text, item_text, list, number, value_text, with_level};
+use crate::text::{height_text, item_text, list, number, reading_text, with_level};
 
 /// A measured value of one criterion.
 #[derive(Debug, Clone, PartialEq)]
@@ -339,7 +339,7 @@ impl Method {
         let def = self.criterion(&c.id).expect("a scored criterion");
         let value = def
             .unit
-            .map(|u| value_text(&c.id, Some(u.symbol()), c.value))
+            .map(|u| reading_text(&c.id, Some(u.symbol()), c.value))
             .unwrap_or_default();
         let height = height_text(c.height, split);
         with_level(&item_text(&def.title, &value, height.as_deref()), c.level)

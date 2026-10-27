@@ -597,10 +597,10 @@
               "criteria": [
                 {
                   "id": "C1",
-                  "title": "Touchdown past the target",
+                  "title": "Touchdown",
                   "height": "all",
                   "value": -46.152217897522014,
-                  "value_text": "-46 ft",
+                  "value_text": "46 ft before the target",
                   "height_text": null,
                   "unit": "ft",
                   "ell": 0.23076108948761007,
@@ -644,7 +644,7 @@
               ],
               "findings": [],
               "sets_by": "C1",
-              "set_by_text": "Touchdown past the target -46 ft"
+              "set_by_text": "Touchdown 46 ft before the target"
             },
             {
               "id": "lateral",

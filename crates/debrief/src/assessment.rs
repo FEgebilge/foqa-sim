@@ -3,11 +3,11 @@
 //! flight graded by its last full-stop landing (Decision 3) and the rest of
 //! the flight. A flight without a scored landing keeps the points method.
 
-pub use assess::value_text;
 use assess::{
     CapKind, Height, Landing, LandingScore, Measures, Method, SpeedSource, Speeds, height_text,
     item_text, number,
 };
+pub use assess::{reading_text, value_text};
 use rules::{Domain, Level, ScoringClass};
 
 use crate::wire::{
@@ -191,7 +191,7 @@ fn domains(
                         title: def.title.clone(),
                         height: c.height,
                         value: c.value,
-                        value_text: text(c.value),
+                        value_text: reading_text(&c.id, unit, c.value),
                         height_text,
                         unit,
                         ell: c.ell,

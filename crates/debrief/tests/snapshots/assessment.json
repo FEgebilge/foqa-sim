@@ -651,7 +651,7 @@
               "loss": 0.0,
               "sets": false,
               "standard": "S2 aiming point -250/+500 ft; S3/S4 0/+400 and +200 ft; S7 deep landing; S9 at least 1000 ft; long-landing (L2), short-landing (L3); rest est",
-              "title": "Touchdown past the target",
+              "title": "Touchdown",
               "unit": "ft",
               "value": 0.0,
               "value_text": "0.0 ft"

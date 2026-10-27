@@ -198,6 +198,7 @@ interface AssessmentDetail {
 interface CapNote {
   kind: "material" | "unstable" | "inspection" | "undershoot" | "excursion" | "flight";
   score: number;             // the most the score can be
+  title: string;             // the headline, e.g. "Unstable approach continued to a landing"
   reason: string;            // what caused it, e.g. "level 2 or more: A2 above, high-sink-light"
   source: string;
   landing?: number;          // index in `landings`
@@ -212,6 +213,9 @@ interface LandingAssessment {
   confidence: "full" | "partial" | null;
   class: "light" | "turboprop" | "jet" | null;   // the scoring class whose bands apply
   partial: string[];         // expected data that was missing, e.g. "No Vref for B738"
+  partial_note: string | null;   // the same in plain words (which items were not graded); null when nothing is missing
+  note: string | null;       // why an insufficient landing is not scored, in plain words
+  facts: string[];           // class, reference speeds and stable height in words, for the line under the title
   missing: string[];         // required data that was missing (insufficient)
   full_stop: boolean;        // false: a touch-and-go, no rollout scored, does not set the flight grade
   caps: CapNote[];
@@ -224,6 +228,8 @@ interface LandingAssessment {
 interface DomainAssessment {
   id: "stability" | "energy" | "point" | "lateral" | "contact" | "rollout";
   title: string;             // "Approach stability", …
+  short: string;             // the title in a word or two, for small bars
+  summary: string;           // what the domain looks at, in one line
   weight: number;            // 25, 10, 20, 15, 20, 10
   loss: number | null;       // 0-1 of the weight, its worst item's; null: n/a, its weight shared out
   points: number;            // points it cost, to 0.1
@@ -239,7 +245,7 @@ interface CriterionAssessment {
   title: string;
   height: "all" | "above" | "below";   // the half of the approach window (split 500 ft, light 300 ft)
   value: number;             // its worst value, in `unit`; offsets (A1, B1, B2, C1) signed
-  value_text: string;        // `value` as shown: "+12 kt" (offsets signed), "1.48 g", "0.8 dot", "1,562 fpm", "L2"
+  value_text: string;        // `value` as shown: "+12 kt" (offsets signed), "1.48 g", "0.8 dot", "1,562 fpm", "L2"; C1 names its side: "46 ft before the target", "558 ft past the target"
   height_text: string | null;   // "at or above 500 ft" / "below 500 ft"; null for "all"
   unit: string | null;       // null: a level 0-3 (A6, E3)
   ell: number;               // continuous level 0-3: 0 ideal, 0.5 tolerance edge, 1-3 the FDM levels

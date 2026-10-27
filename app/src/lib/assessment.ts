@@ -93,7 +93,6 @@ export function againstText(c: CriterionAssessment, landing: LandingAssessment) 
   const speed = s ? (landing.class === "light" ? `approach speed ${number(s.vapp_kt)}` : `reference speed ${number(s.vref_kt)}`) : "";
   if (c.id === "A1" || c.id === "B2") return speed ? `vs ${speed} kt` : "";
   if (c.id === "B1") return "vs 50 ft over the threshold";
-  if (c.id === "C1") return "vs the aiming point";
   return "";
 }
 
