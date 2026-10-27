@@ -31,9 +31,10 @@ impl SimTime {
         self.0 - earlier.0
     }
 
-    /// This time shifted by `us` microseconds.
+    /// This time shifted by `us` microseconds, held at the ends of the
+    /// range: a crafted time near them never wraps.
     pub const fn add_us(self, us: i64) -> Self {
-        Self(self.0 + us)
+        Self(self.0.saturating_add(us))
     }
 }
 
@@ -58,5 +59,11 @@ mod tests {
         let t = SimTime::from_micros(5_000_000);
         assert_eq!(t.us_since(SimTime::from_micros(2_000_000)), 3_000_000);
         assert_eq!(t.add_us(-500_000), SimTime::from_micros(4_500_000));
+        let last = SimTime::from_micros(i64::MAX - 1);
+        assert_eq!(last.add_us(5_000_000), SimTime::from_micros(i64::MAX));
+        assert_eq!(
+            SimTime::from_micros(i64::MIN + 1).add_us(-10_000_000),
+            SimTime::from_micros(i64::MIN)
+        );
     }
 }

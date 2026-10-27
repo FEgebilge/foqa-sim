@@ -15,13 +15,23 @@ export interface Aircraft {
 
 export type Grade = "good" | "fair" | "poor";
 
-/** The flight graded as a whole: each rule broken counts once at its worst level (high 4 points, medium 2, low 1, advisory 0). */
+/**
+ * The flight graded as a whole: by landing-2 (docs/scoring.md) when a landing was scored (`score` 0-100), else by the
+ * points method. `points` and `findings` are the points method's (each rule broken counts once at its worst level: high 4,
+ * medium 2, low 1, advisory 0), kept for one release; older summaries have no `method`.
+ */
 export interface Assessment {
   grade: Grade;
   points: number;
   /** Rules broken at low or above. */
   findings: number;
+  method?: "landing-2" | "points";
+  score?: number;
+  confidence?: Confidence;
 }
+
+export type Confidence = "full" | "partial";
+
 
 /** One rule's share of the assessment: its worst level in the flight alone counts. */
 export interface AssessmentPart {
@@ -39,11 +49,113 @@ export interface GradeBand {
   up_to?: number;
 }
 
-/** How the assessment was reached: the parts, most points first, and the scale they are read on. */
+export type Domain = "stability" | "energy" | "point" | "lateral" | "contact" | "rollout";
+export type ScoringClass = "light" | "turboprop" | "jet";
+
+/** A safety cap on a landing, or (`kind: "flight"`) why the flight's score is below its grading landing's. */
+export interface CapNote {
+  kind: "material" | "unstable" | "inspection" | "undershoot" | "excursion" | "flight";
+  score: number;
+  reason: string;
+  source: string;
+  /** Index in `AssessmentDetail.landings`. */
+  landing?: number;
+}
+
+/** [ideal, tolerance, L1, L2, L3] at levels 0, 0.5, 1, 2, 3; `above` grades larger values, `below` smaller; null: absent. */
+export type Anchors = [number | null, number | null, number | null, number | null, number | null];
+
+export interface CriterionAssessment {
+  id: string;
+  title: string;
+  /** The half of the approach window it was graded in. */
+  height: "all" | "above" | "below";
+  /** The worst value in `unit` (none: a level). */
+  value: number;
+  /** `value` as shown: "+12 kt", "1.48 g", "L2". */
+  value_text: string;
+  /** "at or above 500 ft" for a criterion graded on one half of the approach window; null for `all`. */
+  height_text: string | null;
+  unit: string | null;
+  /** Continuous level 0-3. */
+  ell: number;
+  level: number;
+  loss: number;
+  bands: { above: Anchors; below: Anchors };
+  /** Each anchor as shown, like `value_text`. */
+  bands_text: { above: (string | null)[]; below: (string | null)[] };
+  standard: string;
+  /** It set its domain's deduction. */
+  sets: boolean;
+}
+
+export interface FindingAssessment {
+  /** Index in `Debrief.events`. */
+  event: number | null;
+  rule: string;
+  level: Level;
+  ell: number;
+  loss: number;
+  sets: boolean;
+}
+
+export interface DomainAssessment {
+  id: Domain;
+  title: string;
+  weight: number;
+  /** Fraction of the weight lost; null: n/a, its weight shared out. */
+  loss: number | null;
+  /** Points it cost. */
+  points: number;
+  level: number;
+  criteria: CriterionAssessment[];
+  findings: FindingAssessment[];
+  sets_by: string | null;
+  /** The item that set the deduction, in words: "Descent rate 1,562 fpm at or above 300 ft" or the event's title. */
+  set_by_text: string | null;
+}
+
+export interface LandingAssessment {
+  t_s: number;
+  status: "scored" | "insufficient";
+  score: number | null;
+  raw: number | null;
+  grade: Grade | null;
+  confidence: Confidence | null;
+  class: ScoringClass | null;
+  partial: string[];
+  missing: string[];
+  /** false: a touch-and-go, scored without its rollout, not setting the flight grade. */
+  full_stop: boolean;
+  caps: CapNote[];
+  stable_from_ft: number | null;
+  /** The approach window's split height for its class; null when insufficient. */
+  split_ft: number | null;
+  speeds: { vref_kt: number; vapp_kt: number; source: "profile" | "selected"; approximate: boolean; basis: string } | null;
+  domains: DomainAssessment[];
+}
+
+/**
+ * How the assessment was reached (docs/scoring.md §7.5): each landing in six domains, the caps and the rest of the flight.
+ * `method: "points"` (no scored landing, or an older backend without `landings`) grades by the parts and bands.
+ */
 export interface AssessmentDetail {
+  method?: "landing-2" | "points";
+  score?: number | null;
+  grade?: Grade;
+  confidence?: Confidence | null;
+  caps?: CapNote[];
+  graded_by?: number | null;
+  landings?: LandingAssessment[];
+  /** Indices in `Debrief.events` outside every landing. */
+  other_findings?: number[];
+  legacy_points?: number;
+  legacy_findings?: number;
   parts: AssessmentPart[];
   bands: GradeBand[];
+  grades?: { good: number; fair: number };
 }
+
 
 export interface FlightSummary {
   id: string;
@@ -230,4 +342,99 @@ export interface SetupStatus {
   sims: SimInstall[];
   community: string | null;
   choice: "found" | "install" | "folder";
+}
+
+// Landing challenges (docs/challenges.md) and their local attempts (docs/challenge-protocol.md B5, B8).
+
+/** A challenge file kept in the local library. */
+export interface ChallengeEntry {
+  key: string;            // "<id>-v<version>"
+  id: string;
+  version: number;
+  title: string;
+  airport: string;
+  runway: string;
+  sha256: string;         // of the stored definition bytes
+}
+
+type Band = { min?: number; max?: number };
+
+/** The challenge JSON as written (docs/challenges.md). */
+export interface ChallengeDefinition {
+  id: string;
+  version: number;
+  title: string;
+  window?: { from: string; to: string };
+  airport: string;
+  runway: string;
+  aircraft?: { classes?: ("light" | "transport")[]; types?: string[] };
+  start: { distance_nm: number; height_ft: number; ias_kt: number; gear_down?: boolean; flaps?: number; mode: "teleport" | "self" };
+  gate: { distance_nm: number };
+  conditions?: {
+    wind?: { from_deg: number; speed_kt: number; tolerance_deg: number; tolerance_kt: number };
+    crosswind_kt?: Band;
+    tailwind_kt?: Band;
+    preset?: string;
+  };
+  rules?: { ap_off_by_height_ft?: number; stop_on_runway?: boolean };
+  scoring: { version: string };
+}
+
+export interface Briefing extends ChallengeEntry {
+  definition: ChallengeDefinition;
+}
+
+export interface PreflightLine {
+  name: "sim" | "aircraft" | "weather" | "ranking";
+  state: "ok" | "warn" | "fail" | "unknown";
+  text: string;
+  fix?: string;
+}
+
+export type AttemptState = "created" | "placing" | "failed_start" | "flying" | "approach" | "rollout" | "finished" | "graded_local" | "sliced" | "done" | "abandoned";
+
+/** `attempt.json`. */
+export interface AttemptRecord {
+  id: string;
+  key: string;
+  challenge: string;
+  version: number;
+  title: string;
+  definition_sha256: string;
+  n: number;              // attempt number on this challenge on this PC
+  state: AttemptState;
+  created_at: string;
+  updated_at: string;
+  flight_id: string | null;
+  ref?: string | null;    // the attempt marker's reference (A7); null for a local attempt
+  begin_s: number | null;
+  touchdown_s: number | null;
+  reason: string | null;  // why it finished or was abandoned
+  slice_failed?: string;  // why its slice can never be cut (no_marker, no_flight): done, never uploaded
+}
+
+/** The local grade (`challenge::Attempt`). */
+export interface AttemptResult {
+  challenge: string;
+  challenge_version: number;
+  aircraft?: { icao: string | null; class: string | null };
+  marker?: { ref: string | null; begin_s: number; end_s: number | null } | null;
+  valid: boolean;
+  checks: { name: string; ok: boolean; detail: string }[];
+  gate_s: number | null;
+  touchdown_s: number | null;
+  score: { version: string; total: number; parts: { name: string; weight: number; score: number; value: number | null; unit: string }[] } | null;
+}
+
+/** One line of `log.jsonl`. */
+export interface AttemptLogLine {
+  at: string;
+  seq: number;
+  event: string;
+  [field: string]: unknown;
+}
+
+export interface AttemptView extends AttemptRecord {
+  result: AttemptResult | null;
+  log: AttemptLogLine[];
 }

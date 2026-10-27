@@ -35,6 +35,8 @@ Gzip-compressed UTF-8 JSON lines.
    - Aircraft identity: `{"event":"Aircraft","aircraft":{...}}`, the object
      described under [Aircraft identity](#aircraft-identity).
    - Pilot report: `{"event":"PilotReport","note":"..."}`.
+   - Attempt marker: `{"event":"Attempt","marker":{...}}`, the object
+     described under [Attempt marker](#attempt-marker).
 
 Replay matches columns to the current wiring by SimVar and unit. A column
 missing from an older capture yields no value for the parameters it feeds.
@@ -74,14 +76,37 @@ Appended one after another until the end of the file:
 | Field | Type | |
 |---|---|---|
 | t | i64 | Sim time of the last frame before the event, µs |
-| code | u8 | `1` sim start, `2` sim stop, `3` crashed, `4` flight loaded, `5` airport snapshot, `6` aircraft identity, `7` pilot report, `32 + n` MSFS flow event `n` (`SIMCONNECT_FLOW_EVENT`) |
-| text | UTF-8, rest of payload | Flight file for code `4`, airport snapshot JSON for code `5`, aircraft identity JSON for code `6`, the pilot's note for code `7` (may be empty), else empty |
+| code | u8 | `1` sim start, `2` sim stop, `3` crashed, `4` flight loaded, `5` airport snapshot, `6` aircraft identity, `7` pilot report, `8` attempt marker, `32 + n` MSFS flow event `n` (`SIMCONNECT_FLOW_EVENT`) |
+| text | UTF-8, rest of payload | Flight file for code `4`, airport snapshot JSON for code `5`, aircraft identity JSON for code `6`, the pilot's note for code `7` (may be empty), attempt marker JSON for code `8`, else empty |
 
 A **pilot report** (code `7`) marks a moment the pilot chose in the in-sim
 panel (`mark`, [ingame-panel.md](ingame-panel.md)), stamped like any
 event with the last frame's time. Readers that predate it skip it as an
 unknown code. The debrief lists it as an advisory event
 ([debrief-api.md](debrief-api.md)).
+
+### Attempt marker
+
+Where an attempt at a landing challenge begins (the aircraft placed, or a
+`self` attempt armed) and ends (finished or abandoned)
+([challenge-protocol.md](challenge-protocol.md) A7). Written by the app
+through the recorder into the open flight, stamped with the last frame's
+time; never into a flight that is not open. Readers that predate it skip
+it as an unknown code. One JSON object:
+
+| Key | | |
+|---|---|---|
+| `phase` | string | `begin` or `end` |
+| `challenge`, `version` | string, integer | The challenge flown |
+| `ref` | string or `null` | Opaque, chosen by the caller, `^[A-Za-z0-9_-]{8,64}$`; `null` for a local attempt. The recorder gives it no meaning |
+| `reason` | string | `end` only: `stopped`, `abandoned`, `replaced`, `flight_closed`, … |
+
+```json
+{"challenge":"ltfj-06-gusty-2026w44","phase":"begin","ref":"Qe3v1hJ0dEa9fP2kLm7xRw","version":1}
+```
+
+Unknown keys are ignored; an unknown `phase`, a malformed `ref` or a
+missing key makes the packet undecodable (damage, below).
 
 ### Airport snapshot
 
@@ -161,7 +186,8 @@ not carried over.
 The rest of the file is one zstd frame (level 19, with its content
 checksum) around the body below. A frame that fails to decompress, or a
 body that does not decode exactly, is an error: unlike a journal, a compact
-flight is never cut short.
+flight is never cut short. A reader refuses a body past 256 MiB, and
+past 32 MiB for a challenge input (`fdm challenge`, `fdm slice`).
 
 ### Body
 
@@ -189,6 +215,29 @@ event codes are skipped, as in the journal.
 On the 11-minute flight used to choose the format, the journal was
 3.80 MB and the compact flight 0.32 MB (8.5 %).
 
+## Recording slice
+
+The part of a flight a site receives for one attempt
+([challenge-protocol.md](challenge-protocol.md) A5): a compact flight v1,
+cut by `recorder::slice` (`fdm slice`, and the app when an attempt is
+sliced). By marker `ref`, the window runs from 10 s before the attempt's
+latest `begin` marker to 5 s after the `end` marker that follows it, or to
+the end of the data without one. It holds:
+
+- every sample inside the window, plus each parameter's last sample before
+  it; sim times are not rebased;
+- the aircraft identity in force at the window start and any change inside
+  it, with `title` and `atc_id` blanked (`atc_model` and `atc_type` kept);
+- the airport snapshots recorded inside the window, plus the latest earlier
+  snapshot of each airport whose reference point is within 10 km of a
+  position recorded inside the window (the challenge's runway);
+- the sim events inside the window, and of the attempt markers only the
+  attempt's own (every marker when cut by time range).
+
+Never: the flight-loaded event (a local file path), pilot reports,
+anything else outside the window. The same input gives the same bytes, so
+its SHA-256 is stable.
+
 ## Flight index
 
 `index.json` in the flights folder caches the app's flight list
@@ -205,9 +254,11 @@ stale file is rebuilt from the flights, and it can be deleted at any time.
 }
 ```
 
-- `station`: hash of the rule set, the type profiles and the build (the
-  running executable's size and modification time). Any change drops every
-  entry, so new rules or code regrade every flight.
+- `station`: hash of the rule set, the type profiles, the landing
+  assessment method (`scoring/landing-2.yaml`) and the analysis source
+  (`crates/debrief/build.rs`). Any change drops every entry, so new rules,
+  bands or code regrade every flight.
+
 - `flights`: by file name, compact flights only (a journal may still be
   recording). An entry is used while the file's `len` (bytes) and
   `modified_ns` (modification time, ns since the Unix epoch) are unchanged;

@@ -217,7 +217,8 @@ var FoqaHistory = (function () {
         if (!d) return head + '<div class="body">' + this.stateHtml("the debrief") + "</div>";
         var f = d.flight, events = d.events;
         var html = '<div class="dhead lvl-' + grade(f.grade)[1] + '"><div class="title">' + esc(route(f)) + "</div>" +
-            '<div class="assess">' + gradeTag(f.grade) + '<span class="why">' + assessText(f) + "</span></div>" +
+            '<div class="assess">' + scoreHtml(f) + gradeTag(f.grade) + '<span class="why">' + assessText(f) + "</span></div>" +
+            barsHtml(f) +
             this.partsHtml(f) +
             '<div class="facts">' +
             fact("Date", when(f.started_utc)) + fact("Aircraft", f.aircraft) + fact("Time", clock(f.duration_s)) +
@@ -279,9 +280,33 @@ var FoqaHistory = (function () {
         return p.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/ (\w)/g, function (m, c) { return " " + c.toLowerCase(); });
     }
 
-    // "12 points from 5 findings": what the grade is made of.
+    // The landing-2 score (debrief-api.md), "77.4/100", before the grade.
+    function scoreHtml(f) {
+        if (f.score === undefined || f.score === null) return "";
+        return '<span class="score">' + f.score.toFixed(1) + '<span class="of">/100</span></span>';
+    }
+
+    // The grading landing's six domains as mini-bars (track as long as the weight, the share of it lost shaded in the
+    // level's colour, labelled with the points lost) and the largest deduction in one line.
+    var DOMAIN_SHORT = ["Approach", "Flare", "Point", "Lateral", "Contact", "Rollout"];
+    var BAR_LEVEL = ["none", "low", "medium", "high"];
+    function barsHtml(f) {
+        if (!f.bars || !f.bars.length) return "";
+        var html = '<div class="mbars">' + f.bars.map(function (b, i) {
+            var weight = b[0], lost = b[1], level = BAR_LEVEL[Math.min(3, b[2])] || "none", share = b[3] || 0;
+            var track = '<div class="mtrack' + (lost === null ? " na" : "") + '" style="width:' + (weight / 25 * 100).toFixed(0) + '%">' +
+                (share ? '<div class="mlost lvl-' + level + '" style="width:' + (Math.min(1, share) * 100).toFixed(0) + '%"></div>' : "") + "</div>";
+            return '<div class="mbar"><div class="mname">' + DOMAIN_SHORT[i] + '<span class="mpts">' +
+                (lost === null ? "n/a" : lost ? "−" + lost.toFixed(1) : "0") + "</span></div>" + track + "</div>";
+        }).join("") + "</div>";
+        return html + (f.top ? '<div class="mtop">' + esc(f.top) + "</div>" : "");
+    }
+
+    // "landing-2, partial data", or "12 points from 5 findings": what the grade is made of.
     function assessText(f) {
+        if (f.method === "landing-2") return "landing-2" + (f.confidence === "partial" ? " · partial data, not rankable" : "");
         if (!f.findings) return "No findings at low or above";
+
         return f.points + (f.points === 1 ? " point" : " points") + " from " + f.findings +
             (f.findings === 1 ? " finding" : " findings") + " · each rule counts once, at its worst level";
     }
@@ -408,5 +433,7 @@ var FoqaHistory = (function () {
         return h;
     }
 
-    return { MSG: MSG, attach: attach };
+    var api = { MSG: MSG, attach: attach, barsHtml: barsHtml };
+    if (typeof module !== "undefined" && module.exports) module.exports = api;
+    return api;
 })();

@@ -1,0 +1,15 @@
+{
+  "attempt": {
+    "id": "0b7f3c52-9a1e-4d68-b2c4-7e5f9a0d1c83",
+    "ref": "Qe3v1hJ0dEa9fP2kLm7xRw",
+    "challenge_id": "test-20",
+    "challenge_version": 1,
+    "definition_sha256": "9ed69c5f0e84064dda2ef918eac92e60d1ab146ecdbef5037ed8b8dd0f34eb3f",
+    "issued_at": "2026-10-28T17:02:11Z",
+    "fly_within_s": 1800,
+    "upload_within_s": 86400,
+    "fly_by": "2026-10-28T17:32:11Z",
+    "upload_by": "2026-10-29T17:02:11Z"
+  },
+  "definition": {"id":"test-20","version":1,"title":"Runway 20","airport":"TEST","runway":"20","aircraft":{"types":["C172"]},"start":{"distance_nm":4,"height_ft":1300,"ias_kt":140,"gear_down":true,"flaps":1,"mode":"self"},"gate":{"distance_nm":3},"scoring":{"version":"landing-2"}}
+}

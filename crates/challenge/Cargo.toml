@@ -9,12 +9,13 @@ publish.workspace = true
 
 [dependencies]
 analyzer = { path = "../analyzer" }
+assess = { path = "../assess" }
 debrief = { path = "../debrief" }
 fdm-core = { path = "../fdm-core" }
+recorder = { path = "../recorder" }
 rules = { path = "../rules" }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1"
 
 [dev-dependencies]
-recorder = { path = "../recorder" }
 testkit = { path = "../testkit" }

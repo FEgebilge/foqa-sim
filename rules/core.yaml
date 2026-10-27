@@ -1,41 +1,97 @@
-# FOQA-Sim core rule set v1.
+# FOQA-Sim core rule set v2.
 #
 # Each document is one event definition. Thresholds name their source in the
 # description; "FOQA-Sim estimate" marks values without a published source.
 # Thresholds are exceeded strictly (`above` > value, `below` < value).
 # `detail` says the event in words; without it a numeric rule reads
 # "{value}, limit {threshold}".
+# `domain` is the part of a landing assessment an event counts toward
+# (docs/scoring.md 3). The approach rules follow EASA Data4Safety's
+# split at 500 ft (docs/scoring.md 2.5).
 # Language reference: docs/rules.md
 
-rule: unstable-speed-500
+rule: unstable-speed-above-500
 version: 1
-title: Approach speed off target at 500 ft
+title: Approach speed off Vref above 500 ft
+domain: stability
 description: >
-  IAS minus selected speed (the VAPP proxy) at the 500 ft stabilisation gate.
-  EASA EOFDM example: below -5 kt or above +10 kt; higher levels are a
-  FOQA-Sim estimate.
+  IAS against Vref (type profile: Vref table by gross weight and flap) from
+  1000 ft to 500 ft, held 3 s. EASA Data4Safety unstable-approach guidance
+  (Rev 00, 2022), first and second thresholds above 500 ft (SL1, SL2A):
+  above Vref+20 / Vref+35, below Vref-5 / Vref-10. Silent without a Vref.
 why_it_matters: >
   Too fast lengthens the flare and the landing roll and invites a float or
   long landing; too slow erodes the margin above the stall and leaves little
   energy for a go-around.
 advice: >
-  Set the target speed early and hold it within -5/+10 kt by 500 ft. If it
-  is not there by the gate, go around rather than chase it in the flare.
+  Fly the approach speed (Vref plus the wind additive) and have it set by
+  1000 ft; if it will not be there by the stabilisation gate, go around.
 phase: Approach
 aircraft: transport
-gate: height <= 500 ft
-when: sel.speed > 0 kt
-measure: ias - sel.speed
-detail: "{value} from the {sel.speed} target, limit {threshold}"
-above: { low: 10 kt, medium: 15 kt, high: 20 kt }
-below: { low: -5 kt, medium: -10 kt, high: -15 kt }
+when: height < 1000 ft and height >= 500 ft
+measure: ias - profile.vref
+detail: "{ias}, {value} from Vref {profile.vref}, limit {threshold}"
+sustain: 3 s
+above: { low: 20 kt, medium: 35 kt }
+below: { low: -5 kt, medium: -10 kt }
+---
+rule: unstable-speed-below-500
+version: 1
+title: Approach speed off Vref below 500 ft
+domain: stability
+description: >
+  IAS against Vref (type profile) from 500 ft to the flare, held 3 s. EASA
+  Data4Safety: below 500 ft the first and second thresholds are SL2B and
+  SL3 (above Vref+20 / Vref+35, below Vref-5 / Vref-10). Silent without a
+  Vref.
+why_it_matters: >
+  Off speed close to the ground there is no height left to correct: fast
+  means a float and a long landing, slow a hard landing or a tail strike.
+advice: >
+  Below 500 ft an approach off speed is unstable: go around rather than
+  chase the speed in the flare.
+phase: Approach
+aircraft: transport
+when: height < 500 ft
+measure: ias - profile.vref
+detail: "{ias}, {value} from Vref {profile.vref}, limit {threshold}"
+sustain: 3 s
+above: { medium: 20 kt, high: 35 kt }
+below: { medium: -5 kt, high: -10 kt }
+---
+rule: unstable-speed-light
+version: 1
+title: Approach speed off the published speed below 500 ft
+domain: stability
+description: >
+  IAS against the approach speed of the type profile (the middle of the
+  POH range for the flaps set, or 1.3 VSO) from 500 ft to the flare, held
+  3 s. The levels (+15/-7.5, +20/-10, +30/-15 kt) are a FOQA-Sim estimate
+  beyond the Private/Commercial ACS tolerance (+10/-5 kt). Silent without a
+  published speed.
+why_it_matters: >
+  Too fast floats down the runway; too slow leaves little margin above the
+  stall in the flare.
+advice: >
+  Trim for the POH approach speed for the flaps set and hold it to the
+  flare; off it at 500 ft, go around.
+phase: Approach
+aircraft: light
+when: height < 500 ft
+measure: ias - profile.vapp
+detail: "{ias}, {value} from {profile.vapp}, limit {threshold}"
+sustain: 3 s
+above: { low: 15 kt, medium: 20 kt, high: 30 kt }
+below: { low: -7.5 kt, medium: -10 kt, high: -15 kt }
 ---
 rule: unstable-sink-500
-version: 1
+version: 2
 title: High descent rate at 500 ft
+domain: stability
 description: >
-  Rate of descent at the 500 ft gate. EASA EOFDM / FSF ALAR stabilised
-  approach: no more than 1000 fpm; higher levels are a FOQA-Sim estimate.
+  Rate of descent at the 500 ft gate against the FSF ALAR stabilised
+  approach limit, 1000 fpm. An advisory: the descent below 500 ft is graded
+  by `high-sink-below-500` and `high-sink-light`.
 why_it_matters: >
   A steep, fast descent at 500 ft leaves little height to arrest the sink, a
   common precursor of hard and short landings.
@@ -47,13 +103,16 @@ phase: Approach
 gate: height <= 500 ft
 measure: -vs
 detail: "{value} sink, limit {threshold}"
-above: { low: 1000 fpm, medium: 1200 fpm, high: 1500 fpm }
+above: { advisory: 1000 fpm }
 ---
 rule: unstable-bank-500
-version: 1
+version: 2
 title: Bank at 500 ft
+domain: stability
 description: >
-  Bank angle at the 500 ft gate. EASA EOFDM example: more than 7 deg.
+  Bank angle at the 500 ft gate against the EAFDM stabilised-approach
+  limit, 7 deg. An advisory: bank is graded by `bank-above-500`,
+  `bank-below-500` and `bank-light`.
 why_it_matters: >
   Still turning at 500 ft means the aircraft is not lined up with the
   runway, and bank raises the stall speed close to the ground.
@@ -65,11 +124,12 @@ phase: Approach
 gate: height <= 500 ft
 measure: abs(roll)
 detail: "{value} bank, limit {threshold}"
-above: { low: 7 deg, medium: 10 deg, high: 15 deg }
+above: { advisory: 7 deg }
 ---
 rule: localizer-deviation-500
 version: 1
 title: Localizer deviation at 500 ft
+domain: stability
 description: >
   EASA EOFDM example: more than 1/4 dot. Not evaluated without a localizer
   signal. Dot scaling of the sim needle is not yet verified on an ILS.
@@ -88,6 +148,7 @@ above: { low: 0.25 dot, medium: 0.5 dot, high: 1 dot }
 rule: glideslope-deviation-500
 version: 1
 title: Glideslope deviation at 500 ft
+domain: stability
 description: >
   EASA EOFDM example: more than 1 dot. Not evaluated without a glideslope
   signal. Dot scaling of the sim needle is not yet verified on an ILS.
@@ -103,9 +164,52 @@ measure: abs(nav.gs_dev)
 detail: "{value} off the glideslope, limit {threshold}"
 above: { low: 1 dot, medium: 1.5 dot, high: 2 dot }
 ---
+rule: localizer-deviation-above-500
+version: 1
+title: Localizer deviation from 1000 ft to 500 ft
+domain: stability
+description: >
+  EASA Data4Safety: more than 1 dot (SL1) or 1.5 dot (SL2A), held 5 s,
+  from 1000 ft to 500 ft. Not evaluated without a localizer signal. Dot
+  scaling of the sim needle is not yet verified on an ILS.
+why_it_matters: >
+  Off the localizer on final the aircraft is not aligned with the runway;
+  correcting late takes large banks close to the ground.
+advice: >
+  Keep the localizer centred with small heading corrections; more than a
+  dot off by 500 ft: go around.
+phase: Approach
+when: height < 1000 ft and height >= 500 ft
+measure: abs(nav.loc_dev)
+detail: "{value} off the localizer, limit {threshold}"
+sustain: 5 s
+above: { low: 1 dot, medium: 1.5 dot }
+---
+rule: glideslope-deviation-above-500
+version: 1
+title: Glideslope deviation from 1000 ft to 500 ft
+domain: stability
+description: >
+  EASA Data4Safety: more than 1 dot (SL1) or 2 dots (SL2A), held 5 s, from
+  1000 ft to 500 ft. Not evaluated without a glideslope signal. Dot scaling
+  of the sim needle is not yet verified on an ILS.
+why_it_matters: >
+  Off the glideslope on final the aircraft is high (long landing, steep
+  correction) or low (obstacle and short-landing risk).
+advice: >
+  Correct path deviations early with small pitch and power changes; more
+  than a dot off by 500 ft: go around.
+phase: Approach
+when: height < 1000 ft and height >= 500 ft
+measure: abs(nav.gs_dev)
+detail: "{value} off the glideslope, limit {threshold}"
+sustain: 5 s
+above: { low: 1 dot, medium: 2 dot }
+---
 rule: gear-not-down-500
 version: 1
 title: Landing gear not down at 500 ft
+domain: stability
 description: >
   CAP 739 lists gear not established at the stabilisation gate.
 why_it_matters: >
@@ -120,32 +224,101 @@ gate: height <= 500 ft
 measure: gear.extended < 99 %
 level: high
 ---
-rule: high-sink-below-1000
+rule: high-sink-above-500
 version: 1
-title: High descent rate below 1000 ft
+title: High descent rate above 500 ft
+domain: stability
 description: >
-  Sustained descent faster than 1000 fpm below 1000 ft AAL on approach
-  (FSF ALAR stabilised approach). Higher levels are a FOQA-Sim estimate.
+  Descent rate from 1000 ft to 500 ft. EASA Data4Safety, above 500 ft:
+  more than 1200 fpm (SL1) or 1500 fpm (SL2A). Held 5 s, Data4Safety's
+  persistence for the first threshold (3 s for the second; a rule has one).
 why_it_matters: >
   A sustained high descent rate close to the ground leaves little room to
   arrest it and is a classic precursor of hard landings and controlled
   flight into terrain.
 advice: >
-  Stay on a stable path and keep the descent under 1000 fpm below 1000 ft;
-  if it needs more, the approach is too high: go around and set up again.
+  Stay on a stable path; if it needs more than 1000 fpm below 1000 ft, the
+  approach is too high: go around and set up again.
 phase: Approach
-when: height < 1000 ft
+aircraft: transport
+when: height < 1000 ft and height >= 500 ft
 measure: -vs
 detail: "{value} sink, limit {threshold}"
+sustain: 5 s
+above: { low: 1200 fpm, medium: 1500 fpm }
+---
+rule: high-sink-below-500
+version: 1
+title: High descent rate below 500 ft
+domain: stability
+description: >
+  Descent rate from 500 ft to the flare. EASA Data4Safety, below 500 ft:
+  more than 1200 fpm (SL2B) or 1500 fpm (SL3). Held 5 s, the persistence
+  of the first threshold (3 s for the second; a rule has one).
+why_it_matters: >
+  A high descent rate this close to the ground cannot be arrested in the
+  flare: a hard or short landing follows.
+advice: >
+  Below 500 ft an approach needing more than 1000 fpm is unstable: go
+  around.
+phase: Approach
+aircraft: transport
+when: height < 500 ft
+measure: -vs
+detail: "{value} sink, limit {threshold}"
+sustain: 5 s
+above: { medium: 1200 fpm, high: 1500 fpm }
+---
+rule: high-sink-light
+version: 1
+title: High descent rate below 500 ft (light aircraft)
+domain: stability
+description: >
+  Descent rate from 500 ft to the flare, held 5 s. FSF ALAR stabilised
+  approach: no more than 1000 fpm; the levels 1200 / 1500 / 2000 fpm are a
+  FOQA-Sim estimate.
+why_it_matters: >
+  A steep, fast final leaves little height to arrest the sink: a common
+  precursor of hard and short landings.
+advice: >
+  Fly a stable path of about 3 degrees (roughly 500-700 fpm in a light
+  aircraft); more than 1000 fpm on short final: go around.
+phase: Approach
+aircraft: light
+when: height < 500 ft
+measure: -vs
+detail: "{value} sink, limit {threshold}"
+sustain: 5 s
+above: { low: 1200 fpm, medium: 1500 fpm, high: 2000 fpm }
+---
+rule: bank-above-500
+version: 1
+title: Excessive bank from 1000 ft to 500 ft
+domain: stability
+description: >
+  Bank angle from 1000 ft to 500 ft, held 3 s. EASA Data4Safety, above
+  500 ft: more than 15 deg (SL1) or 30 deg (SL2A).
+why_it_matters: >
+  Still turning steeply on final means the aircraft is not lined up, and
+  bank raises the stall speed close to the ground.
+advice: >
+  Plan the turn onto final so it is complete with shallow bank well before
+  500 ft.
+phase: Approach
+aircraft: transport
+when: height < 1000 ft and height >= 500 ft
+measure: abs(roll)
+detail: "{value} bank, limit {threshold}"
 sustain: 3 s
-above: { low: 1000 fpm, medium: 1200 fpm, high: 1500 fpm }
+above: { low: 15 deg, medium: 30 deg }
 ---
 rule: bank-below-500
-version: 1
+version: 2
 title: Excessive bank below 500 ft
+domain: stability
 description: >
-  Initial tier from the FOQA rule research: more than 15 deg below 500 ft.
-  Higher levels are a FOQA-Sim estimate.
+  Bank angle below 500 ft, held 3 s. EASA Data4Safety, below 500 ft:
+  more than 15 deg (SL2B) or 30 deg (SL3). Light aircraft: `bank-light`.
 why_it_matters: >
   Steep bank close to the ground raises the stall speed (about 7% at 20 deg,
   41% at 45 deg) and risks a wingtip strike; a stall in a low turn is rarely
@@ -155,15 +328,40 @@ advice: >
   deg or less) well above 500 ft. Overshooting final: go around, do not
   tighten the turn.
 phase: [InitialClimb, Approach, Landing, GoAround]
+aircraft: transport
 when: height < 500 ft and not air_ground
 measure: abs(roll)
 detail: "{value} bank, limit {threshold}"
-sustain: 2 s
+sustain: 3 s
+above: { medium: 15 deg, high: 30 deg }
+---
+rule: bank-light
+version: 1
+title: Excessive bank below 300 ft (light aircraft)
+domain: stability
+description: >
+  Bank angle below 300 ft, held 3 s. FSF ALAR: wings level by 300 ft on a
+  circling approach; the levels 15 / 20 / 30 deg are a FOQA-Sim estimate.
+why_it_matters: >
+  Steep bank close to the ground raises the stall speed (about 7% at 20 deg,
+  41% at 45 deg) and risks a wingtip strike; a stall in a low turn is rarely
+  recoverable.
+advice: >
+  Plan the pattern so the turn to final is complete with shallow bank (15
+  deg or less) above 300 ft. Overshooting final: go around, do not
+  tighten the turn.
+phase: [InitialClimb, Approach, Landing, GoAround]
+aircraft: light
+when: height < 300 ft and not air_ground
+measure: abs(roll)
+detail: "{value} bank, limit {threshold}"
+sustain: 3 s
 above: { low: 15 deg, medium: 20 deg, high: 30 deg }
 ---
 rule: hard-landing
 version: 1
 title: Hard landing
+domain: contact
 description: >
   Peak normal load at touchdown, transport aircraft. Levels 1.6 / 1.8 /
   2.1 g; ~2.1 g is the 737 hard-landing indication on an 8 Hz recording
@@ -183,6 +381,7 @@ above: { low: 1.6 g, medium: 1.8 g, high: 2.1 g }
 rule: hard-landing-light
 version: 1
 title: Hard landing (light aircraft)
+domain: contact
 description: >
   Peak normal load at touchdown, light aircraft (normal-category limit
   load 3.8 g). Levels are a FOQA-Sim estimate.
@@ -200,11 +399,14 @@ detail: "{value} at touchdown, limit {threshold}"
 above: { low: 1.8 g, medium: 2.2 g, high: 2.6 g }
 ---
 rule: high-sink-touchdown
-version: 1
+version: 2
 title: High sink rate at touchdown
+domain: contact
 description: >
-  Rate of descent at main-gear contact. 600 fpm (10 ft/s) is the CS/FAR 25
-  landing-gear design sink rate; lower levels are a FOQA-Sim estimate.
+  Rate of descent at main-gear contact, transport aircraft. 14 CFR 25.473:
+  6 ft/s (360 fpm) at the design takeoff weight, 10 ft/s (600 fpm) at the
+  design landing weight; 480 fpm is a FOQA-Sim estimate. Light aircraft:
+  `high-sink-touchdown-light`.
 why_it_matters: >
   A high descent rate at contact puts the gear near its design load (600 fpm
   is the certification limit for transport aircraft).
@@ -212,13 +414,34 @@ advice: >
   Reduce the descent rate in the flare; touch down at 100-300 fpm. Keep a
   little power if the sink builds, and go around from an unstable flare.
 at: touchdown
+aircraft: transport
 measure: td.sink
 detail: "{value} sink at touchdown, limit {threshold}"
 above: { low: 360 fpm, medium: 480 fpm, high: 600 fpm }
 ---
+rule: high-sink-touchdown-light
+version: 1
+title: High sink rate at touchdown (light aircraft)
+domain: contact
+description: >
+  Rate of descent at main-gear contact, light aircraft. Levels 400 / 500 /
+  700 fpm are a FOQA-Sim estimate (CS-23 not checked).
+why_it_matters: >
+  A firm arrival stresses the gear, its attachments and the propeller
+  clearance; repeated hard landings cause structural damage.
+advice: >
+  Reduce the descent rate in the flare and hold the aircraft off; touch
+  down at 100-300 fpm.
+at: touchdown
+aircraft: light
+measure: td.sink
+detail: "{value} sink at touchdown, limit {threshold}"
+above: { low: 400 fpm, medium: 500 fpm, high: 700 fpm }
+---
 rule: bounced-landing
 version: 1
 title: Bounced landing
+domain: contact
 description: >
   More than one main-gear air-to-ground transition (EASA EOFDM RE30).
 why_it_matters: >
@@ -236,6 +459,7 @@ level: medium
 rule: long-landing
 version: 1
 title: Long landing
+domain: point
 description: >
   Touchdown beyond the touchdown zone, whose length is min(3000 ft, LDA/3)
   of the landing runway (sources to be confirmed: FAA P/CG 3000 ft,
@@ -253,6 +477,7 @@ level: medium
 rule: short-landing
 version: 1
 title: Short landing
+domain: point
 description: >
   Touchdown before the landing threshold. Needs the airport data recorded
   in flight.
@@ -269,6 +494,7 @@ level: high
 rule: off-centreline-touchdown
 version: 1
 title: Touchdown off the runway centreline
+domain: lateral
 description: >
   Distance of the touchdown from the runway centreline. Levels are a
   FOQA-Sim estimate. Needs the airport data recorded in flight.
@@ -286,6 +512,7 @@ above: { low: 25 ft, medium: 40 ft, high: 60 ft }
 rule: stall-warning
 version: 2
 title: Stall warning
+domain: energy
 description: >
   Stall warning active in flight. Below 50 ft it counts only while
   climbing, so the landing flare is excluded whatever the phase boundaries:
@@ -306,6 +533,7 @@ level: high
 rule: go-around
 version: 1
 title: Go-around
+domain: other
 description: >
   Recorded for context, not as a fault: a go-around is the safe outcome of
   an unstable approach.
@@ -321,6 +549,7 @@ level: advisory
 rule: flap-overspeed
 version: 1
 title: Flap overspeed
+domain: energy
 description: >
   IAS above the VFE for the flap angle, which comes from the aircraft's
   type profile (profiles/<ICAO>.yaml, manufacturer's airspeed limitations). Silent without a profile. Levels above VFE are a FOQA-Sim
@@ -341,6 +570,7 @@ above: { low: 0 kt, medium: 5 kt, high: 10 kt }
 rule: tailstrike-risk-takeoff
 version: 1
 title: Tailstrike risk at rotation
+domain: other
 description: >
   Tail clearance margin on the runway during rotation: the tail-contact
   pitch with the main gear struts extended, from the aircraft's type
@@ -362,6 +592,7 @@ below: { medium: 2 deg, high: 1 deg }
 rule: tailstrike-risk-landing
 version: 1
 title: Tailstrike risk at touchdown
+domain: contact
 description: >
   Tail clearance margin at main-gear contact: the tail-contact pitch with
   the struts compressed, from the aircraft's type profile, minus the
@@ -382,6 +613,7 @@ below: { medium: 2 deg, high: 1 deg }
 rule: hard-landing-inspection
 version: 1
 title: Hard-landing inspection required
+domain: contact
 description: >
   Peak normal load at touchdown above the manufacturer's hard-landing
   maintenance inspection threshold, from the aircraft's type profile
@@ -400,6 +632,7 @@ above: { high: 0 g }
 rule: vmo-exceedance
 version: 1
 title: Maximum operating speed exceeded
+domain: energy
 description: >
   IAS above VMO (VNE for types without one) from the aircraft's type
   profile (AFM limitations or the type certificate data sheet). MACH is not
@@ -422,6 +655,7 @@ above: { low: 0 kt, medium: 5 kt, high: 10 kt }
 rule: gear-extended-overspeed
 version: 1
 title: Gear extended overspeed
+domain: energy
 description: >
   IAS above VLE with the landing gear down, from the aircraft's type
   profile (AFM limitations). Silent without a profile value or with fixed
@@ -442,6 +676,7 @@ above: { low: 0 kt, medium: 5 kt, high: 10 kt }
 rule: gear-operating-overspeed
 version: 1
 title: Gear operated above its speed limit
+domain: energy
 description: >
   IAS above VLO while the landing gear is in transit, from the aircraft's
   type profile (AFM limitations; the lower of the extension and retraction
@@ -463,6 +698,7 @@ above: { low: 0 kt, medium: 5 kt, high: 10 kt }
 rule: crosswind-above-demonstrated
 version: 1
 title: Landing crosswind above demonstrated
+domain: lateral
 description: >
   Crosswind component at touchdown, from the wind at contact and the
   runway heading, above the maximum demonstrated crosswind in the
@@ -485,6 +721,7 @@ above: { low: 0 kt, medium: 5 kt }
 rule: tailwind-landing-limit
 version: 1
 title: Tailwind above the landing limit
+domain: rollout
 description: >
   Tailwind component at touchdown, from the wind at contact and the runway
   heading, above the aircraft's certified tailwind limit (type profile, AFM

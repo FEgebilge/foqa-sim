@@ -6,6 +6,7 @@
 
 #![forbid(unsafe_code)]
 
+mod assessment;
 mod index;
 mod wire;
 
@@ -16,13 +17,13 @@ use std::io::{self, BufReader};
 use std::path::{Path, PathBuf};
 
 use analyzer::{Basis, Cause, Flight, Phase, Span, Track, phases, thresholds, touchdowns};
+use assess::Method;
 use fdm_core::geo::distance_m;
 use fdm_core::{Lfl, SimTime};
 use recorder::{COMPACT_EXT, Recorder, ReplaySource, SimEvent, TOUCHDOWN_WINDOW_US};
-use rules::{
-    LoadError, PhaseField, ProfileError, ProfileField, ProfileSet, Rule, Selection, Sourced,
-};
+use rules::{LoadError, PhaseField, ProfileField, ProfileSet, Rule, Selection, Sourced};
 
+pub use assessment::{POINTS, domain_title};
 pub use index::{INDEX_FILE, Index};
 pub use wire::*;
 
@@ -175,26 +176,34 @@ pub fn delete_flight(dir: &Path, id: &str) -> io::Result<usize> {
 pub struct Station {
     rules: Vec<Rule>,
     profiles: ProfileSet,
-    /// Hash of the rules, the profiles and the analysis code (`build.rs`):
-    /// a summary made by another station is stale.
+    /// The landing assessment (`scoring/landing-2.yaml`).
+    method: Method,
+    /// Hash of the rules, the profiles, the scoring method and the analysis
+    /// code (`build.rs`): a summary made by another station is stale.
     version: String,
 }
 
 impl Station {
-    pub fn new(rules: Vec<Rule>) -> Result<Self, ProfileError> {
+    pub fn new(rules: Vec<Rule>) -> Result<Self, Error> {
         let profiles = ProfileSet::shipped()?;
+        let method = Method::landing_2()?;
         let mut h = DefaultHasher::new();
-        format!("{rules:?}{profiles:?}{}", env!("SOURCE_HASH")).hash(&mut h);
+        format!("{rules:?}{profiles:?}{method:?}{}", env!("SOURCE_HASH")).hash(&mut h);
         Ok(Self {
             rules,
             profiles,
+            method,
             version: format!("{:016x}", h.finish()),
         })
     }
 
     /// The core rules and the shipped profiles.
     pub fn core() -> Result<Self, Error> {
-        Ok(Self::new(core_rules()?)?)
+        Self::new(core_rules()?)
+    }
+
+    pub fn method(&self) -> &Method {
+        &self.method
     }
 
     pub fn rules(&self) -> &[Rule] {
@@ -215,6 +224,7 @@ impl Station {
             phases: phases(&track, &selection.phases),
             id,
             rules: &self.rules,
+            method: &self.method,
             selection,
             flight,
             track,
@@ -240,14 +250,29 @@ pub struct Analysis<'a> {
     /// In time order, the most severe first at equal times.
     pub events: Vec<rules::Event>,
     rules: &'a [Rule],
+    method: &'a Method,
 }
 
 impl Analysis<'_> {
+    /// The rules the events come from.
+    pub fn rules(&self) -> &[Rule] {
+        self.rules
+    }
+
+    /// The landing assessment method.
+    pub fn method(&self) -> &Method {
+        self.method
+    }
+
     pub fn summary(&self) -> FlightSummary {
-        let t = &self.track.t;
         let events = self.events();
+        self.summary_of(&events, &self.assessment(&events))
+    }
+
+    fn summary_of(&self, events: &[Event], detail: &AssessmentDetail) -> FlightSummary {
+        let t = &self.track.t;
         let mut event_counts: BTreeMap<_, usize> = Level::ALL.map(|l| (l, 0)).into();
-        for e in &events {
+        for e in events {
             *event_counts.entry(e.level).or_default() += 1;
         }
         FlightSummary {
@@ -269,14 +294,16 @@ impl Analysis<'_> {
             landings: self.touchdowns.iter().filter(|td| !td.bounce).count(),
             worst_level: events.iter().map(|e| e.level).max(),
             event_counts,
-            assessment: Assessment::of(&events),
+            assessment: detail.into(),
         }
     }
 
     pub fn debrief(&self) -> Debrief {
+        let events = self.events();
+        let assessment_detail = self.assessment(&events);
         Debrief {
             flight: FlightHeader {
-                summary: self.summary(),
+                summary: self.summary_of(&events, &assessment_detail),
                 lfl_version: self.flight.lfl_version(),
                 profile: self.selection.to_string(),
                 class: self.selection.class.map(|c| c.to_string()),
@@ -284,7 +311,7 @@ impl Analysis<'_> {
                 phase_values: PhaseField::ALL
                     .map(|f| (f.name(), self.selection.phase_value(f)))
                     .into(),
-                assessment_detail: AssessmentDetail::of(&self.events()),
+                assessment_detail,
                 damaged_at: self.flight.damaged_at,
             },
             phases: self
@@ -302,8 +329,9 @@ impl Analysis<'_> {
                 .iter()
                 .map(|td| Touchdown::new(td, &self.flight))
                 .collect(),
-            events: self.events(),
+            events,
             series: self.series(),
+
             airports: self.airports(),
         }
     }
@@ -614,8 +642,8 @@ mod tests {
         let d = c172().debrief();
         assert_eq!(d.flight.summary.id, "c172-pattern");
         assert_eq!(d.flight.summary.landings, 1);
-        assert_eq!(d.flight.summary.worst_level, Some(Level::High));
-        assert_eq!(d.events.len(), 6);
+        assert_eq!(d.flight.summary.worst_level, Some(Level::Medium));
+        assert_eq!(d.events.len(), 5);
         assert!(d.events.iter().all(|e| !e.description.is_empty()));
         assert!(d.events.iter().all(|e| e.advice.is_some()));
         // Every measured value is said in words.
@@ -686,11 +714,11 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         let flight = &v["flight"];
         assert_eq!(flight["profile"], "no aircraft identity, unknown class");
-        assert_eq!(flight["worst_level"], "high");
+        assert_eq!(flight["worst_level"], "medium");
 
         assert_eq!(
             flight["event_counts"],
-            serde_json::json!({"advisory": 0, "low": 1, "medium": 2, "high": 3})
+            serde_json::json!({"advisory": 2, "low": 0, "medium": 3, "high": 0})
         );
         // Unknown optional fields are left out, not null.
         assert!(
@@ -707,7 +735,7 @@ mod tests {
         let flare = &flight["phase_values"]["flare_ft"];
         assert_eq!(flare["value"], 50.0);
         assert_eq!(flare["source"], "transport class default (unknown class)");
-        assert_eq!(v["events"][0]["level"], "high");
+        assert_eq!(v["events"][0]["level"], "medium");
     }
 
     #[test]
@@ -733,8 +761,9 @@ mod tests {
             ("Pilot report", "long final")
         );
         assert_eq!((report.level, report.start_s), (Level::Advisory, 100.0));
+        // With the two 500 ft gate notes of the pattern.
         let counts = &a.summary().event_counts;
-        assert_eq!(counts[&Level::Advisory], 1);
+        assert_eq!(counts[&Level::Advisory], 3);
     }
 
     #[test]

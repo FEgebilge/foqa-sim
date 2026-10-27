@@ -87,3 +87,16 @@
 .foqa.history .phrow .name { color: #e8f0f6; }
 .foqa.history .phrow .trigger { grid-column: 2; font-size: 13px; color: var(--muted); }
 .foqa.history .bounces { margin-top: 6px; font-size: 15px; font-family: var(--mono); color: var(--medium); }
+/* landing-2: the score before the grade, six domain mini-bars and the top deduction (debrief-api.md). */
+.foqa.history .assess .score { margin-right: 12px; font-size: 30px; font-family: var(--mono); color: var(--fg); }
+.foqa.history .assess .score .of { font-size: 14px; color: var(--muted); }
+.foqa.history .mbars { display: grid; grid-template-columns: repeat(3, 1fr); column-gap: 14px; row-gap: 6px; margin-top: 10px; }
+.foqa.history .mname { display: flex; justify-content: space-between; font-size: 13px; color: var(--secondary); }
+.foqa.history .mpts { font-family: var(--mono); color: var(--muted); }
+.foqa.history .mtrack { position: relative; height: 6px; margin-top: 3px; border-radius: 2px; background: #2a3a50; overflow: hidden; }
+.foqa.history .mtrack.na { background: transparent; border: 1px dashed #2a3a50; }
+.foqa.history .mlost { position: absolute; top: 0; right: 0; bottom: 0; background: var(--ok); }
+.foqa.history .mlost.lvl-low { background: var(--low); }
+.foqa.history .mlost.lvl-medium { background: var(--medium); }
+.foqa.history .mlost.lvl-high { background: var(--high); }
+.foqa.history .mtop { margin-top: 8px; font-size: 15px; color: var(--secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

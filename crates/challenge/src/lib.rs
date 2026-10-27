@@ -9,11 +9,12 @@ mod score;
 
 use fdm_core::Airport;
 use fdm_core::geo::LocalFrame;
-use rules::Aircraft;
+use rules::{Aircraft, ProfileSet};
+
 use serde::{Deserialize, Serialize};
 
-pub use attempt::{Attempt, Check, evaluate};
-pub use score::{Part, SCORING, Score};
+pub use attempt::{Attempt, Begin, Check, Flown, Marker, aircraft_check, evaluate, evaluate_after};
+pub use score::{LANDING_2, Part, SCORING, Score};
 
 const M_PER_NM: f64 = 1852.0;
 const FT_PER_M: f64 = 1.0 / 0.3048;
@@ -171,10 +172,40 @@ impl Challenge {
         if !is_runway(&c.runway) {
             return Err(format!("runway `{}` is not like `06` or `27L`", c.runway));
         }
-        if c.scoring.version != SCORING {
-            return Err(format!("unknown scoring `{}`", c.scoring.version));
+        match c.scoring.version.as_str() {
+            SCORING => {}
+            LANDING_2 => c.ranked_on_speed()?,
+            other => return Err(format!("unknown scoring `{other}`")),
         }
         Ok(c)
+    }
+
+    /// landing-2 ranks on the approach speed, so every type allowed needs
+    /// a Vref source in its profile: never the pilot's selected speed
+    /// (docs/scoring.md §5, Decision 1).
+    fn ranked_on_speed(&self) -> Result<(), String> {
+        let types = &self.aircraft.types;
+        if types.is_empty() {
+            return Err("landing-2 needs `aircraft.types`, each with a Vref source".into());
+        }
+        let profiles = ProfileSet::shipped().map_err(|e| e.to_string())?;
+        let lacking: Vec<&str> = types
+            .iter()
+            .filter(|t| {
+                let p = profiles.select_type(Some(t.to_ascii_uppercase()), || None);
+                !p.profile.is_some_and(|p| {
+                    p.vref.is_some() || p.approach_speed.is_some() || p.vso.is_some()
+                })
+            })
+            .map(String::as_str)
+            .collect();
+        match lacking[..] {
+            [] => Ok(()),
+            _ => Err(format!(
+                "no Vref source for {}: landing-2 cannot rank it",
+                lacking.join(", ")
+            )),
+        }
     }
 
     /// The challenge's landing threshold at `airport`, with the runway's

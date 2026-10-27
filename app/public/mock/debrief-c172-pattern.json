@@ -3,17 +3,18 @@
     "id": "c172-pattern",
     "duration_s": 303.5,
     "landings": 1,
-    "worst_level": "high",
+    "worst_level": "medium",
     "event_counts": {
-      "advisory": 0,
-      "low": 1,
-      "medium": 2,
-      "high": 3
+      "advisory": 2,
+      "low": 0,
+      "medium": 3,
+      "high": 0
     },
     "assessment": {
       "grade": "poor",
-      "points": 14,
-      "findings": 4
+      "points": 6,
+      "findings": 3,
+      "method": "points"
     },
     "lfl_version": 1,
     "profile": "no aircraft identity, unknown class",
@@ -44,26 +45,48 @@
       }
     },
     "assessment_detail": {
+      "method": "points",
+      "score": null,
+      "grade": "poor",
+      "confidence": null,
+      "caps": [],
+      "graded_by": null,
+      "landings": [
+        {
+          "t_s": 281.33451,
+          "status": "insufficient",
+          "score": null,
+          "raw": null,
+          "grade": null,
+          "confidence": null,
+          "class": null,
+          "partial": [],
+          "missing": [
+            "runway"
+          ],
+          "full_stop": true,
+          "caps": [],
+          "stable_from_ft": null,
+          "split_ft": null,
+          "speeds": null,
+          "domains": []
+        }
+      ],
+      "other_findings": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "legacy_points": 6,
+      "legacy_findings": 3,
       "parts": [
         {
-          "rule": "high-sink-below-1000",
-          "title": "High descent rate below 1000 ft",
-          "level": "high",
-          "points": 4,
-          "count": 3
-        },
-        {
-          "rule": "unstable-bank-500",
-          "title": "Bank at 500 ft",
-          "level": "high",
-          "points": 4,
-          "count": 1
-        },
-        {
-          "rule": "unstable-sink-500",
-          "title": "High descent rate at 500 ft",
-          "level": "high",
-          "points": 4,
+          "rule": "bank-above-500",
+          "title": "Excessive bank from 1000 ft to 500 ft",
+          "level": "medium",
+          "points": 2,
           "count": 1
         },
         {
@@ -71,6 +94,27 @@
           "title": "Excessive bank below 500 ft",
           "level": "medium",
           "points": 2,
+          "count": 1
+        },
+        {
+          "rule": "high-sink-above-500",
+          "title": "High descent rate above 500 ft",
+          "level": "medium",
+          "points": 2,
+          "count": 1
+        },
+        {
+          "rule": "unstable-bank-500",
+          "title": "Bank at 500 ft",
+          "level": "advisory",
+          "points": 0,
+          "count": 1
+        },
+        {
+          "rule": "unstable-sink-500",
+          "title": "High descent rate at 500 ft",
+          "level": "advisory",
+          "points": 0,
           "count": 1
         }
       ],
@@ -86,7 +130,11 @@
         {
           "grade": "poor"
         }
-      ]
+      ],
+      "grades": {
+        "good": 85.0,
+        "fair": 60.0
+      }
     }
   },
   "phases": [
@@ -159,106 +207,89 @@
   ],
   "events": [
     {
-      "rule": "high-sink-below-1000",
+      "rule": "bank-above-500",
       "version": 1,
-      "title": "High descent rate below 1000 ft",
-      "description": "Sustained descent faster than 1000 fpm below 1000 ft AAL on approach (FSF ALAR stabilised approach). Higher levels are a FOQA-Sim estimate.",
-      "level": "high",
+      "title": "Excessive bank from 1000 ft to 500 ft",
+      "description": "Bank angle from 1000 ft to 500 ft, held 3 s. EASA Data4Safety, above 500 ft: more than 15 deg (SL1) or 30 deg (SL2A).",
+      "level": "medium",
       "start_s": 229.5,
-      "end_s": 245.625,
+      "end_s": 239.0,
+      "peak_s": 229.5,
+      "measure": "abs(roll)",
+      "value": 42.43336015710619,
+      "threshold": 30.0,
+      "unit": "deg",
+      "why_it_matters": "Still turning steeply on final means the aircraft is not lined up, and bank raises the stall speed close to the ground.",
+      "advice": "Plan the turn onto final so it is complete with shallow bank well before 500 ft.",
+      "detail": "42° bank, limit 30°"
+    },
+    {
+      "rule": "high-sink-above-500",
+      "version": 1,
+      "title": "High descent rate above 500 ft",
+      "description": "Descent rate from 1000 ft to 500 ft. EASA Data4Safety, above 500 ft: more than 1200 fpm (SL1) or 1500 fpm (SL2A). Held 5 s, Data4Safety's persistence for the first threshold (3 s for the second; a rule has one).",
+      "level": "medium",
+      "start_s": 229.875,
+      "end_s": 242.0,
       "peak_s": 236.75,
       "measure": "-vs",
       "value": 2989.7599849985677,
       "threshold": 1500.0,
       "unit": "fpm",
       "why_it_matters": "A sustained high descent rate close to the ground leaves little room to arrest it and is a classic precursor of hard landings and controlled flight into terrain.",
-      "advice": "Stay on a stable path and keep the descent under 1000 fpm below 1000 ft; if it needs more, the approach is too high: go around and set up again.",
+      "advice": "Stay on a stable path; if it needs more than 1000 fpm below 1000 ft, the approach is too high: go around and set up again.",
       "detail": "2990 fpm sink, limit 1500 fpm"
     },
     {
-      "rule": "unstable-sink-500",
-      "version": 1,
-      "title": "High descent rate at 500 ft",
-      "description": "Rate of descent at the 500 ft gate. EASA EOFDM / FSF ALAR stabilised approach: no more than 1000 fpm; higher levels are a FOQA-Sim estimate.",
-      "level": "high",
-      "start_s": 242.125,
-      "end_s": 242.125,
-      "peak_s": 242.125,
-      "measure": "-vs",
-      "value": 2061.923967088862,
-      "threshold": 1500.0,
-      "unit": "fpm",
-      "why_it_matters": "A steep, fast descent at 500 ft leaves little height to arrest the sink, a common precursor of hard and short landings.",
-      "advice": "Fly a stable path of about 3 degrees (roughly 500-700 fpm in a light aircraft, 700-800 fpm in a jet). More than 1000 fpm at the gate: go around.",
-      "detail": "2062 fpm sink, limit 1500 fpm"
-    },
-    {
-      "rule": "unstable-bank-500",
-      "version": 1,
-      "title": "Bank at 500 ft",
-      "description": "Bank angle at the 500 ft gate. EASA EOFDM example: more than 7 deg.",
-      "level": "high",
-      "start_s": 242.125,
-      "end_s": 242.125,
-      "peak_s": 242.125,
-      "measure": "abs(roll)",
-      "value": 15.434233636889388,
-      "threshold": 15.0,
-      "unit": "deg",
-      "why_it_matters": "Still turning at 500 ft means the aircraft is not lined up with the runway, and bank raises the stall speed close to the ground.",
-      "advice": "Roll out on final above 500 ft: extend the downwind or widen the base turn so the final is straight and wings-level. Not aligned at the gate: go around.",
-      "detail": "15.4° bank, limit 15°"
-    },
-    {
       "rule": "bank-below-500",
-      "version": 1,
+      "version": 2,
       "title": "Excessive bank below 500 ft",
-      "description": "Initial tier from the FOQA rule research: more than 15 deg below 500 ft. Higher levels are a FOQA-Sim estimate.",
+      "description": "Bank angle below 500 ft, held 3 s. EASA Data4Safety, below 500 ft: more than 15 deg (SL2B) or 30 deg (SL3). Light aircraft: `bank-light`.",
       "level": "medium",
       "start_s": 242.125,
       "end_s": 252.0,
       "peak_s": 244.0,
       "measure": "abs(roll)",
       "value": 26.797280787975133,
-      "threshold": 20.0,
+      "threshold": 15.0,
       "unit": "deg",
       "why_it_matters": "Steep bank close to the ground raises the stall speed (about 7% at 20 deg, 41% at 45 deg) and risks a wingtip strike; a stall in a low turn is rarely recoverable.",
       "advice": "Plan the pattern so the turn to final is complete with shallow bank (15 deg or less) well above 500 ft. Overshooting final: go around, do not tighten the turn.",
-      "detail": "27° bank, limit 20°"
+      "detail": "27° bank, limit 15°"
     },
     {
-      "rule": "high-sink-below-1000",
-      "version": 1,
-      "title": "High descent rate below 1000 ft",
-      "description": "Sustained descent faster than 1000 fpm below 1000 ft AAL on approach (FSF ALAR stabilised approach). Higher levels are a FOQA-Sim estimate.",
-      "level": "medium",
-      "start_s": 247.25,
-      "end_s": 252.5,
-      "peak_s": 249.625,
+      "rule": "unstable-sink-500",
+      "version": 2,
+      "title": "High descent rate at 500 ft",
+      "description": "Rate of descent at the 500 ft gate against the FSF ALAR stabilised approach limit, 1000 fpm. An advisory: the descent below 500 ft is graded by `high-sink-below-500` and `high-sink-light`.",
+      "level": "advisory",
+      "start_s": 242.125,
+      "end_s": 242.125,
+      "peak_s": 242.125,
       "measure": "-vs",
-      "value": 1477.2916375455602,
-      "threshold": 1200.0,
-      "unit": "fpm",
-      "why_it_matters": "A sustained high descent rate close to the ground leaves little room to arrest it and is a classic precursor of hard landings and controlled flight into terrain.",
-      "advice": "Stay on a stable path and keep the descent under 1000 fpm below 1000 ft; if it needs more, the approach is too high: go around and set up again.",
-      "detail": "1477 fpm sink, limit 1200 fpm"
-    },
-    {
-      "rule": "high-sink-below-1000",
-      "version": 1,
-      "title": "High descent rate below 1000 ft",
-      "description": "Sustained descent faster than 1000 fpm below 1000 ft AAL on approach (FSF ALAR stabilised approach). Higher levels are a FOQA-Sim estimate.",
-      "level": "low",
-      "start_s": 253.875,
-      "end_s": 257.75,
-      "peak_s": 257.0,
-      "measure": "-vs",
-      "value": 1194.0106983036933,
+      "value": 2061.923967088862,
       "threshold": 1000.0,
       "unit": "fpm",
-      "why_it_matters": "A sustained high descent rate close to the ground leaves little room to arrest it and is a classic precursor of hard landings and controlled flight into terrain.",
-      "advice": "Stay on a stable path and keep the descent under 1000 fpm below 1000 ft; if it needs more, the approach is too high: go around and set up again.",
-      "detail": "1194 fpm sink, limit 1000 fpm"
+      "why_it_matters": "A steep, fast descent at 500 ft leaves little height to arrest the sink, a common precursor of hard and short landings.",
+      "advice": "Fly a stable path of about 3 degrees (roughly 500-700 fpm in a light aircraft, 700-800 fpm in a jet). More than 1000 fpm at the gate: go around.",
+      "detail": "2062 fpm sink, limit 1000 fpm"
+    },
+    {
+      "rule": "unstable-bank-500",
+      "version": 2,
+      "title": "Bank at 500 ft",
+      "description": "Bank angle at the 500 ft gate against the EAFDM stabilised-approach limit, 7 deg. An advisory: bank is graded by `bank-above-500`, `bank-below-500` and `bank-light`.",
+      "level": "advisory",
+      "start_s": 242.125,
+      "end_s": 242.125,
+      "peak_s": 242.125,
+      "measure": "abs(roll)",
+      "value": 15.434233636889388,
+      "threshold": 7.0,
+      "unit": "deg",
+      "why_it_matters": "Still turning at 500 ft means the aircraft is not lined up with the runway, and bank raises the stall speed close to the ground.",
+      "advice": "Roll out on final above 500 ft: extend the downwind or widen the base turn so the final is straight and wings-level. Not aligned at the gate: go around.",
+      "detail": "15° bank, limit 7°"
     }
   ],
   "series": {

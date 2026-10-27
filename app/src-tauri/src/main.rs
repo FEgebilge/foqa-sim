@@ -6,7 +6,11 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod attempts;
 mod commands;
+#[cfg(feature = "connect")]
+mod connect;
+mod library;
 mod setup;
 
 use std::sync::Arc;
@@ -15,8 +19,10 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use ::debrief::{LandingNotice, RecorderStatus, Station};
+use attempts::Attempts;
 use capture::{Happening, Service};
 use commands::{Shared, lock};
+use library::Library;
 use serde::Serialize;
 use setup::Setup;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
@@ -29,7 +35,57 @@ const QUIT_GRACE: Duration = Duration::from_secs(3);
 /// The notification's payload key naming the flight to open on a click.
 const FLIGHT_ID: &str = "flight_id";
 
+/// The core commands, and those of the optional modules given.
+macro_rules! handler {
+    ($($extra:path),*) => {
+        tauri::generate_handler![
+            commands::list_flights,
+            commands::debrief,
+            commands::delete_flight,
+            commands::place_challenge,
+            commands::challenges_list,
+            commands::challenge_import,
+            commands::challenge_remove,
+            commands::challenge_briefing,
+            commands::challenge_preflight,
+            commands::attempt_start,
+            commands::attempt_fly_again,
+            commands::attempt_finish,
+            commands::attempt_abandon,
+            commands::attempts_list,
+            commands::recorder_status,
+            commands::open_flights_folder,
+            commands::storage_usage,
+            commands::setup_status,
+            commands::setup_install,
+            commands::setup_remove,
+            commands::setup_use_community,
+            commands::setup_pick_community
+            $(, $extra)*
+        ]
+    };
+}
+
+type Commands = fn(tauri::ipc::Invoke<Wry>) -> bool;
+
 fn main() {
+    #[cfg(feature = "connect")]
+    let commands: Commands = handler!(
+        connect::connect_available,
+        connect::sites_list,
+        connect::site_add,
+        connect::site_sign_in,
+        connect::site_sign_in_cancel,
+        connect::site_sign_out,
+        connect::site_remove,
+        connect::site_challenges,
+        connect::site_challenge_take,
+        connect::site_attempts,
+        connect::attempt_upload,
+        connect::site_open
+    );
+    #[cfg(not(feature = "connect"))]
+    let commands: Commands = handler!();
     tauri::Builder::default()
         // First, so a second launch only brings this one's window up.
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
@@ -42,20 +98,7 @@ fn main() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
-        .invoke_handler(tauri::generate_handler![
-            commands::list_flights,
-            commands::debrief,
-            commands::delete_flight,
-            commands::place_challenge,
-            commands::recorder_status,
-            commands::open_flights_folder,
-            commands::storage_usage,
-            commands::setup_status,
-            commands::setup_install,
-            commands::setup_remove,
-            commands::setup_use_community,
-            commands::setup_pick_community,
-        ])
+        .invoke_handler(commands)
         .setup(|app| {
             let station = Arc::new(Station::core()?);
             let dir = app.path().document_dir()?.join("FOQA-Sim").join("flights");
@@ -69,10 +112,35 @@ fn main() {
                 .name("recorder".into())
                 .spawn(move || service.run(tx))?;
             let setup = Setup::new(app.path().app_config_dir()?, app.path().resource_dir().ok());
-            let shared = Arc::new(Shared::new(
-                station, dir, stopper, index, recorder, setup, sim,
-            ));
+            // Challenges and attempts live with the app's data, out of synced Documents.
+            let data = app.path().app_data_dir()?;
+            let library = Library::new(data.join("challenges"))?;
+            let handle = app.handle().clone();
+            #[cfg(feature = "connect")]
+            let connect =
+                connect::Connect::start(data.clone(), data.join("attempts"), handle.clone())?;
+            #[cfg(feature = "connect")]
+            let site = Arc::clone(&connect);
+            let attempts = Attempts::new(data.join("attempts"))?.on_change(move |record| {
+                if let Err(e) = handle.emit("attempt-changed", record) {
+                    eprintln!("event not sent: {e}");
+                }
+                #[cfg(feature = "connect")]
+                site.attempt_changed(record);
+            });
+            let shared = Shared::new(
+                station, dir, stopper, index, recorder, setup, sim, library, attempts,
+            );
+            #[cfg(feature = "connect")]
+            let shared = shared.with_hooks(Arc::clone(&connect) as Arc<dyn commands::AttemptHooks>);
+            let shared = Arc::new(shared);
+            #[cfg(feature = "connect")]
+            {
+                app.manage(connect);
+            }
             app.manage(Arc::clone(&shared));
+            let recover = Arc::clone(&shared);
+            thread::spawn(move || recover.recover());
             // After an update, the in-sim packages follow the app's version.
             let refresh = Arc::clone(&shared);
             thread::spawn(move || {
@@ -114,7 +182,7 @@ fn main() {
 
 /// Hands what the recorder reports to the tray, the window and the
 /// notification centre, until the recorder is gone.
-fn relay(app: &AppHandle, shared: &Shared, tray: &Tray, happenings: Receiver<Happening>) {
+fn relay(app: &AppHandle, shared: &Arc<Shared>, tray: &Tray, happenings: Receiver<Happening>) {
     for happening in happenings {
         let sent = match happening {
             Happening::Status(status) => {
@@ -122,8 +190,12 @@ fn relay(app: &AppHandle, shared: &Shared, tray: &Tray, happenings: Receiver<Hap
                 *lock(&shared.status) = status.clone();
                 app.emit("recorder-status", status)
             }
-            Happening::FlightSaved(summary) => app.emit("flight-saved", summary),
+            Happening::FlightSaved(summary) => {
+                shared.flight_closed(&summary.id);
+                app.emit("flight-saved", summary)
+            }
             Happening::Landing(notice) => {
+                shared.landed(&notice);
                 notify(app, &notice);
                 app.emit("landing", notice)
             }

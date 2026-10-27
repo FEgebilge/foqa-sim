@@ -11,14 +11,23 @@ mod airport_json;
 mod compact;
 mod fdau;
 mod journal;
+mod marker_json;
 mod pipeline;
 mod raw;
+mod slice;
 mod source;
 
 pub use acquisition::{Acquisition, Column, Conditioned};
-pub use compact::{EXT as COMPACT_EXT, FlightRecords, Recording, compact_file, read_records};
+pub use compact::{
+    CHALLENGE_MAX_BODY, EXT as COMPACT_EXT, FlightRecords, Recording, compact_file, read_records,
+    read_records_within,
+};
 pub use fdau::{Fdau, TOUCHDOWN_WINDOW_US};
 pub use journal::{JournalReader, JournalWriter, Record};
 pub use pipeline::Recorder;
 pub use raw::{RawWriter, ReplaySource};
-pub use source::{FlowEvent, SYSTEM_EVENTS, SimEvent, Telemetry, TelemetrySource};
+pub use slice::{AFTER_US, BEFORE_US, Cut, Slice, slice};
+pub use source::{
+    AttemptMarker, AttemptPhase, FlowEvent, SYSTEM_EVENTS, SimEvent, Telemetry, TelemetrySource,
+    is_reference,
+};

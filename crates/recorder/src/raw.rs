@@ -13,7 +13,7 @@ use serde_json::{Map, Value, json};
 
 use crate::{
     Acquisition, Column, FlowEvent, SimEvent, Telemetry, TelemetrySource, aircraft_json,
-    airport_json,
+    airport_json, marker_json,
 };
 
 const FORMAT: &str = "foqa-raw";
@@ -65,6 +65,9 @@ impl RawWriter {
             }
             Telemetry::Event(SimEvent::PilotReport(note)) => {
                 json!({ "event": "PilotReport", "note": note })
+            }
+            Telemetry::Event(SimEvent::Attempt(m)) => {
+                json!({ "event": "Attempt", "marker": marker_json::to_json(m) })
             }
         };
         self.line(&line)?;
@@ -187,6 +190,10 @@ fn event_line(event: &Map<String, Value>) -> io::Result<Telemetry> {
         field("aircraft")
             .and_then(aircraft_json::from_json)
             .map(|a| Telemetry::Event(SimEvent::Aircraft(a)))
+    } else if name == "Attempt" {
+        field("marker")
+            .and_then(marker_json::from_json)
+            .map(|m| Telemetry::Event(SimEvent::Attempt(m)))
     } else if name == "PilotReport" {
         field("note")
             .and_then(Value::as_str)
@@ -234,6 +241,7 @@ mod tests {
             Telemetry::Event(SimEvent::Airport(crate::airport_json::tests::ltbj())),
             Telemetry::Event(SimEvent::Aircraft(crate::aircraft_json::tests::c172())),
             Telemetry::Event(SimEvent::PilotReport("go-around, traffic".into())),
+            Telemetry::Event(SimEvent::Attempt(crate::marker_json::tests::begin(None))),
         ];
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("raw.jsonl.gz");

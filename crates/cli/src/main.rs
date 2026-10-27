@@ -6,15 +6,21 @@
 //! `fdm compact <journal.fqj|folder>`           journals to compact flights
 //! `fdm list <folder>`                          the app's flight list, as JSON
 //! `fdm challenge <challenge.json> <flight.fqz>` a landing-challenge attempt, as JSON
+//! `fdm challenge --check <challenge.json>`      validates a definition (exit 1 if invalid)
+//! `fdm slice <flight> --ref <ref> [-o out.fqz]` an attempt's recording slice, what a site receives
+//! `fdm slice <flight> --from <s> --to <s> [-o out.fqz]` the same, by recording time
 //!
 //! `<flight>` is a journal (`.fqj`), a compact flight (`.fqz`) or a raw
 //! capture (`.raw.jsonl.gz`), which is first recorded through the on-board
 //! chain in memory. `compact` replaces closed journals, so not while
 //! recording. Without
-//! `--rules`, the built-in core rule set is used.
+//! `--rules`, the built-in core rule set is used. A compact flight given to
+//! `challenge` or `slice` may decompress to 32 MiB at most (a site runs them
+//! on uploads), others to 256 MiB.
 
 use std::error::Error;
 use std::fs;
+use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -29,7 +35,9 @@ const USAGE: &str =
        fdm export <flight> [out-dir]
        fdm compact <journal.fqj|folder>
        fdm list <folder>
-       fdm challenge <challenge.json> <flight.fqz>";
+       fdm challenge <challenge.json> <flight.fqz>
+       fdm challenge --check <challenge.json>
+       fdm slice <flight.fqj|flight.fqz> (--ref <ref> | --from <s> --to <s>) [-o out.fqz]";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -41,7 +49,12 @@ fn main() -> ExitCode {
         ["export", path, out] => export(Path::new(path), Path::new(out)),
         ["compact", path] => compact(Path::new(path)),
         ["list", dir] => list(Path::new(dir)),
+        ["challenge", "--check", def] => check(Path::new(def)),
         ["challenge", def, path] => challenge(Path::new(def), Path::new(path)),
+        ["slice", path, ref rest @ ..] => match slice_args(rest) {
+            Some((cut, out)) => slice(Path::new(path), cut, out),
+            None => Err(USAGE.into()),
+        },
         _ => {
             eprintln!("{USAGE}");
             return ExitCode::from(2);
@@ -205,8 +218,31 @@ fn challenge(def: &Path, path: &Path) -> Result<(), Box<dyn Error>> {
     let challenge = challenge::Challenge::parse(&fs::read_to_string(def)?)?;
     uploadable(path)?;
     let station = Station::core()?;
-    let attempt = challenge::evaluate(&challenge, &open(&station, path)?);
+    let attempt = challenge::evaluate(&challenge, &challenge_input(&station, path)?);
     println!("{}", serde_json::to_string_pretty(&attempt)?);
+    Ok(())
+}
+
+/// The records of a challenge input (`challenge`, `slice`): a compact
+/// flight's body held to `recorder::CHALLENGE_MAX_BODY`, not the general cap.
+fn challenge_records(path: &Path) -> std::io::Result<recorder::FlightRecords<impl std::io::Read>> {
+    let file = BufReader::new(fs::File::open(path)?);
+    recorder::read_records_within(file, recorder::CHALLENGE_MAX_BODY)
+}
+
+/// The flight graded as a challenge input.
+fn challenge_input<'s>(station: &'s Station, path: &Path) -> Result<Analysis<'s>, Box<dyn Error>> {
+    let flight = analyzer::Flight::from_records(challenge_records(path)?)?;
+    let analysis = station.analyse(flight_id(path), flight);
+    Ok(analysis.ok_or("no air/ground data in this flight")?)
+}
+
+/// Validates a challenge definition the way an attempt is graded against
+/// it: what a site runs on its catalogue, so both agree (docs/challenges.md).
+fn check(def: &Path) -> Result<(), Box<dyn Error>> {
+    let c = challenge::Challenge::parse(&fs::read_to_string(def)?)?;
+    let ok = serde_json::json!({ "ok": true, "id": c.id, "version": c.version });
+    println!("{ok}");
     Ok(())
 }
 
@@ -222,6 +258,47 @@ fn uploadable(path: &Path) -> Result<(), String> {
     }
 }
 
+/// `--ref <ref>` or `--from <s> --to <s>`, then an optional `-o <out>`.
+fn slice_args<'a>(args: &[&'a str]) -> Option<(recorder::Cut<'a>, Option<&'a str>)> {
+    let secs = |s: &str| {
+        let s: f64 = s.parse().ok().filter(|s: &f64| s.is_finite())?;
+        Some(SimTime::from_secs_f64(s))
+    };
+    let (cut, rest) = match args {
+        ["--ref", r, rest @ ..] if recorder::is_reference(r) => (recorder::Cut::Attempt(r), rest),
+        ["--from", a, "--to", b, rest @ ..] => (recorder::Cut::Range(secs(a)?, secs(b)?), rest),
+        _ => return None,
+    };
+    match rest {
+        [] => Some((cut, None)),
+        ["-o", out] => Some((cut, Some(out))),
+        _ => None,
+    }
+}
+
+/// Cuts an attempt's slice (docs/challenge-protocol.md A5) into `out`,
+/// `<flight>.slice.fqz` by default, and reports it as JSON.
+fn slice(path: &Path, cut: recorder::Cut, out: Option<&str>) -> Result<(), Box<dyn Error>> {
+    let records = challenge_records(path)?;
+    let recording = recorder::Recording::from_records(records.lfl_version(), records)?;
+    let sliced = recording.slice(cut).ok_or_else(|| match cut {
+        recorder::Cut::Attempt(r) => format!("{}: no attempt marker with ref {r}", path.display()),
+        recorder::Cut::Range(..) => format!("{}: no data", path.display()),
+    })?;
+    let out = out.map_or_else(|| path.with_extension("slice.fqz"), PathBuf::from);
+    let bytes = sliced.to_bytes()?;
+    fs::write(&out, &bytes)?;
+    let report = serde_json::json!({
+        "out": out.display().to_string(),
+        "bytes": bytes.len(),
+        "from_s": sliced.from.as_secs_f64(),
+        "to_s": sliced.to.as_secs_f64(),
+        "complete": sliced.complete,
+    });
+    println!("{report}");
+    Ok(())
+}
+
 /// The summaries through the folder's index, which it brings up to date.
 fn list(dir: &Path) -> Result<(), Box<dyn Error>> {
     let summaries = Index::open(dir).summaries(&Station::core()?);
@@ -232,6 +309,55 @@ fn list(dir: &Path) -> Result<(), Box<dyn Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn slice_takes_a_ref_or_a_range_and_an_output() {
+        let ok = |args: &[&str]| slice_args(args).is_some();
+        assert!(ok(&["--ref", "Qe3v1hJ0dEa9fP2kLm7xRw"]));
+        assert!(ok(&["--ref", "Qe3v1hJ0dEa9fP2kLm7xRw", "-o", "a.fqz"]));
+        assert!(ok(&["--from", "10", "--to", "20.5", "-o", "a.fqz"]));
+        for bad in [
+            &["--ref", "short"][..],
+            &["--ref", "Qe3v1hJ0dEa9fP2kLm7xRw", "-o"],
+            &["--from", "x", "--to", "2"],
+            &["--from", "NaN", "--to", "2"],
+            &[],
+        ] {
+            assert!(!ok(bad), "{bad:?}");
+        }
+    }
+
+    /// A compact flight past the challenge cap is refused by `challenge` and
+    /// `slice`, though the app's own flights may be larger.
+    #[test]
+    fn challenge_inputs_are_held_to_the_lower_cap() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("big.fqz");
+        let mut file = b"FQJC".to_vec();
+        file.extend([1, 0, 1, 0]);
+        let body = vec![0u8; recorder::CHALLENGE_MAX_BODY as usize + 1];
+        file.extend(zstd::encode_all(&body[..], 3).unwrap());
+        fs::write(&path, file).unwrap();
+        let golden = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../fixtures/challenge/challenge.json"
+        );
+        let too_big = "compact flight larger than this reader accepts";
+        let err = challenge(Path::new(golden), &path).unwrap_err();
+        assert_eq!(err.to_string(), too_big);
+        let err = slice(
+            &path,
+            recorder::Cut::Range(SimTime::ZERO, SimTime::from_micros(1)),
+            None,
+        );
+        assert_eq!(err.unwrap_err().to_string(), too_big);
+        let err = Station::core().unwrap().open(&path).err().unwrap();
+        assert_eq!(
+            err.to_string(),
+            "corrupt compact flight",
+            "the general cap reads it"
+        );
+    }
 
     #[test]
     fn a_challenge_takes_a_compact_flight_only() {

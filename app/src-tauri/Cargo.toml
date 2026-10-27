@@ -11,17 +11,32 @@ publish.workspace = true
 name = "foqa-sim"
 path = "src/main.rs"
 
+[features]
+default = ["connect"]
+# The site client (docs/challenge-protocol.md B1): off, the app has no
+# network code for challenges and works from challenge files only.
+connect = ["dep:connect", "dep:open"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
 capture = { path = "../../crates/capture" }
 challenge = { path = "../../crates/challenge" }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+connect = { path = "../../crates/connect", optional = true }
 debrief = { path = "../../crates/debrief" }
+open = { version = "5", optional = true }
+recorder = { path = "../../crates/recorder" }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1"
+sha2 = "0.10"
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-autostart = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-single-instance = "2"
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+tempfile = "3"

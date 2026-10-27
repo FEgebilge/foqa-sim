@@ -7,6 +7,8 @@ use rules::{Aircraft, Level};
 use serde::Serialize;
 
 pub const SCORING: &str = "landing-1";
+/// The shared landing assessment (docs/scoring.md), crates/assess.
+pub const LANDING_2: &str = "landing-2";
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Score {

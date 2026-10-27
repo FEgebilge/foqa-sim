@@ -22,6 +22,6 @@ export const toRow = (flight: FlightSummary): FlightRow => ({
   route: `${flight.departure ?? ""}${flight.arrival ?? ""}`,
   duration: flight.duration_s,
   landings: flight.landings,
-  assessment: flight.assessment.points,
+  assessment: flight.assessment.score ?? 100 - flight.assessment.points * 10,
   events: Object.values(flight.event_counts).reduce((sum, count) => sum + count, 0),
 });

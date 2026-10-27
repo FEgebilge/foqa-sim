@@ -4,11 +4,13 @@ import { Button } from "@ui/components/button/button";
 import { Tooltip } from "@ui/components/tooltip/tooltip";
 import { bySeverity, eventsIn, landingWindow } from "../../lib/explain";
 import { clock, LEVEL_LABEL, levelRank, M_PER_FT, number } from "../../lib/format";
+
+import { criterion, landingAt } from "../../lib/assessment";
 import { contactLabel, type Landing } from "../../lib/landings";
 import { levelVar } from "../../lib/palette";
-import { distanceScale, gScale, LIGHT_PITCH, pitchScale, sinkScale, type Scale } from "../../lib/references";
+import { centrelineScale, distanceScale, gScale, LIGHT_PITCH, pitchScale, rollScale, sinkScale, speedScale, type Scale } from "../../lib/references";
 import type { Debrief, FlightEvent, Level, TouchdownWind } from "../../types";
-import { LevelBadge } from "../level";
+import { GradeTag, LevelBadge } from "../level";
 import { RunwayDiagram } from "./RunwayDiagram";
 
 /** Which touchdown value each rule name reads, so the card can flag the value that raised an event. */
@@ -39,7 +41,13 @@ export function LandingCard({ index, landing: { touchdown: td, bounces }, events
   const worst = judged[0]?.level;
   const fix = td.runway;
   const width = runwayWidth ?? (fix && debrief.airports.find((a) => a.icao === fix.icao)?.runways.find((r) => r.ends.some((e) => e.runway === fix.runway))?.width_m);
-  const sink = sinkScale(flight), g = gScale(flight), pitch = pitchScale(flight);
+  // The landing-2 assessment of this landing: its score and the bands the gauges shade.
+  const scored = landingAt(debrief, td.t_s);
+  const c = (id: string) => criterion(scored, id);
+  const sink = sinkScale(flight, td.sink_fpm, c("E2")), g = gScale(flight, td.peak_g, c("E1")), pitch = pitchScale(flight);
+  const roll = td.roll_deg !== undefined ? rollScale(Math.abs(td.roll_deg), c("E5")) : null;
+  const reference = scored?.speeds ? (scored.class === "light" ? scored.speeds.vapp_kt : scored.speeds.vref_kt) : undefined;
+  const speed = td.ias_kt !== undefined && reference !== undefined ? speedScale(td.ias_kt, reference, c("B2")) : null;
 
   return (
     <article className="panel flex flex-col gap-3 p-4" aria-labelledby={`landing-${index}`}>
@@ -48,7 +56,14 @@ export function LandingCard({ index, landing: { touchdown: td, bounces }, events
         <span className="readout text-xs text-fg-3">T+{clock(td.t_s)}</span>
         {bounces.length ? <span className="readout rounded-sm bg-muted px-1.5 text-xs" style={flags.has("bounce") ? { color: levelVar(flags.get("bounce")!) } : undefined}>Bounced ×{bounces.length}</span> : null}
         {fix ? <span className="readout rounded-sm bg-muted px-1.5 text-xs">{fix.icao} {fix.runway}</span> : null}
-        <span className="ml-auto"><LevelBadge level={worst} /></span>
+        <span className="ml-auto flex items-center gap-2">
+          {scored?.score != null && scored.grade ? (
+            <span className="inline-flex items-center gap-1.5" title={`landing-2 score of this landing${scored.full_stop ? "" : " (touch-and-go: no rollout scored, does not set the flight grade)"}`}>
+              <span className="readout text-sm font-semibold">{number(scored.score, 1)}</span>
+              <GradeTag grade={scored.grade} label={scored.full_stop ? undefined : "Touch-and-go"} />
+            </span>
+          ) : <LevelBadge level={worst} />}
+        </span>
       </header>
 
       <div className="rounded-[var(--radius-control)] border px-3 py-2 text-xs" style={{ borderColor: worst ? `color-mix(in oklab, ${levelVar(worst)} 45%, var(--border))` : "var(--border)" }}>
@@ -62,7 +77,9 @@ export function LandingCard({ index, landing: { touchdown: td, bounces }, events
             ))}
           </ul>
         ) : <p className="text-fg-2">No rule exceeded from the start of the approach to 10 s into the rollout.</p>}
-        <p className="mt-1.5 text-[11px] text-fg-3">The verdict comes from the rules ({flight.profile}). The gauges are context: published references and sim comfort bands (a flight-sim community convention, not a limit); ⓘ lists their sources.</p>
+        <p className="mt-1.5 text-[11px] text-fg-3">{scored?.status === "scored"
+          ? `Events from the rules (${flight.profile}). The shaded bands are landing-2's for each value (ideal, tolerance, levels 1–3), the same ones the score uses; dashed ticks are published references. ⓘ lists the sources.`
+          : `Events from the rules (${flight.profile}). Not scored by landing-2${scored?.missing.length ? `: no ${scored.missing.join(", ")}` : ""}; the gauges show published references only.`}</p>
       </div>
 
       <dl className="flex flex-col gap-3">
@@ -77,10 +94,11 @@ export function LandingCard({ index, landing: { touchdown: td, bounces }, events
             : flight.class === "light" ? <Note text={LIGHT_PITCH.text} source={LIGHT_PITCH.source} /> : null}
         </Metric>
         <Metric label="Roll" value={td.roll_deg !== undefined ? `${number(Math.abs(td.roll_deg), 1)}° ${td.roll_deg > 0 ? "R" : td.roll_deg < 0 ? "L" : ""}` : "–"} sub="bank">
-          <Note text="No numeric reference: some bank into the wind is normal in a crosswind." />
+          {roll ? <Gauge scale={roll} value={Math.abs(td.roll_deg!)} unit="°" digits={1} /> : <Note text="Not scored: some bank into the wind is normal in a crosswind." />}
         </Metric>
         <Metric label="Speed" value={td.ias_kt !== undefined ? `${number(td.ias_kt)} kt` : "–"} sub="indicated">
-          <Note text="Compare with your reference speed (Vref); it is not recorded." />
+          {speed ? <Gauge scale={speed} value={td.ias_kt!} unit="kt" />
+            : <Note text={scored?.status === "scored" ? `No Vref for this type: touchdown speed is not graded.` : "Compare with your reference speed (Vref)."} />}
         </Metric>
         {td.wind ? (
           <Metric label="Wind" value={windValue(td.wind)} sub="at touchdown">
@@ -105,9 +123,10 @@ export function LandingCard({ index, landing: { touchdown: td, bounces }, events
       {fix ? (
         <div className="flex flex-col gap-3 rounded-[var(--radius-control)] border border-line-subtle bg-bg px-3 py-2.5">
           <Metric label="Touchdown" value={`${number(fix.along_m)} m`} sub={`${number(fix.along_m / M_PER_FT)} ft past the threshold · ${fix.zone}`} flag={flags.get("along")}>
-            <Gauge scale={distanceScale(fix, flight)} value={fix.along_m} unit="m" flag={flags.get("along")} />
+            <Gauge scale={distanceScale(fix, flight, c("C1"))} value={fix.along_m} unit="m" flag={flags.get("along")} />
           </Metric>
           <Metric label="Centreline" value={fix.cross_m === 0 ? "0 m" : `${number(Math.abs(fix.cross_m), 1)} m ${fix.cross_m > 0 ? "R" : "L"}`} sub={`${number(Math.abs(fix.cross_m) / M_PER_FT)} ft off`} flag={flags.get("cross")}>
+            {(() => { const s = centrelineScale(fix.cross_m, width, c("D1")); return s ? <Gauge scale={s} value={Math.abs(fix.cross_m)} unit="m" digits={1} flag={flags.get("cross")} /> : null; })()}
             <Note text={width ? `Target 0 m. The runway edge is ${number(width / 2, 1)} m from the centreline (measured at the aircraft's centre, not its wheels).` : "Target 0 m."} />
           </Metric>
           <RunwayDiagram fix={fix} widthM={width ?? 45} />
@@ -173,13 +192,13 @@ function Sources({ children }: { children: ReactNode }) {
 const pct = (scale: Scale, v: number) => Math.min(100, Math.max(0, ((v - scale.min) / (scale.max - scale.min)) * 100));
 
 /**
- * The value as a needle in its event's colour. Sim comfort bands shade the track, darker as they get firmer, the one
- * holding the value brightest; published references sit on top, ranges as tinted segments and points as dashed ticks.
+ * The value as a needle in its event's colour. The score's bands shade the track in the zone colours (the one holding the
+ * value brightest); published references sit on top, ranges as tinted segments and points as dashed ticks.
  */
 function Gauge({ scale, value, unit, digits = 0, flag }: { scale: Scale; value: number; unit: string; digits?: number; flag?: Level }) {
   const fmt = (v: number) => number(v, digits);
   const beyond = value > scale.max ? "›" : value < scale.min ? "‹" : null;
-  const bands = scale.comfort?.bands.map((band, i, all) => ({ ...band, from: all[i - 1]?.to ?? scale.min })) ?? [];
+  const bands = (scale.bands?.bands.map((band, i, all) => ({ ...band, from: Math.max(scale.min, all[i - 1]?.to ?? scale.min) })) ?? []).filter((b) => b.to > scale.min && b.from < scale.max);
   const current = bands.find((b) => value <= b.to);
   // Edges inside the scale; one too close to the previous label is left to the ⓘ list.
   const edges = [...new Set([...bands.map((b) => b.to), ...scale.marks.flatMap((m) => (m.to === undefined ? [m.at] : [m.at, m.to]))])].sort((a, b) => a - b)
@@ -189,8 +208,8 @@ function Gauge({ scale, value, unit, digits = 0, flag }: { scale: Scale; value: 
     <div className="flex flex-col gap-0.5">
       <div className="relative mt-2 h-2 rounded-full bg-muted">
         {bands.map((b, i) => (
-          <span key={b.to} className="absolute inset-y-0 border-r border-surface first:rounded-l-full last:rounded-r-full last:border-r-0" title={`${b.label} (sim comfort band)`}
-            style={{ left: `${pct(scale, b.from)}%`, width: `${pct(scale, b.to) - pct(scale, b.from)}%`, background: `color-mix(in oklab, var(--foreground) ${14 + i * 10}%, transparent)`, opacity: b === current ? 1 : 0.6 }} />
+          <span key={`${b.from}-${b.to}-${i}`} className="absolute inset-y-0 border-r border-surface first:rounded-l-full last:rounded-r-full last:border-r-0" title={`${b.label} (landing-2)`}
+            style={{ left: `${pct(scale, b.from)}%`, width: `${pct(scale, b.to) - pct(scale, b.from)}%`, background: b.color, opacity: b === current ? 1 : 0.55 }} />
         ))}
         {scale.marks.map((mark) => mark.to === undefined
           ? <span key={mark.label} className="absolute -top-1.5 h-5 w-0 border-l border-dashed border-fg-2" style={{ left: `${pct(scale, mark.at)}%` }} title={mark.label} aria-hidden="true" />
@@ -202,14 +221,14 @@ function Gauge({ scale, value, unit, digits = 0, flag }: { scale: Scale; value: 
         {edges.map((v) => <span key={v} className="absolute -translate-x-1/2" style={{ left: `${pct(scale, v)}%` }}>{fmt(v)}</span>)}
       </div>
       <p className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-[11px] text-fg-3">
-        {[...scale.marks.map((m) => m.label), ...(current ? [`Sim comfort band: ${current.label.toLowerCase()}`] : [])].join(" · ")}
+        {[...(current ? [`landing-2: ${current.label.toLowerCase()}`] : []), ...scale.marks.map((m) => m.label)].join(" · ")}
         <Sources>
           {scale.marks.length ? <span className="block font-medium">Reference</span> : null}
           {scale.marks.map((m) => <span key={m.label} className="block"><b>{m.to === undefined ? `┊ ${fmt(m.at)}` : `${fmt(m.at)}–${fmt(m.to)}`} {unit}</b> {m.label}</span>)}
-          {bands.length ? <span className="mt-1 block font-medium">Sim comfort band, context only</span> : null}
-          {bands.map((b) => <span key={b.to} className="block"><b>{b.to === Infinity ? `> ${fmt(b.from)}` : `≤ ${fmt(b.to)}`} {unit}</b> {b.label}</span>)}
+          {bands.length ? <span className="mt-1 block font-medium">landing-2 bands (the score)</span> : null}
+          {bands.map((b, i) => <span key={i} className="block"><b>{b.to === Infinity ? `> ${fmt(b.from)}` : `${fmt(b.from)}–${fmt(b.to)}`} {unit}</b> {b.label}</span>)}
           <span className="mt-1 block font-medium">Sources</span>
-          {[...new Set([...scale.marks.map((m) => m.source), scale.comfort?.source])].filter(Boolean).map((source) => <span key={source} className="block opacity-80">{source}</span>)}
+          {[...new Set([...scale.marks.map((m) => m.source), scale.bands?.source])].filter(Boolean).map((source) => <span key={source} className="block opacity-80">{source}</span>)}
         </Sources>
       </p>
     </div>

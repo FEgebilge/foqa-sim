@@ -1,0 +1,72 @@
+[
+  {
+    "key": "ltfj-06-gusty-2026w44-v1",
+    "id": "ltfj-06-gusty-2026w44",
+    "version": 1,
+    "title": "Sabiha Gökçen 06, crosswind",
+    "airport": "LTFJ",
+    "runway": "06",
+    "sha256": "9f2c4e1ab37d05c8e6f1a2b4c9d8e7f60a1b2c3d4e5f60718293a4b5c6d7e8f9",
+    "definition": {
+      "id": "ltfj-06-gusty-2026w44",
+      "version": 1,
+      "title": "Sabiha Gökçen 06, crosswind",
+      "window": { "from": "2026-10-27T00:00Z", "to": "2026-11-03T00:00Z" },
+      "airport": "LTFJ",
+      "runway": "06",
+      "aircraft": { "classes": ["transport"], "types": ["B38M", "A20N"] },
+      "start": { "distance_nm": 8, "height_ft": 2500, "ias_kt": 160, "gear_down": true, "flaps": 0.875, "mode": "teleport" },
+      "gate": { "distance_nm": 3 },
+      "conditions": {
+        "wind": { "from_deg": 330, "speed_kt": 18, "tolerance_deg": 20, "tolerance_kt": 4 },
+        "crosswind_kt": { "min": 12, "max": 20 },
+        "tailwind_kt": { "max": 0 }
+      },
+      "rules": { "ap_off_by_height_ft": 1000, "stop_on_runway": true },
+      "scoring": { "version": "landing-1" }
+    }
+  },
+  {
+    "key": "ltbj-16l-calm-v2",
+    "id": "ltbj-16l-calm",
+    "version": 2,
+    "title": "Izmir 16L, calm morning",
+    "airport": "LTBJ",
+    "runway": "16L",
+    "sha256": "41d7e0c3b2a19f8e7d6c5b4a39281706f5e4d3c2b1a0918273645546372819a0",
+    "definition": {
+      "id": "ltbj-16l-calm",
+      "version": 2,
+      "title": "Izmir 16L, calm morning",
+      "airport": "LTBJ",
+      "runway": "16L",
+      "aircraft": { "classes": ["light"] },
+      "start": { "distance_nm": 5, "height_ft": 1500, "ias_kt": 90, "gear_down": true, "flaps": 0.33, "mode": "teleport" },
+      "gate": { "distance_nm": 2 },
+      "rules": { "stop_on_runway": true },
+      "scoring": { "version": "landing-1" }
+    }
+  },
+  {
+    "key": "lfpg-27r-self-v1",
+    "id": "lfpg-27r-self",
+    "version": 1,
+    "title": "Paris CDG 27R, fly it yourself",
+    "airport": "LFPG",
+    "runway": "27R",
+    "sha256": "c0ffee00d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8",
+    "definition": {
+      "id": "lfpg-27r-self",
+      "version": 1,
+      "title": "Paris CDG 27R, fly it yourself",
+      "airport": "LFPG",
+      "runway": "27R",
+      "aircraft": { "types": ["A20N", "A21N"] },
+      "start": { "distance_nm": 12, "height_ft": 3500, "ias_kt": 170, "mode": "self" },
+      "gate": { "distance_nm": 4 },
+      "conditions": { "tailwind_kt": { "max": 5 } },
+      "rules": { "ap_off_by_height_ft": 500 },
+      "scoring": { "version": "landing-1" }
+    }
+  }
+]

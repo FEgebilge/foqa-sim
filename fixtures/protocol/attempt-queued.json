@@ -1,0 +1,17 @@
+{
+  "attempt": {
+    "id": "0b7f3c52-9a1e-4d68-b2c4-7e5f9a0d1c83",
+    "challenge_id": "test-20",
+    "challenge_version": 1,
+    "issued_at": "2026-10-28T17:02:11Z",
+    "uploaded_at": "2026-10-28T17:20:40Z",
+    "scored_at": null,
+    "result": null,
+    "verified": false,
+    "unverified": [],
+    "reject": null,
+    "rank": null,
+    "url": "https://landings.example/#/challenges/test-20/attempts/0b7f3c52-9a1e-4d68-b2c4-7e5f9a0d1c83",
+    "status": "queued"
+  }
+}

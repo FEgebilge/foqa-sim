@@ -1,7 +1,7 @@
 use std::io::{self, Read};
 
 use fdm_core::{AircraftId, Airport, Lfl, Sample, SignalDef, SignalId, SimTime, Unit};
-use recorder::{Record, SimEvent, read_records};
+use recorder::{FlightRecords, Record, SimEvent, read_records};
 
 /// Parameters whose value wraps around, as (name, lowest value, period).
 /// Interpolating across the wrap-around must take the short way round
@@ -24,7 +24,11 @@ pub struct Flight {
 
 impl Flight {
     pub fn read(input: impl Read) -> io::Result<Self> {
-        let mut reader = read_records(input)?;
+        Self::from_records(read_records(input)?)
+    }
+
+    /// The flight of records already opened (e.g. with a lower cap).
+    pub fn from_records<R: Read>(mut reader: FlightRecords<R>) -> io::Result<Self> {
         let lfl = &Lfl::V1;
         if reader.lfl_version() != lfl.version {
             return Err(io::Error::new(

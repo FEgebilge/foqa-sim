@@ -1,0 +1,5 @@
+{
+  "error": "rate_limited",
+  "message": "Rate limited.",
+  "retry_after": 30
+}

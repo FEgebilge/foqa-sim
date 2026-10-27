@@ -4,7 +4,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-use analyzer::{Flight, Phase, PhaseConfig, Track, phases, touchdowns};
+use analyzer::{Approach, Flight, Phase, PhaseConfig, Track, phases, sustained_worst, touchdowns};
 use fdm_core::Lfl;
 use recorder::{Recorder, ReplaySource};
 
@@ -88,4 +88,32 @@ fn single_soft_touchdown_matches_the_sim() {
     );
     assert!((td.peak_g - 1.13).abs() < 0.02, "peak {:.2} g", td.peak_g);
     assert!(td.pitch_deg.unwrap() > 3.0, "touchdown should be nose-up");
+}
+
+/// Regression snapshot of the approach values of the pattern's landing,
+/// over the light window (500 ft to the 20 ft flare). The recording has no
+/// airport data, so the runway values are unknown.
+#[test]
+fn approach_values_of_the_pattern_landing() {
+    let (flight, track) = flight();
+    let td = &touchdowns(flight, track)[0];
+    let a = Approach::of(flight, track, td, 500.0, 20.0);
+    let w = &a.window;
+    let sink = sustained_worst(&w.t, &w.sink_fpm, 3_000_000);
+    let roll = w.roll_deg.iter().map(|r| r.abs()).collect::<Vec<_>>();
+    let roll = sustained_worst(&w.t, &roll, 3_000_000);
+    let span = w.t[w.t.len() - 1].us_since(w.t[0]) as f64 / 1e6;
+    eprintln!(
+        "window {span:.1} s, float {:?}, sink {sink:?}, roll {roll:?}",
+        a.float_s
+    );
+    assert!((span - 29.5).abs() < 0.2, "{span}");
+    assert!((a.float_s.unwrap() - 13.3).abs() < 0.1);
+    // A steep, turning final: 1338 fpm and 24.5 deg held for 3 s.
+    assert!((sink.unwrap().1 - 1338.0).abs() < 5.0);
+    assert!((roll.unwrap().1 - 24.5).abs() < 0.2);
+    // Only the flap handle is recorded: no flap angle, no changes.
+    assert!(a.config_changes.is_empty());
+    assert_eq!(a.threshold, None);
+    assert_eq!((a.crab_deg, a.drift_kt, a.slowed), (None, None, None));
 }

@@ -205,7 +205,7 @@ pub fn phases(track: &Track, cfg: &PhaseConfig) -> Vec<Span> {
 }
 
 /// Height above the runway: calibrated RA where valid, else AAL.
-fn runway_height(track: &Track, i: usize) -> (f64, Basis) {
+pub(crate) fn runway_height(track: &Track, i: usize) -> (f64, Basis) {
     Some(track.ra_ft[i])
         .filter(|r| r.is_finite())
         .map_or((track.aal_ft[i], Basis::Aal), |r| (r, Basis::Ra))

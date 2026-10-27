@@ -2,14 +2,15 @@
 //! Everything comes from the flight, so the server can grade the uploaded
 //! recording itself and never trust a client's number.
 
-use analyzer::{locate, wind_components};
+use analyzer::{Phase, locate, wind_components};
 use debrief::Analysis;
 use fdm_core::SimTime;
 use fdm_core::geo::distance_m;
-use rules::Aircraft;
+use recorder::{AttemptPhase, SimEvent};
+use rules::{Aircraft, Domain};
 use serde::Serialize;
 
-use crate::score::{Landing, Score, landing_1};
+use crate::score::{LANDING_2, Landing, Part, SCORING, Score, landing_1};
 use crate::{Challenge, M_PER_NM};
 
 /// The rollout ends below this groundspeed.
@@ -27,6 +28,11 @@ const MAX_GS_KT: f64 = 600.0;
 pub struct Attempt {
     pub challenge: String,
     pub challenge_version: u32,
+    /// The aircraft graded, from the recorded identity and weight.
+    pub aircraft: Flown,
+    /// The attempt marker graded after, when the flight has one: the
+    /// latest begin (docs/challenge-protocol.md A7), or the attempt's own.
+    pub marker: Option<Marker>,
     /// Every check passed: the attempt counts.
     pub valid: bool,
     pub checks: Vec<Check>,
@@ -35,6 +41,24 @@ pub struct Attempt {
     pub touchdown_s: Option<f64>,
     /// `None` without a landing on the challenge's runway past its gate.
     pub score: Option<Score>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Flown {
+    /// ICAO type designator; `None` without an identity.
+    pub icao: Option<String>,
+    /// `light` or `transport`.
+    pub class: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Marker {
+    /// The opaque reference the begin marker carries; `None` for a local attempt.
+    #[serde(rename = "ref")]
+    pub reference: Option<String>,
+    /// Sim time of the begin marker and of the end marker after it, s.
+    pub begin_s: f64,
+    pub end_s: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -52,25 +76,67 @@ fn check(name: &'static str, ok: bool, detail: String) -> Check {
 struct Graded {
     gate: SimTime,
     touchdown: SimTime,
-    score: Score,
+    /// `None` when landing-2 lacks the data any score needs.
+    score: Option<Score>,
+}
+
+/// Which begin marker an attempt is graded after.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum Begin<'a> {
+    /// The latest begin of any attempt: a slice holds one attempt (A7).
+    #[default]
+    Latest,
+    /// One attempt of a whole flight: its begin, the first carrying
+    /// `reference` (`None` for a local attempt) at or after `begin_s`,
+    /// the sim time it was placed at. Without that marker, a landing after
+    /// `begin_s` is graded.
+    Of {
+        reference: Option<&'a str>,
+        begin_s: Option<f64>,
+    },
 }
 
 /// Grades the analysed flight as an attempt at `challenge`.
+/// Only a touchdown after the latest begin marker is graded, when the
+/// flight has one.
 pub fn evaluate(challenge: &Challenge, a: &Analysis) -> Attempt {
-    let mut checks = vec![aircraft(challenge, a)];
-    let graded = landing(challenge, a, &mut checks);
+    evaluate_after(challenge, a, Begin::Latest)
+}
+
+/// Grades one attempt of the analysed flight: only a touchdown after the
+/// begin `begin` picks.
+pub fn evaluate_after(challenge: &Challenge, a: &Analysis, begin: Begin) -> Attempt {
+    let mut checks = vec![aircraft_check(challenge, a)];
+    let marker = marker(a, begin);
+    let fallback = match begin {
+        Begin::Of { begin_s, .. } => begin_s,
+        Begin::Latest => None,
+    };
+    let after = marker
+        .as_ref()
+        .map(|m| m.begin_s)
+        .or(fallback)
+        .map(SimTime::from_secs_f64);
+    let graded = landing(challenge, a, after, &mut checks);
     Attempt {
         challenge: challenge.id.clone(),
         challenge_version: challenge.version,
+        aircraft: Flown {
+            icao: a.selection.icao.clone(),
+            class: a.selection.class.map(|k| k.to_string()),
+        },
+        marker,
         valid: graded.is_some() && checks.iter().all(|k| k.ok),
         checks,
         gate_s: graded.as_ref().map(|g| g.gate.as_secs_f64()),
         touchdown_s: graded.as_ref().map(|g| g.touchdown.as_secs_f64()),
-        score: graded.map(|g| g.score),
+        score: graded.and_then(|g| g.score),
     }
 }
 
-fn aircraft(c: &Challenge, a: &Analysis) -> Check {
+/// Whether the flight's aircraft is one the challenge allows; also the
+/// app's pre-flight check on the flight being recorded.
+pub fn aircraft_check(c: &Challenge, a: &Analysis) -> Check {
     let (class, icao) = (a.selection.class, a.selection.icao.as_deref());
     let rule = &c.aircraft;
     let class_ok = rule.classes.is_empty() || class.is_some_and(|k| rule.classes.contains(&k));
@@ -81,14 +147,47 @@ fn aircraft(c: &Challenge, a: &Analysis) -> Check {
     check("aircraft", class_ok && type_ok, detail)
 }
 
-/// Finds the landing, adds the checks on it and scores it.
-fn landing(c: &Challenge, a: &Analysis, checks: &mut Vec<Check>) -> Option<Graded> {
+/// The begin marker `begin` picks (events are in time order) and the
+/// first end marker of the same attempt after it.
+fn marker(a: &Analysis, begin: Begin) -> Option<Marker> {
+    let markers = a.flight.events.iter().filter_map(|(t, e)| match e {
+        SimEvent::Attempt(m) => Some((*t, m)),
+        _ => None,
+    });
+    let mut begins = markers
+        .clone()
+        .filter(|(_, m)| m.phase == AttemptPhase::Begin);
+    let (begin, m) = match begin {
+        Begin::Latest => begins.next_back()?,
+        Begin::Of { reference, begin_s } => begins.find(|(t, m)| {
+            m.reference.as_deref() == reference && begin_s.is_none_or(|b| t.as_secs_f64() >= b)
+        })?,
+    };
+    let end = markers
+        .filter(|(t, e)| *t >= begin && e.phase == AttemptPhase::End && e.reference == m.reference)
+        .map(|(t, _)| t)
+        .next();
+    Some(Marker {
+        reference: m.reference.clone(),
+        begin_s: begin.as_secs_f64(),
+        end_s: end.map(SimTime::as_secs_f64),
+    })
+}
+
+/// Finds the landing after `after`, adds the checks on it and scores it.
+fn landing(
+    c: &Challenge,
+    a: &Analysis,
+    after: Option<SimTime>,
+    checks: &mut Vec<Check>,
+) -> Option<Graded> {
     let (flight, track) = (&a.flight, &a.track);
     let on_runway = |icao: &str, runway: &str| {
         icao.eq_ignore_ascii_case(&c.airport) && runway.eq_ignore_ascii_case(&c.runway)
     };
     let found = a.touchdowns.iter().enumerate().find(|(_, td)| {
         !td.bounce
+            && after.is_none_or(|t| td.t >= t)
             && td
                 .runway
                 .as_ref()
@@ -240,24 +339,116 @@ fn landing(c: &Challenge, a: &Analysis, checks: &mut Vec<Check>) -> Option<Grade
         ));
     }
 
-    let score = landing_1(&Landing {
-        class: a.selection.class.unwrap_or(Aircraft::Transport),
-        td,
-        fix,
-        bounced: a.touchdowns.get(k + 1).is_some_and(|t| t.bounce),
-        worst: a
-            .events
-            .iter()
-            .filter(|e| (from..td.t).contains(&e.start))
-            .map(|e| e.level)
-            .max(),
-        rollout_cross_m: rollout.map(|xs| xs.into_iter().fold(0.0, f64::max)),
-    });
+    let score = match c.scoring.version.as_str() {
+        SCORING => Some(landing_1(&Landing {
+            class: a.selection.class.unwrap_or(Aircraft::Transport),
+            td,
+            fix,
+            bounced: a.touchdowns.get(k + 1).is_some_and(|t| t.bounce),
+            worst: a
+                .events
+                .iter()
+                .filter(|e| (from..td.t).contains(&e.start))
+                .map(|e| e.level)
+                .max(),
+            rollout_cross_m: rollout.map(|xs| xs.into_iter().fold(0.0, f64::max)),
+        })),
+        _ => landing_2(a, k, gate_i, checks),
+    };
     Some(Graded {
         gate: from,
         touchdown: td.t,
         score,
     })
+}
+
+/// The landing-2 score of touchdown `k` (docs/scoring.md), the shared
+/// assessment as a ranked attempt flown from the gate: no selected-speed
+/// fallback, the window starting at the gate where it is lower. Adds the
+/// `go_around` check (an attempt that went around is not ranked) and the
+/// `data` check (ranking needs every expected value). The parts are the
+/// domains, their weights shared out where one is n/a; a safety cap holds
+/// `total` below their sum.
+fn landing_2(a: &Analysis, k: usize, gate_i: usize, checks: &mut Vec<Check>) -> Option<Score> {
+    let track = &a.track;
+    let (gate, td) = (track.t[gate_i], a.touchdowns[k].t);
+    let around = a
+        .phases
+        .iter()
+        .find(|s| s.phase == Phase::GoAround && (gate..td).contains(&s.start));
+    checks.push(match around {
+        None => check("go_around", true, "no go-around".into()),
+        Some(s) => check(
+            "go_around",
+            false,
+            format!(
+                "went around at {:.0} s: not ranked, fly again",
+                s.start.as_secs_f64()
+            ),
+        ),
+    });
+    let method = a.method();
+    let landing = assess::Landing {
+        flight: &a.flight,
+        track,
+        selection: &a.selection,
+        touchdowns: &a.touchdowns,
+        index: k,
+        events: &a.events,
+        rules: a.rules(),
+        ranked: true,
+        gate_ft: Some(track.aal_ft[gate_i]).filter(|h| h.is_finite()),
+        target_m: None,
+    };
+    let m = match method.measures(&landing) {
+        Ok((m, _, _)) => m,
+        Err(missing) => {
+            let detail = format!("missing {}", missing.join(", "));
+            checks.push(check("data", false, detail));
+            return None;
+        }
+    };
+    let s = method.score(&m);
+    checks.push(match &s.partial[..] {
+        [] => check("data", true, "every value recorded".into()),
+        partial => check("data", false, format!("partial: {}", partial.join("; "))),
+    });
+    let available: f64 = s
+        .domains
+        .iter()
+        .filter(|d| d.loss.is_some())
+        .map(|d| d.weight)
+        .sum();
+    let parts = s
+        .domains
+        .iter()
+        .filter_map(|d| {
+            Some(Part {
+                name: domain_name(d.domain),
+                weight: d.weight * 100.0 / available,
+                score: 1.0 - d.loss?,
+                value: None,
+                unit: "",
+            })
+        })
+        .collect();
+    Some(Score {
+        version: LANDING_2,
+        total: s.score,
+        parts,
+    })
+}
+
+fn domain_name(d: Domain) -> &'static str {
+    match d {
+        Domain::Stability => "stability",
+        Domain::Energy => "energy",
+        Domain::Point => "point",
+        Domain::Lateral => "lateral",
+        Domain::Contact => "contact",
+        Domain::Rollout => "rollout",
+        Domain::Other => "other",
+    }
 }
 
 fn check_flag(checks: &mut Vec<Check>, name: &'static str, on: bool) {

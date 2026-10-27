@@ -20,7 +20,10 @@
     "assessment": {
       "grade": "poor",
       "points": 10,
-      "findings": 6
+      "findings": 6,
+      "method": "landing-2",
+      "score": 59.9,
+      "confidence": "full"
     }
   },
   {
@@ -41,9 +44,12 @@
       "high": 0
     },
     "assessment": {
-      "grade": "good",
+      "grade": "fair",
       "points": 0,
-      "findings": 0
+      "findings": 0,
+      "method": "landing-2",
+      "score": 72.8,
+      "confidence": "full"
     }
   },
   {
@@ -66,7 +72,8 @@
     "assessment": {
       "grade": "fair",
       "points": 2,
-      "findings": 1
+      "findings": 1,
+      "method": "points"
     }
   },
   {
@@ -90,7 +97,10 @@
     "assessment": {
       "grade": "poor",
       "points": 7,
-      "findings": 4
+      "findings": 4,
+      "method": "landing-2",
+      "score": 53.1,
+      "confidence": "full"
     }
   },
   {
@@ -110,7 +120,10 @@
     "assessment": {
       "grade": "poor",
       "points": 8,
-      "findings": 5
+      "findings": 5,
+      "method": "landing-2",
+      "score": 59.9,
+      "confidence": "full"
     }
   }
 ]
