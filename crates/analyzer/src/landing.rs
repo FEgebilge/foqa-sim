@@ -170,7 +170,7 @@ fn grade(flight: &Flight, track: &Track, airports: &[Airport], c: Contact) -> To
 }
 
 /// (lat, lon) at `t`.
-fn position(flight: &Flight, t: SimTime) -> Option<(f64, f64)> {
+pub(crate) fn position(flight: &Flight, t: SimTime) -> Option<(f64, f64)> {
     Some((flight.at("pos.lat", t)?, flight.at("pos.lon", t)?))
 }
 

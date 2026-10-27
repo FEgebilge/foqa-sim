@@ -354,10 +354,13 @@ fn tail_contact_and_inspection_values_drive_their_rules() {
                 flaps: 0.0,
                 gear: 100.0,
                 wind: (0.0, 0.0),
+                heading: TRACK_DEG,
+                track: TRACK_DEG,
                 sim_rate: 1.0,
                 ap: false,
                 ground: t < LIFTOFF_S,
                 lost: &[],
+                set: Vec::new(),
             }
         } else {
             landing(t, TD, 1.2)
