@@ -239,7 +239,8 @@ impl WeatherSpec {
     /// The `FOQA_SIM_WEATHER` message for request `req`, within the size cap.
     pub fn message(&self, req: &str) -> Result<String, String> {
         self.validate()?;
-        let data = json!({ "v": VERSION, "cmd": "set_weather", "req": req, "spec": self }).to_string();
+        let data =
+            json!({ "v": VERSION, "cmd": "set_weather", "req": req, "spec": self }).to_string();
         if data.len() > MESSAGE_MAX_BYTES {
             return Err("message too long".into());
         }
@@ -278,8 +279,8 @@ pub struct WeatherResult {
 impl WeatherResult {
     /// From the view's JSON, with or without trailing NULs.
     pub fn parse(data: &str) -> Result<Self, String> {
-        let v: Value =
-            serde_json::from_str(data.trim_end_matches(' ')).map_err(|e| format!("not JSON: {e}"))?;
+        let v: Value = serde_json::from_str(data.trim_end_matches(' '))
+            .map_err(|e| format!("not JSON: {e}"))?;
         if v["v"] != VERSION {
             return Err("unsupported version".into());
         }
@@ -842,7 +843,11 @@ mod tests {
     fn weather_spec_message_and_result() {
         let spec = WeatherSpec {
             base: WeatherBase::Name("clear".into()),
-            wind: vec![WindLayer { alt_ft: 0.0, from_deg: 270.0, kt: 18.0 }],
+            wind: vec![WindLayer {
+                alt_ft: 0.0,
+                from_deg: 270.0,
+                kt: 18.0,
+            }],
             qnh_hpa: Some(1013.0),
             temp_c: None,
         };
@@ -856,7 +861,8 @@ mod tests {
         let back: WeatherSpec = serde_json::from_value(v["spec"].clone()).unwrap();
         assert_eq!(back, spec);
         let by_index: WeatherSpec =
-            serde_json::from_str(r#"{"base":3,"wind":[{"alt_ft":0,"from_deg":0,"kt":0}]}"#).unwrap();
+            serde_json::from_str(r#"{"base":3,"wind":[{"alt_ft":0,"from_deg":0,"kt":0}]}"#)
+                .unwrap();
         assert_eq!(by_index.base, WeatherBase::Index(3));
         let mut bad = spec.clone();
         bad.base = WeatherBase::Name("storm".into());
@@ -880,9 +886,13 @@ mod tests {
         assert_eq!(r.mismatches, ["temp"]);
         assert_eq!(r.measured.unwrap().wind_kt, Some(17.5));
         assert_eq!(r.applied.unwrap().wind[0].from_deg, 270.0);
-        assert!(WeatherResult::parse(r#"{"v":1,"cmd":"weather_result","req":"a","ok":true}"#).is_err());
+        assert!(
+            WeatherResult::parse(r#"{"v":1,"cmd":"weather_result","req":"a","ok":true}"#).is_err()
+        );
         assert!(WeatherResult::parse(r#"{"v":2,"cmd":"mark"}"#).is_err());
-        let e = WeatherResult::parse(r#"{"v":2,"cmd":"weather_result","req":"a","ok":false,"error":"no listener"}"#);
+        let e = WeatherResult::parse(
+            r#"{"v":2,"cmd":"weather_result","req":"a","ok":false,"error":"no listener"}"#,
+        );
         assert_eq!(e.unwrap().error.as_deref(), Some("no listener"));
     }
 }
