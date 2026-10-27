@@ -14,7 +14,9 @@ import { useAttempts, useChallenges } from "../../lib/use-backend";
 import type { AttemptView, Briefing, ChallengeDefinition, ChallengeEntry, PreflightLine } from "../../types";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { OPEN_STATES } from "../../lib/attempts";
+import { type SiteAttempt, useConnect, useSiteAttempts, useSites } from "../../lib/sites";
 import { AttemptList, Stages } from "./AttemptList";
+import { SitesPanel } from "./SitesPanel";
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 /** The pre-flight card is measured again this often while shown; each check analyses the flight being recorded. */
@@ -25,6 +27,9 @@ export function ChallengesScreen({ selected, recorder }: { selected?: string; re
   const challenges = useChallenges();
   const attempts = useAttempts();
   const notify = useNotify();
+  const connect = useConnect();
+  const sites = useSites(connect);
+  const siteAttempts = useSiteAttempts(connect);
   const [importing, setImporting] = useState(false);
   const [doomed, setDoomed] = useState<ChallengeEntry | null>(null);
   const entries = useMemo(() => (challenges.state.status === "ready" ? challenges.state.data : []), [challenges.state]);
@@ -65,7 +70,7 @@ export function ChallengesScreen({ selected, recorder }: { selected?: string; re
     body = (
       <div className="grid items-start gap-5 lg:grid-cols-[minmax(15rem,19rem)_minmax(0,1fr)] 2xl:grid-cols-[minmax(17rem,22rem)_minmax(0,1fr)]">
         <Library entries={entries} selected={key} attempts={views} onRemove={setDoomed} />
-        <ChallengeDetail key={key} challengeKey={key} attempts={views.filter((a) => a.key === key)} recorder={recorder} onChanged={attempts.refresh} />
+        <ChallengeDetail key={key} challengeKey={key} attempts={views.filter((a) => a.key === key)} sites={siteAttempts} recorder={recorder} onChanged={attempts.refresh} />
       </div>
     );
   }
@@ -80,6 +85,7 @@ export function ChallengesScreen({ selected, recorder }: { selected?: string; re
         </div>
         {entries.length ? openButton : null}
       </header>
+      {connect ? <SitesPanel sites={sites.data} onChanged={() => { sites.refresh(); challenges.refresh(); }} /> : null}
       {body}
       <ConfirmDialog open={doomed !== null} title="Remove this challenge?" confirmLabel="Remove challenge" onConfirm={remove} onCancel={() => setDoomed(null)}>
         {doomed ? `“${doomed.title}” (${doomed.airport} ${doomed.runway}, version ${doomed.version}) leaves the library. ` : ""}Its attempts and their logs stay. Open the file again to fly it.
@@ -132,7 +138,7 @@ function Library({ entries, selected, attempts, onRemove }: { entries: Challenge
   );
 }
 
-function ChallengeDetail({ challengeKey, attempts, recorder, onChanged }: { challengeKey: string; attempts: AttemptView[]; recorder: RecorderState | null; onChanged: () => void }) {
+function ChallengeDetail({ challengeKey, attempts, sites, recorder, onChanged }: { challengeKey: string; attempts: AttemptView[]; sites: Map<string, SiteAttempt>; recorder: RecorderState | null; onChanged: () => void }) {
   const [briefing, setBriefing] = useState<Briefing | { error: string } | null>(null);
   const { lines, checking, check } = usePreflight(challengeKey, recorder?.value.state);
   useEffect(() => {
@@ -147,10 +153,10 @@ function ChallengeDetail({ challengeKey, attempts, recorder, onChanged }: { chal
         <BriefingCard briefing={briefing} />
         <div className="flex flex-col gap-5">
           <PreflightCard lines={lines} checking={checking} onCheck={check} />
-          <Actions briefing={briefing} attempts={attempts} simReady={lines?.find((l) => l.name === "sim")?.state === "ok"} onChanged={onChanged} />
+          <Actions briefing={briefing} attempts={attempts} simReady={lines?.find((l) => l.name === "sim")?.state === "ok"} ranking={lines?.find((l) => l.name === "ranking")} onChanged={onChanged} />
         </div>
       </div>
-      <AttemptList attempts={attempts} />
+      <AttemptList attempts={attempts} sites={sites} />
     </div>
   );
 }
@@ -275,7 +281,7 @@ function PreflightCard({ lines, checking, onCheck }: { lines: PreflightLine[] | 
 }
 
 /** Place, the attempt in progress (Finish, Fly again, Abandon), or Fly again after the last one. */
-function Actions({ briefing, attempts, simReady, onChanged }: { briefing: Briefing; attempts: AttemptView[]; simReady: boolean; onChanged: () => void }) {
+function Actions({ briefing, attempts, simReady, ranking, onChanged }: { briefing: Briefing; attempts: AttemptView[]; simReady: boolean; ranking?: PreflightLine; onChanged: () => void }) {
   const notify = useNotify();
   const [pending, setPending] = useState<string | null>(null);
   const last = attempts[0];
@@ -316,7 +322,7 @@ function Actions({ briefing, attempts, simReady, onChanged }: { briefing: Briefi
         <>
           <div>
             <h2 className="font-display text-sm font-semibold">{last ? `Attempt ${last.n + 1}` : "First attempt"}</h2>
-            <p className="mt-0.5 text-xs text-fg-3">Local practice: graded here from the recording, never uploaded.</p>
+            <p className="mt-0.5 text-xs text-fg-3">{ranking && !ranking.text.startsWith("Local") ? ranking.text : "Local practice: graded here from the recording, never uploaded."}</p>
           </div>
           <Button variant="primary" onClick={place} loading={pending === "place"} disabled={!simReady || busy}>
             {last ? <RotateCcw size={16} aria-hidden="true" /> : <PlaneLanding size={16} aria-hidden="true" />}

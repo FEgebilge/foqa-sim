@@ -1,7 +1,10 @@
 import { useState } from "react";
-import { Check, ChevronRight, History, X } from "lucide-react";
+import { Check, ChevronRight, ExternalLink, History, RefreshCw, X } from "lucide-react";
 import { Badge, type BadgeTone } from "@ui/components/badge/badge";
+import { Button } from "@ui/components/button/button";
 import { EmptyState } from "@ui/components/empty-state/empty-state";
+import { api } from "../../api";
+import { RETRYABLE, SITE_STATE, type SiteAttempt } from "../../lib/sites";
 import { flightDate, flightTimeUtc, measured, number } from "../../lib/format";
 import type { AttemptLogLine, AttemptResult, AttemptState, AttemptView } from "../../types";
 
@@ -60,7 +63,7 @@ export function Stages({ attempt }: { attempt: AttemptView }) {
 const STAGE_RANK: Partial<Record<AttemptState, number>> = { flying: 1, approach: 1, rollout: 2, finished: 3, graded_local: 4, sliced: 4, done: 4 };
 
 /** The attempts at one challenge, newest first; each opens to its checks, score parts and log. */
-export function AttemptList({ attempts }: { attempts: AttemptView[] }) {
+export function AttemptList({ attempts, sites }: { attempts: AttemptView[]; sites?: Map<string, SiteAttempt> }) {
   return (
     <section aria-label="Attempts" className="flex flex-col gap-2">
       <div className="flex items-baseline justify-between gap-3">
@@ -69,7 +72,7 @@ export function AttemptList({ attempts }: { attempts: AttemptView[] }) {
       </div>
       {attempts.length ? (
         <ul className="panel divide-y divide-line overflow-hidden">
-          {attempts.map((attempt, i) => <AttemptRow key={attempt.id} attempt={attempt} initiallyOpen={i === 0 && attempt.result !== null} />)}
+          {attempts.map((attempt, i) => <AttemptRow key={attempt.id} attempt={attempt} site={sites?.get(attempt.id)} initiallyOpen={i === 0 && attempt.result !== null} />)}
         </ul>
       ) : (
         <div className="panel"><EmptyState size="sm" icon={<History size={18} />} title="No attempts yet" description="Each attempt is logged step by step and graded from the recorded flight." /></div>
@@ -78,7 +81,7 @@ export function AttemptList({ attempts }: { attempts: AttemptView[] }) {
   );
 }
 
-function AttemptRow({ attempt, initiallyOpen }: { attempt: AttemptView; initiallyOpen: boolean }) {
+function AttemptRow({ attempt, site, initiallyOpen }: { attempt: AttemptView; site?: SiteAttempt; initiallyOpen: boolean }) {
   const [open, setOpen] = useState(initiallyOpen);
   const { label, tone } = STATE[attempt.state];
   const result = attempt.result;
@@ -93,6 +96,7 @@ function AttemptRow({ attempt, initiallyOpen }: { attempt: AttemptView; initiall
           <Badge size="sm" tone={tone}>{label}</Badge>
           {result ? <Badge size="sm" tone={result.valid ? "success" : "danger"}>{result.valid ? "Counts" : `Doesn't count · ${failed} check${failed === 1 ? "" : "s"} failed`}</Badge> : null}
           {attempt.state === "abandoned" && attempt.reason ? <span className="text-xs text-fg-3">{reason(attempt.reason)}</span> : null}
+          {site ? <Badge size="sm" tone={SITE_STATE[site.state]?.tone ?? "info"}>{SITE_STATE[site.state]?.label ?? "Site"}</Badge> : null}
         </span>
         <span className="readout text-right">
           <span className="text-xl">{result?.score ? number(result.score.total, 1) : "–"}</span>
@@ -101,9 +105,10 @@ function AttemptRow({ attempt, initiallyOpen }: { attempt: AttemptView; initiall
       </button>
       {open ? (
         <div className="grid gap-5 border-t border-line-subtle bg-[color-mix(in_oklab,var(--surface-muted)_40%,transparent)] px-4 py-4 lg:grid-cols-2 2xl:grid-cols-3">
+          {site ? <SitePart site={site} /> : null}
           {result ? <Checks result={result} /> : null}
           {result?.score ? <ScoreParts score={result.score} /> : result ? <p className="text-sm text-fg-2">No score: no landing on the challenge's runway after its gate.</p> : null}
-          <Timeline log={attempt.log} />
+          <Timeline log={site ? [...attempt.log, ...site.log.map((l) => ({ ...l, site: true }))].sort((a, b) => a.at.localeCompare(b.at)) : attempt.log} />
         </div>
       ) : null}
     </li>
@@ -147,6 +152,26 @@ function ScoreParts({ score }: { score: NonNullable<AttemptResult["score"]> }) {
   );
 }
 
+/** The attempt on its site: the app's own words for its state, the site's message, its page and a retry. */
+function SitePart({ site }: { site: SiteAttempt }) {
+  const [retrying, setRetrying] = useState(false);
+  const retry = () => {
+    setRetrying(true);
+    api.attemptUpload(site.id).finally(() => setRetrying(false));
+  };
+  return (
+    <div className="min-w-0 lg:col-span-2 2xl:col-span-3">
+      <h3 className="eyebrow mb-2">Site</h3>
+      <p className="text-sm">{site.text} <span className="readout text-xs text-fg-3">· {site.site}</span></p>
+      {site.detail ? <details className="mt-1 text-xs text-fg-3"><summary className="cursor-pointer">Details</summary><p className="readout mt-1 break-all">{site.detail}</p></details> : null}
+      <div className="mt-2 flex flex-wrap gap-2">
+        {RETRYABLE.includes(site.state) ? <Button variant="secondary" size="sm" onClick={retry} loading={retrying}><RefreshCw size={14} aria-hidden="true" />{site.state.startsWith("upload") ? "Upload now" : "Check now"}</Button> : null}
+        {site.url ? <Button variant="ghost" size="sm" onClick={() => api.siteOpen(site.url!)}><ExternalLink size={14} aria-hidden="true" />View on site</Button> : null}
+      </div>
+    </div>
+  );
+}
+
 /** A log line in words. Unknown events from a newer app show their name. */
 function describe(line: AttemptLogLine): string {
   const f = line as Record<string, unknown>;
@@ -172,6 +197,15 @@ function describe(line: AttemptLogLine): string {
     case "done": return "Done";
     case "abandoned": return `Abandoned: ${reason(f.reason)}`;
     case "error": return `Error while ${String(f.during ?? "working")}: ${String(f.message ?? "")}`;
+    // The site's log (site.log.jsonl), merged in by time.
+    case "issued": return `Issued by the site, attempt ${String(f.attempt_id ?? "?")}${f.definition_match === false ? ", definition differs" : ""}`;
+    case "practice": return `Practice, not uploaded (${String(f.reason ?? "no attempt issued")})`;
+    case "upload_queued": return "Upload queued";
+    case "upload": return typeof f.status === "string" ? `Uploaded, try ${String(f.try)}: ${f.status}` : `Upload try ${String(f.try)} failed: ${String(f.error ?? "?")}${typeof f.retry_in_s === "number" ? `, retry in ${f.retry_in_s} s` : ""}`;
+    case "server_status": return `Site: ${String(f.status)}${typeof f.score === "number" ? `, ${number(f.score, 1)}` : ""}${typeof f.rank === "number" ? `, #${f.rank}` : ""}`;
+    case "upload_refused": return `Upload refused (${String(f.reason ?? "by the site")})`;
+    case "upload_abandoned": return "Not uploaded: signed in as another account";
+    case "expired": return "Upload window closed";
     default: return line.event.replace(/_/g, " ");
   }
 }
@@ -183,8 +217,8 @@ function Timeline({ log }: { log: AttemptLogLine[] }) {
     <div className="min-w-0">
       <h3 className="eyebrow mb-2">Log</h3>
       <ol className="relative flex flex-col gap-2 border-l border-line pl-4">
-        {log.map((line) => (
-          <li key={line.seq} className="relative text-sm">
+        {log.map((line, i) => (
+          <li key={i} className="relative text-sm">
             <span className="absolute top-1.5 -left-[1.3rem] size-2 rounded-full" style={{ background: line.event === "error" || line.event === "failed_start" ? "var(--danger)" : line.event === "graded_local" ? "var(--accent)" : "var(--text-muted)" }} aria-hidden="true" />
             <span className="readout mr-2 text-xs text-fg-3">{time.format(new Date(line.at))}Z</span>
             {describe(line)}

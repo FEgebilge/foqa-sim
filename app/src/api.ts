@@ -4,6 +4,8 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { mockChallenges } from "./lib/challenges-mock";
 import { mockSetup } from "./lib/setup-mock";
+import { mockSites } from "./lib/sites-mock";
+import type { SiteAttempt, SiteChallenge, SitesApi, SiteView } from "./lib/sites";
 import type { AttemptRecord, AttemptView, Briefing, ChallengeEntry, Debrief, FlightSummary, LandingNotice, OpenFlight, PreflightLine, RecorderStatus, SetupStatus, StorageUsage } from "./types";
 
 export type Unlisten = () => void;
@@ -14,6 +16,8 @@ export interface BackendEvents {
   landing: LandingNotice;
   "open-flight": OpenFlight;
   "attempt-changed": AttemptRecord;
+  /** A site or an attempt's site part changed (connect builds only). */
+  "site-changed": { origin?: string; attempt?: string };
 }
 
 /** Landing challenges, local only: the library, the pre-flight card and the attempts. */
@@ -34,7 +38,7 @@ export interface ChallengesApi {
   attemptsList(): Promise<AttemptView[]>;
 }
 
-export interface Api extends ChallengesApi {
+export interface Api extends ChallengesApi, SitesApi {
   readonly live: boolean;
   listFlights(): Promise<FlightSummary[]>;
   debrief(id: string): Promise<Debrief>;
@@ -75,6 +79,18 @@ const tauriApi: Api = {
   attemptFinish: (id) => invoke<AttemptRecord>("attempt_finish", { id }),
   attemptAbandon: (id) => invoke<AttemptRecord>("attempt_abandon", { id }),
   attemptsList: () => invoke<AttemptView[]>("attempts_list"),
+  connectAvailable: () => invoke<boolean>("connect_available").catch(() => false),
+  sitesList: () => invoke<SiteView[]>("sites_list"),
+  siteAdd: (origin) => invoke<SiteView>("site_add", { origin }),
+  siteSignIn: (origin, device) => invoke<SiteView>("site_sign_in", { origin, device }),
+  siteSignInCancel: (origin) => invoke<void>("site_sign_in_cancel", { origin }),
+  siteSignOut: (origin) => invoke<SiteView>("site_sign_out", { origin }),
+  siteRemove: (origin) => invoke<void>("site_remove", { origin }),
+  siteChallenges: (origin) => invoke<SiteChallenge[]>("site_challenges", { origin }),
+  siteChallengeTake: (origin, id) => invoke<ChallengeEntry>("site_challenge_take", { origin, id }),
+  siteAttempts: () => invoke<SiteAttempt[]>("site_attempts"),
+  attemptUpload: (id) => invoke<void>("attempt_upload", { id }),
+  siteOpen: (url) => invoke<void>("site_open", { url }),
   on<K extends keyof BackendEvents>(event: K, handler: (payload: BackendEvents[K]) => void) {
     return listen<BackendEvents[K]>(event, (message) => handler(message.payload));
   },
@@ -130,6 +146,7 @@ const mockApi: Api = {
   },
   ...mockSetup(params.get("setup")),
   ...mockChallenges(params.get("status")),
+  ...mockSites(params.get("sites")),
   on: async () => () => {},
 };
 
