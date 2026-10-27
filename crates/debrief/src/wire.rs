@@ -133,6 +133,9 @@ pub struct AssessmentDetail {
     /// What holds the flight's score down beyond its domains: the grading
     /// landing's caps, then the flight's own (`kind: flight`).
     pub caps: Vec<CapNote>,
+    /// Why the data is partial in plain words (which items were not graded);
+    /// `None` when none is missing.
+    pub partial_note: Option<String>,
     /// The landing in `landings` that sets the grade.
     pub graded_by: Option<usize>,
     pub landings: Vec<LandingAssessment>,
@@ -159,6 +162,10 @@ pub struct CapNote {
     /// `flight`.
     pub kind: String,
     pub score: f64,
+    /// The headline: "Unstable approach continued to a landing".
+    pub title: String,
+    /// What caused it and what it holds the grade to, in one sentence:
+    /// "Bounce (level 2) holds this landing below Good (max 84.9)."
     pub reason: String,
     pub source: String,
     /// The landing in `AssessmentDetail.landings` it comes from.
@@ -182,6 +189,11 @@ pub struct LandingAssessment {
     pub partial: Vec<String>,
     /// Required data that was missing.
     pub missing: Vec<&'static str>,
+    /// Why an insufficient landing is not scored, in plain words.
+    pub note: Option<String>,
+    /// Class, reference speeds and stable height in plain words, for the
+    /// line under the landing's title.
+    pub facts: Vec<String>,
     /// `false` for a touch-and-go: no rollout scored, and it does not set
     /// the flight's grade.
     pub full_stop: bool,
@@ -198,6 +210,10 @@ pub struct LandingAssessment {
 pub struct DomainAssessment {
     pub id: Domain,
     pub title: &'static str,
+    /// The title in a word or two, for small bars.
+    pub short: &'static str,
+    /// What the domain looks at, in one line.
+    pub summary: &'static str,
     pub weight: f64,
     /// Of the weight, 0 to 1; `None`: n/a, its weight shared out.
     pub loss: Option<f64>,
@@ -209,7 +225,7 @@ pub struct DomainAssessment {
     /// The criterion (`A1 below`) or rule that set the loss.
     pub sets_by: Option<String>,
     /// That item in words, as the app and the EFB show it: "Descent rate
-    /// 1,562 fpm at or above 300 ft", or its event's title.
+    /// 1,562 fpm above 300 ft", or its event's title.
     pub set_by_text: Option<String>,
 }
 
@@ -223,7 +239,7 @@ pub struct CriterionAssessment {
     pub value: f64,
     /// `value` in its unit as shown: "+12 kt", "1.48 g", "0.8 dot", "L2".
     pub value_text: String,
-    /// The half it was graded in, in words ("at or above 500 ft"); `None`
+    /// The half it was graded in, in words ("above 500 ft"); `None`
     /// for `all`.
     pub height_text: Option<String>,
     pub unit: Option<&'static str>,
@@ -698,6 +714,7 @@ mod grade_band_tests {
                 .iter()
                 .map(|&(domain, level)| Finding {
                     rule: format!("{domain:?}"),
+                    title: format!("{domain:?}"),
                     domain,
                     level,
                     height_ft: None,

@@ -304,7 +304,15 @@ const SCORING = readFileSync(join(import.meta.dirname, "../../scoring/landing-2.
 const CRITERIA = Object.fromEntries([...SCORING.matchAll(/- id: (\w+)\n\s+title: (.*)\n(?:.*\n)*?\s+source: "(.*)"/g)].map(([, id, title, source]) => [id, { title, source }]))
 const RULE_DOMAIN = Object.fromEntries(readFileSync(join(import.meta.dirname, "../../rules/core.yaml"), "utf8").replace(/\r/g, "").split(/^---$/m)
   .map((doc) => [doc.match(/^rule: (.*)$/m)?.[1], doc.match(/^domain: (\w+)$/m)?.[1]]))
-const DOMAINS = [["stability", "Approach stability", 25], ["energy", "Threshold and flare", 10], ["point", "Touchdown point", 20], ["lateral", "Lateral control", 15], ["contact", "Touchdown contact", 20], ["rollout", "Rollout and stopping", 10]]
+// Titles, short names and summaries as crates/debrief/src/assessment.rs words them.
+const DOMAINS = [
+  ["stability", "Approach stability", 25, "Approach", "Speed, descent rate, bank, pitch, glideslope and configuration on final"],
+  ["energy", "Threshold and flare", 10, "Flare", "Height over the threshold, touchdown speed and float down the runway"],
+  ["point", "Touchdown point", 20, "Landing spot", "How far from the aiming point the wheels touched down"],
+  ["lateral", "Lateral control", 15, "Centreline", "Offset from the centreline, crab and drift at touchdown, then on the rollout"],
+  ["contact", "Touchdown contact", 20, "Touchdown", "Load, sink rate, bounce, tail clearance and bank at touchdown"],
+  ["rollout", "Rollout and stopping", 10, "Rollout", "How soon braking began and how hard it had to be to stop"],
+]
 const DOMAIN_OF = { A: "stability", B: "energy", C: "point", D: "lateral", E: "contact", F: "rollout" }
 const LOSS = [[0, 0], [0.5, 0.1], [1, 0.35], [2, 0.65], [3, 1]]
 const curveAt = (keys, x) => { if (x <= keys[0][0]) return keys[0][1]; for (let i = 1; i < keys.length; i++) if (x <= keys[i][0]) { const [a, b] = [keys[i - 1], keys[i]]; return a[1] + ((x - a[0]) / (b[0] - a[0])) * (b[1] - a[1]) } return keys.at(-1)[1] }
@@ -325,13 +333,19 @@ const valueText = (id, unit, x) => {
   return `${sign}${x.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits })}${unit === "deg" ? "°" : ` ${unit}`}`
 }
 
+/** What a cap at `score` allows, in words (`Method::ceiling`). */
+const ceiling = (score) => (score <= 0 ? "at zero" : score >= 85 ? `at ${score.toFixed(1)} at most` : score >= 60 ? `below Good (max ${score.toFixed(1)})` : `below Fair (max ${score.toFixed(1)})`)
+/** A graded item in words with its level: "Descent rate 1,565 fpm above 300 ft (level 2)". */
+const itemText = (c) => `${[c.title, c.unit ? c.value_text : null, c.height_text].filter(Boolean).join(" ")} (level ${c.level})`
+const CAUSE = new WeakMap()
+
 function landing2({ touchdowns, events, samples, phases, lastT, cls, legacy }) {
   const VREF = 60, VAPP = 65, TRACK_FT = 8.2, M = 1 / FT
   const firsts = touchdowns.filter((td) => !td.bounce)
   const counted = new Set()
   const landings = firsts.map((td, n) => {
     const next = firsts[n + 1]
-    if (!td.runway) return { t_s: td.t_s, status: "insufficient", score: null, raw: null, grade: null, confidence: null, class: null, partial: [], missing: ["runway"], full_stop: !next, caps: [], stable_from_ft: null, split_ft: null, speeds: null, domains: [] }
+    if (!td.runway) return { t_s: td.t_s, status: "insufficient", score: null, raw: null, grade: null, confidence: null, class: null, partial: [], missing: ["runway"], note: "Not scored: runway data not recorded, and a score needs it. Missing data never earns credit, so this landing counts through its findings only (event points).", facts: [], full_stop: !next, caps: [], stable_from_ft: null, split_ft: null, speeds: null, domains: [] }
     const fix = td.runway, full = !next
     const approach = phases.filter((p) => p.phase === "Approach" && p.start_s <= td.t_s).at(-1)
     const from = approach?.start_s ?? td.t_s - 120, to = next ? Math.min(next.t_s, td.t_s + 30) : lastT
@@ -346,7 +360,7 @@ function landing2({ touchdowns, events, samples, phases, lastT, cls, legacy }) {
       const text = (x) => (x === null ? null : valueText(id, unit, x))
       value = round1(value * 100) / 100
       crit.push({ id, title: CRITERIA[id].title, height, value, value_text: text(value),
-        height_text: height === "all" ? null : height === "above" ? `at or above ${split} ft` : `below ${split} ft`, unit,
+        height_text: height === "all" ? null : height === "above" ? `above ${split} ft` : `below ${split} ft`, unit,
         ell, level: Math.min(3, Math.floor(ell)), loss: curveAt(LOSS, ell), bands: { above, below }, bands_text: { above: above.map(text), below: below.map(text) }, standard: CRITERIA[id].source, sets: false })
     }
     for (const [height, xs] of [["above", win.filter((x) => x.h / FT >= 300)], ["below", win.filter((x) => x.h / FT < 300)]]) {
@@ -368,7 +382,7 @@ function landing2({ touchdowns, events, samples, phases, lastT, cls, legacy }) {
       const ell = { advisory: 0, low: 1, medium: 2, high: 3 }[e.level]
       return [{ event: i, rule: e.rule, level: e.level, ell, loss: curveAt(LOSS, ell), sets: false, domain }]
     })
-    const domains = DOMAINS.map(([id, title, weight]) => {
+    const domains = DOMAINS.map(([id, title, weight, short, summary]) => {
       const criteria = crit.filter((c) => DOMAIN_OF[c.id[0]] === id), fs = findings.filter((f) => f.domain === id).map((f) => Object.fromEntries(Object.entries(f).filter(([k]) => k !== "domain")))
       const items = [...criteria.map((c) => [c.loss, c]), ...fs.map((f) => [f.loss, f])]
       const top = items.reduce((a, b) => (b[0] > a[0] ? b : a), [0, null])
@@ -377,17 +391,27 @@ function landing2({ touchdowns, events, samples, phases, lastT, cls, legacy }) {
       const ell = top[1]?.ell ?? 0
       const set = sets_by && top[1]
       const set_by_text = !set ? null : set.id ? [set.title, set.value_text, set.height_text].filter(Boolean).join(" ") : events[set.event]?.title ?? set.rule
-      return { id, title, weight, loss: items.length ? top[0] : null, points: 0, level: Math.min(3, Math.floor(ell)), criteria, findings: fs, sets_by, set_by_text }
+      return { id, title, short, summary, weight, loss: items.length ? top[0] : null, points: 0, level: Math.min(3, Math.floor(ell)), criteria, findings: fs, sets_by, set_by_text }
     })
     const available = domains.filter((d) => d.loss !== null).reduce((a, d) => a + d.weight, 0)
     for (const d of domains) d.points = d.loss === null ? 0 : round1((d.weight * d.loss * 100) / available)
     const raw = round1(100 - domains.reduce((a, d) => a + (d.loss === null ? 0 : d.weight * d.loss), 0) * 100 / available)
     const caps = []
-    const material = [...crit.filter((c) => c.ell >= 2).map((c) => (c.height === "all" ? c.id : `${c.id} ${c.height}`)), ...findings.filter((f) => f.ell >= 2).map((f) => f.rule)]
-    if (material.length) caps.push({ kind: "material", score: 84.9, reason: `level 2 or more: ${material.join(", ")}`, source: "A material FDM event (level 2 or more); docs/scoring.md 4" })
-    if (fix.short_landing) caps.push({ kind: "undershoot", score: 39, reason: "touchdown before the threshold", source: "short-landing: touchdown before the threshold" })
+    const material = [...crit.filter((c) => c.ell >= 2).map(itemText), ...findings.filter((f) => f.ell >= 2).map((f) => `${events[f.event]?.title ?? f.rule} (level ${f.level === "high" ? 3 : 2})`)]
+    if (material.length) {
+      const cause = material.length > 1 ? `${material.slice(0, -1).join(", ")} and ${material.at(-1)}` : material[0]
+      const cap = { kind: "material", score: 84.9, title: "A significant deviation limits the grade", reason: `${cause} ${material.length > 1 ? "hold" : "holds"} this landing ${ceiling(84.9)}.`, source: "A material FDM event (level 2 or more); docs/scoring.md 4" }
+      CAUSE.set(cap, cause); caps.push(cap)
+    }
+    if (fix.short_landing) {
+      const cause = "Touched down before the runway threshold"
+      const cap = { kind: "undershoot", score: 39, title: "Touchdown short of the runway", reason: `${cause}, which holds this landing ${ceiling(39)}.`, source: "short-landing: touchdown before the threshold" }
+      CAUSE.set(cap, cause); caps.push(cap)
+    }
     const score = round1(Math.min(raw, ...caps.map((c) => c.score)))
-    return { t_s: td.t_s, status: "scored", score, raw, grade: score >= 85 ? "good" : score >= 60 ? "fair" : "poor", confidence: "full", class: cls === "transport" ? "jet" : "light", partial: [], missing: [], full_stop: full, caps, stable_from_ft: null, split_ft: split,
+    const stableFrom = crit.some((c) => c.id[0] === "A" && c.ell > 0.5) ? null : 500
+    return { t_s: td.t_s, status: "scored", score, raw, grade: score >= 85 ? "good" : score >= 60 ? "fair" : "poor", confidence: "full", class: cls === "transport" ? "jet" : "light", partial: [], missing: [], note: null, full_stop: full, caps, stable_from_ft: stableFrom, split_ft: split,
+      facts: [`Graded with ${cls === "transport" ? "jet" : "light-aircraft"} limits`, `Reference speed ${VREF} kt, approach speed ${VAPP} kt`, stableFrom === null ? "Approach never fully stable" : `Approach stable from ${stableFrom} ft down`],
       speeds: { vref_kt: VREF, vapp_kt: VAPP, source: "profile", approximate: false, basis: "Cessna 172S POH, Section 4 (sample)" }, domains }
   })
   const other_findings = events.map((_, i) => i).filter((i) => !counted.has(i))
@@ -396,12 +420,12 @@ function landing2({ touchdowns, events, samples, phases, lastT, cls, legacy }) {
   const [grading, graded_by] = scoredAt.findLast(([l]) => l.full_stop) ?? scoredAt.at(-1)
   let score = grading.score
   const caps = grading.caps.map((c) => ({ ...c, landing: graded_by })), reasons = []
-  for (const [l, i] of scoredAt) if (i !== graded_by) for (const c of l.caps) if (c.kind !== "material" && c.score < score) { score = c.score; reasons.push(`landing ${i + 1}: ${c.reason}`) }
+  for (const [l, i] of scoredAt) if (i !== graded_by) for (const c of l.caps) if (c.kind !== "material" && c.score < score) { score = c.score; reasons.push(`Landing ${i + 1}: ${CAUSE.get(c)}, which holds the flight ${ceiling(c.score)}.`) }
   const highs = other_findings.filter((i) => events[i].level === "high").length
   const limit = highs === 1 ? 84.9 : highs > 1 ? 59.9 : 100
-  if (limit < score) { score = limit; reasons.push(highs === 1 ? "a high finding elsewhere in the flight" : `${highs} high findings elsewhere in the flight`) }
-  caps.push(...reasons.map((reason) => ({ kind: "flight", score, reason, source: "docs/scoring.md Decision 3: flight grade" })))
-  return { method: "landing-2", score, grade: score >= 85 ? "good" : score >= 60 ? "fair" : "poor", confidence: "full", caps, graded_by, landings, other_findings }
+  if (limit < score) { score = limit; reasons.push(`${highs === 1 ? "A high-severity finding outside the landings holds" : `${highs} high-severity findings outside the landings hold`} the flight ${ceiling(limit)}.`) }
+  caps.push(...reasons.map((reason) => ({ kind: "flight", score, title: "The flight grade is held below the landing's score", reason, source: "docs/scoring.md Decision 3: flight grade" })))
+  return { method: "landing-2", score, grade: score >= 85 ? "good" : score >= 60 ? "fair" : "poor", confidence: "full", caps, partial_note: null, graded_by, landings, other_findings }
 }
 
 const c172 = { aircraft: { icao: "C172", title: "Cessna Skyhawk G1000 Asobo" }, profile: "C172 profile", class: "light" }

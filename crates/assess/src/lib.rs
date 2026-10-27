@@ -12,6 +12,7 @@ mod measure;
 mod method;
 mod scale;
 mod score;
+mod text;
 
 pub use measure::{Assessment, Landing, SpeedSource, Speeds, scoring_class};
 pub use method::{
@@ -23,3 +24,4 @@ pub use score::{
     Cap, CapKind, Confidence, CriterionScore, DomainScore, Finding, FindingScore, FlightGrade,
     Grade, LandingScore, Measures, Outcome, Value,
 };
+pub use text::{height_text, item_text, list, number, value_text, with_level};

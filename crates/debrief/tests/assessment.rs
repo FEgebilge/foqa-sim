@@ -88,7 +88,7 @@ fn the_assessment_matches_its_snapshot() {
             let half = c.height_text.as_deref();
             match c.height {
                 assess::Height::All => assert_eq!(half, None),
-                assess::Height::Above => assert_eq!(half, Some("at or above 500 ft")),
+                assess::Height::Above => assert_eq!(half, Some("above 500 ft")),
                 assess::Height::Below => assert_eq!(half, Some("below 500 ft")),
             }
         }

@@ -12,7 +12,7 @@ import { AssessmentBreakdown } from "./AssessmentBreakdown";
 interface Props { debrief: Debrief; onSelectEvent: (index: number) => void }
 
 /**
- * The landing-2 assessment of each landing (docs/scoring.md): six domain bars, each track as long as its weight and shaded
+ * The landing-2 assessment of each landing (docs/scoring.md): six area bars, each track as long as its weight and shaded
  * by the points it lost in its level's colour; the selected domain opens beside them (below when narrow) to its criteria on
  * their band strips and its event cards, the one that set the deduction marked. Findings outside every landing follow.
  */
@@ -27,7 +27,7 @@ export function AssessmentPanel({ debrief, onSelectEvent }: Props) {
   return (
     <section className="panel flex flex-col" aria-labelledby="assessment-title">
       <header className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-line-subtle px-4 py-2.5">
-        <h2 id="assessment-title" className="eyebrow flex items-center gap-1.5"><Scale size={13} aria-hidden="true" />Landing assessment <span className="normal-case tracking-normal text-fg-3">landing-2</span></h2>
+        <h2 id="assessment-title" className="eyebrow flex items-center gap-1.5"><Scale size={13} aria-hidden="true" />Landing assessment</h2>
         {landings.length > 1 ? <SegmentedControl label="Landing" options={options} value={String(pick)} onValueChange={(v) => setPick(Number(v))} /> : null}
         <LandingFacts landing={landing} />
       </header>
@@ -35,7 +35,7 @@ export function AssessmentPanel({ debrief, onSelectEvent }: Props) {
         ? <Scored key={pick} landing={landing} debrief={debrief} onSelectEvent={onSelectEvent} />
         : (
           <div className="flex flex-col gap-3 p-4 text-sm text-fg-2">
-            <p>Not scored: {landing.missing.join(", ")} not recorded, and a score needs it. Missing data never earns credit, so this landing is graded by its findings only (points method).</p>
+            <p>{landing.note}</p>
             <AssessmentBreakdown detail={detail} points={detail.legacy_points ?? 0} />
           </div>
         )}
@@ -44,14 +44,9 @@ export function AssessmentPanel({ debrief, onSelectEvent }: Props) {
   );
 }
 
-/** Class, reference speeds and the stable height, in one line. */
+/** The grading limits, reference speeds and stable height, in one line as the debrief words them. */
 function LandingFacts({ landing }: { landing: LandingAssessment }) {
-  const s = landing.speeds;
-  const facts = [
-    landing.class ? `${landing.class[0]!.toUpperCase()}${landing.class.slice(1)} bands` : null,
-    s ? `Vref ${number(s.vref_kt)} · Vapp ${number(s.vapp_kt)} kt${s.source === "selected" ? " (selected speed, debrief only)" : s.approximate ? " (≈ profile)" : ""}` : landing.status === "scored" ? "No Vref: speed not graded" : null,
-    landing.status === "scored" ? (landing.stable_from_ft === null ? "Never stable in the window" : `Stable from ${number(landing.stable_from_ft)} ft`) : null,
-  ].filter(Boolean);
+  const s = landing.speeds, facts = landing.facts;
   return (
     <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-fg-2 sm:ml-auto">
       {facts.map((f) => <span key={f} className="readout">{f}</span>)}
@@ -67,14 +62,14 @@ function Scored({ landing, debrief, onSelectEvent }: { landing: LandingAssessmen
   return (
     <div className="grid gap-x-6 gap-y-4 p-4 lg:grid-cols-[minmax(300px,5fr)_minmax(0,8fr)]">
       <div className="flex flex-col gap-1">
-        <ul className="flex flex-col gap-1" aria-label="Domains">
+        <ul className="flex flex-col gap-1" aria-label="Assessment areas">
           {landing.domains.map((d) => <DomainBar key={d.id} domain={d} maxWeight={maxWeight} active={d.id === domain.id} onSelect={() => setOpen(d.id)} />)}
         </ul>
         <div className="mt-2 flex items-baseline justify-between border-t border-line-subtle pt-2 text-xs">
-          <span className="text-fg-2">Raw {number(landing.raw ?? 0, 1)}{landing.caps.length ? ((landing.score ?? 0) < (landing.raw ?? 0) ? `, capped at ${number(landing.score ?? 0, 1)}` : `; cap ${number(Math.min(...landing.caps.map((c) => c.score)), 1)} not reached`) : ""}</span>
+          <span className="text-fg-2">Before safety caps {number(landing.raw ?? 0, 1)}{landing.caps.length ? ((landing.score ?? 0) < (landing.raw ?? 0) ? `, held to ${number(landing.score ?? 0, 1)} by a cap` : `; a cap at ${number(Math.min(...landing.caps.map((c) => c.score)), 1)} did not apply`) : ""}</span>
           <span className="readout text-base font-semibold">{number(landing.score ?? 0, 1)} <span className="text-xs font-normal text-fg-3">{landing.grade ? GRADE_LABEL[landing.grade] : ""}</span></span>
         </div>
-        <p className="text-[11px] leading-relaxed text-fg-3">Each domain loses by its worst item only, so one mistake is not counted twice. A domain with nothing measured is n/a and its weight is shared out.</p>
+        <p className="text-[11px] leading-relaxed text-fg-3">Each area loses points for its worst item only, so one mistake is never counted twice. An area with nothing measured is not graded (n/a) and its weight is shared among the others.</p>
       </div>
       <DomainDetail domain={domain} landing={landing} debrief={debrief} onSelectEvent={onSelectEvent} />
     </div>
@@ -89,7 +84,7 @@ function DomainBar({ domain, maxWeight, active, onSelect }: { domain: DomainAsse
         className={`grid w-full cursor-pointer grid-cols-[minmax(7.5rem,9rem)_minmax(0,1fr)_3.5rem_1rem] items-center gap-x-3 rounded-[var(--radius-control)] px-2 py-1.5 text-left transition-colors hover:bg-muted ${active ? "bg-muted" : ""}`}>
         <span className="min-w-0">
           <span className="block truncate text-sm">{domain.title}</span>
-          <span className="readout block text-[10.5px] text-fg-3">{bar.na ? "n/a" : domain.points ? LEVEL_WORD[Math.min(3, domain.level)] : "full marks"} · weight {number(domain.weight)}</span>
+          <span className="readout block text-[10.5px] text-fg-3">{bar.na ? "not graded" : domain.points ? LEVEL_WORD[Math.min(3, domain.level)] : "full marks"} · worth {number(domain.weight)} pts</span>
         </span>
         <span className="relative h-3" aria-hidden="true">
           <span className={`absolute inset-y-0 left-0 overflow-hidden rounded-sm ${bar.na ? "border border-dashed border-line" : "bg-[color-mix(in_oklab,var(--foreground)_16%,transparent)]"}`} style={{ width: `${bar.track}%` }}>
@@ -109,9 +104,10 @@ function DomainDetail({ domain, landing, debrief, onSelectEvent }: { domain: Dom
     <div className="flex min-w-0 flex-col gap-3" aria-live="polite">
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <h3 className="font-display text-base font-semibold">{domain.title}</h3>
-        <span className="readout text-sm text-fg-2">{domain.loss === null ? "n/a: nothing measured" : `−${number(domain.points, 1)} of ${number(domain.weight)}`}</span>
-        {set && domain.points ? <span className="text-xs text-fg-2">Set by <span className="text-fg">{set}</span></span> : null}
+        <span className="readout text-sm text-fg-2">{domain.loss === null ? "Not graded: nothing measured" : `−${number(domain.points, 1)} of ${number(domain.weight)}`}</span>
+        {set && domain.points ? <span className="text-xs text-fg-2">Biggest deduction: <span className="text-fg">{set}</span></span> : null}
       </div>
+      <p className="-mt-2 text-xs text-fg-3">{domain.summary}</p>
       {domain.criteria.length ? (
         <ul className="flex flex-col divide-y divide-line-subtle rounded-[var(--radius-control)] border border-line-subtle">
           {[...domain.criteria].sort((a, b) => a.id.localeCompare(b.id)).map((c) => <CriterionRow
@@ -120,7 +116,7 @@ function DomainDetail({ domain, landing, debrief, onSelectEvent }: { domain: Dom
       ) : <p className="text-xs text-fg-3">No measured value in this domain.</p>}
       {domain.findings.length ? (
         <div className="flex flex-col gap-1.5">
-          <h4 className="eyebrow">Event cards</h4>
+          <h4 className="eyebrow">Flagged events</h4>
           <ul className="grid gap-1.5 [grid-template-columns:repeat(auto-fill,minmax(min(100%,280px),1fr))]">
             {domain.findings.map((f, i) => <FindingCard key={`${f.rule}-${i}`} f={f} domain={domain} debrief={debrief} onSelectEvent={onSelectEvent} />)}
           </ul>
@@ -144,7 +140,7 @@ function CriterionRow({ c, landing, domain }: { c: CriterionAssessment; landing:
         {where ? <p className="text-[11px] text-fg-3">{where}</p> : null}
         <p className="mt-0.5 flex flex-wrap items-baseline gap-x-2">
           <span className="readout text-base leading-tight" style={c.ell > 0.5 ? { color: ellColor(c.ell) } : undefined}>{c.value_text}</span>
-          <span className="text-[11px] text-fg-2">{ellWords(c.ell)} <span className="readout text-fg-3">ℓ {number(c.ell, 2)}</span></span>
+          <span className="text-[11px] text-fg-2">{ellWords(c.ell)} <span className="readout text-fg-3" title="Severity from 0 (ideal) to 3 (worst)">severity {number(c.ell, 1)} of 3</span></span>
         </p>
         {c.sets ? <SetsMark points={Number.isFinite(cost) ? cost : domain.points} /> : null}
       </div>
@@ -158,7 +154,7 @@ function CriterionRow({ c, landing, domain }: { c: CriterionAssessment; landing:
 
 const SetsMark = ({ points }: { points: number }) => (
   <span className="mt-1 inline-flex items-center gap-1 rounded-sm bg-accent-subtle px-1.5 py-px text-[10.5px] font-medium text-accent-strong">
-    <Gauge size={11} aria-hidden="true" />Sets this deduction · −{number(points, 1)}
+    <Gauge size={11} aria-hidden="true" />Biggest deduction here · −{number(points, 1)}
   </span>
 );
 
@@ -217,7 +213,7 @@ function FindingCard({ f, domain, debrief, onSelectEvent }: { f: FindingAssessme
       </span>
       {event?.detail ? <span className="readout text-xs" style={{ color: levelVar(f.level) }}>{event.detail}</span> : null}
       <span className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-fg-3">
-        <span>{f.level === "advisory" ? "Advisory: no deduction" : `ℓ ${number(f.ell)} · ${number(f.loss * 100)}% of the domain`}</span>
+        <span>{f.level === "advisory" ? "Advisory: no deduction" : `severity ${number(f.ell, 1)} of 3 · costs ${number(f.loss * 100)}% of the area`}</span>
         {event ? <button type="button" className="inline-flex items-center gap-1 hover:text-fg" onClick={() => onSelectEvent(f.event!)}><Crosshair size={12} aria-hidden="true" />T+{clock(event.start_s)}</button> : null}
       </span>
       {f.sets ? <SetsMark points={domain.points} /> : null}
@@ -229,7 +225,7 @@ function ZoneLegend() {
   return (
     <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10.5px] text-fg-3">
       {ZONES.map((z, i) => <span key={z} className="inline-flex items-center gap-1"><span className="h-2 w-3 rounded-[2px]" style={{ background: ZONE_COLOR[i] }} aria-hidden="true" />{z}</span>)}
-      <span>· ideal and tolerance from the checkride standard (ACS/SOP), levels from the FDM thresholds</span>
+      <span>· ideal and tolerance follow the checkride standard (ACS or airline SOP); levels 1–3 follow flight-data-monitoring limits</span>
     </p>
   );
 }

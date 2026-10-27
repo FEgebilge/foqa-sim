@@ -5,7 +5,7 @@ import { Button } from "@ui/components/button/button";
 import { Tooltip } from "@ui/components/tooltip/tooltip";
 import { aircraftName, assessmentText, duration, flightDate, flightTimeUtc, number } from "../../lib/format";
 import { openFlights } from "../../lib/route";
-import type { CapNote, Debrief } from "../../types";
+import type { Debrief } from "../../types";
 import { AssessmentBreakdown } from "./AssessmentBreakdown";
 import { EventCounts, GradeBadge, GradeTag } from "../level";
 
@@ -67,7 +67,6 @@ function Score({ flight }: { flight: Debrief["flight"] }) {
       </div>
     );
   }
-  const partial = (a.landings ?? []).flatMap((l) => l.partial);
   const graded = a.graded_by ?? 0, many = (a.landings?.length ?? 0) > 1;
   return (
     <div className="flex flex-col items-start gap-1 sm:items-end">
@@ -79,28 +78,19 @@ function Score({ flight }: { flight: Debrief["flight"] }) {
         <div className="flex flex-col items-start gap-1">
           <GradeTag grade={flight.assessment.grade} size="md" />
           {flight.assessment.confidence === "partial" ? (
-            <Tooltip content={<span className="block max-w-[320px] text-xs">Expected data was missing, so those criteria are n/a (never full credit): {partial.join("; ")}. A challenge would not rank it.</span>}>
+            <Tooltip content={<span className="block max-w-[320px] text-xs">{a.partial_note}</span>}>
               <span><Badge size="sm" tone="warning" animated={false}>Partial data</Badge></span>
             </Tooltip>
           ) : <Badge size="sm" tone="neutral" animated={false}>Full data</Badge>}
         </div>
         <EventCounts counts={flight.event_counts} />
       </div>
-      <p className="text-xs text-fg-3">landing-2{many ? ` · from landing ${graded + 1}, the last full stop` : ""} · points method {flight.assessment.points} pt{flight.assessment.points === 1 ? "" : "s"}</p>
+      <p className="text-xs text-fg-3">{many ? `Graded on landing ${graded + 1}, the last full stop` : "Landing score"} · {flight.assessment.points} event point{flight.assessment.points === 1 ? "" : "s"}</p>
     </div>
   );
 }
 
-const CAP_TITLE: Record<CapNote["kind"], string> = {
-  material: "A level 2 finding: cannot be Good",
-  unstable: "Unstable approach continued to a landing",
-  inspection: "Inspection-level touchdown",
-  undershoot: "Touchdown before the threshold",
-  excursion: "Runway excursion",
-  flight: "The flight grade is below the landing's score",
-};
-
-/** The caps that hold the flight's score down, the lowest first, each with what caused it (docs/scoring.md §4, Decision 3). */
+/** The caps that hold the flight's score down, the lowest first, each with what caused it, as the debrief words them. */
 function CapBanner({ flight }: { flight: Debrief["flight"] }) {
   const caps = [...(flight.assessment_detail.caps ?? [])].sort((a, b) => a.score - b.score);
   if (!caps.length) return null;
@@ -112,9 +102,8 @@ function CapBanner({ flight }: { flight: Debrief["flight"] }) {
       <ul className="flex min-w-0 flex-col gap-1 text-sm">
         {caps.map((c, i) => (
           <li key={i}>
-            <span className="font-medium">{CAP_TITLE[c.kind]}</span>
-            <span className="readout ml-2 text-xs text-fg-2">capped at {number(c.score, 1)}</span>
-            <span className="block text-xs text-fg-2">{c.landing !== undefined && (flight.assessment_detail.landings?.length ?? 0) > 1 ? `Landing ${c.landing + 1}: ` : ""}{c.reason}{c.kind === "unstable" ? ". Go around next time: a go-around is never a deduction." : "."}</span>
+            <span className="font-medium">{c.title}</span>
+            <span className="block text-xs text-fg-2">{c.landing !== undefined && (flight.assessment_detail.landings?.length ?? 0) > 1 ? `Landing ${c.landing + 1}: ` : ""}{c.reason}</span>
           </li>
         ))}
       </ul>

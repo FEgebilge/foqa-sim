@@ -131,7 +131,10 @@ fn the_selected_speed_is_only_a_debrief_fallback() {
     };
     assert_eq!(speeds, None);
     assert_eq!(score.confidence, Confidence::Partial);
-    assert_eq!(score.partial, ["No Vref for TEST"]);
+    assert_eq!(
+        score.partial,
+        ["No reference speed (Vref) for TEST, so speed items were not graded"]
+    );
 }
 
 #[test]
@@ -243,8 +246,8 @@ fn data_gaps_make_their_criteria_n_a() {
     assert_eq!(
         s.partial,
         [
-            "A1 n/a: data gap over 1.5 s in the approach window",
-            "B1 n/a: no radio height at the threshold"
+            "IAS off the approach speed was not graded: the recording has a gap of over 1.5 s in the approach",
+            "Threshold crossing height was not graded: no radio altitude at the threshold"
         ]
     );
 }

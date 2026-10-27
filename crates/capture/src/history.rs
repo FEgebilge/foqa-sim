@@ -24,7 +24,7 @@ use crate::service::ClearOnDrop;
 /// the real Comm Bus limit is not yet measured in the sim.
 const CAP: usize = 6 * 1024;
 /// Bytes of one message's UTF-8 JSON: `CAP` less the terminator.
-const JSON_MAX: usize = CAP - 1;
+pub(crate) const JSON_MAX: usize = CAP - 1;
 /// Flights in `FOQA_SIM_FLIGHTS`, fewer when they do not fit `JSON_MAX`.
 const FLIGHTS_SENT: usize = 30;
 /// A longer `req` plus `id` is refused, so every reply fits `JSON_MAX`.
@@ -419,12 +419,13 @@ impl From<Event> for CompactEvent {
 
 /// A domain mini-bar: weight, points lost (`None`: n/a), level, and the
 /// share of the weight lost (0 to 1; 0 when n/a), which the bar draws:
-/// the points are rescaled when a domain is n/a, the share is not.
-type Bar = (f64, Option<f64>, u8, f64);
+/// the points are rescaled when a domain is n/a, the share is not; and the
+/// domain's short name, in the app's words.
+type Bar = (f64, Option<f64>, u8, f64, &'static str);
 
 /// The grading landing's domains as mini-bars and its largest deduction in
 /// words, as the app words it: "Approach stability −17.3: Descent rate
-/// 1,562 fpm at or above 500 ft".
+/// 1,562 fpm above 500 ft".
 fn bars(d: &AssessmentDetail) -> (Vec<Bar>, Option<String>) {
     let Some(landing) = d.graded_by.and_then(|i| d.landings.get(i)) else {
         return (Vec::new(), None);
@@ -438,6 +439,7 @@ fn bars(d: &AssessmentDetail) -> (Vec<Bar>, Option<String>) {
                 x.loss.map(|_| x.points),
                 x.level,
                 x.loss.unwrap_or(0.0),
+                x.short,
             )
         })
         .collect();
@@ -683,7 +685,7 @@ mod tests {
         assert!(f["score"].as_f64().is_some_and(|s| s > 0.0 && s <= 100.0));
         let bars = f["bars"].as_array().unwrap();
         assert_eq!(bars.len(), 6);
-        assert_eq!(bars[0], json!([25.0, 0.0, 0, 0.0]));
+        assert_eq!(bars[0], json!([25.0, 0.0, 0, 0.0, "Approach"]));
         let top = f["top"].as_str().unwrap();
         // In the app's words: two decimals in g.
         assert_eq!(

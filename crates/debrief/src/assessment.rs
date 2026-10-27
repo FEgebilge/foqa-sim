@@ -3,8 +3,12 @@
 //! flight graded by its last full-stop landing (Decision 3) and the rest of
 //! the flight. A flight without a scored landing keeps the points method.
 
-use assess::{CapKind, Height, Landing, LandingScore, Measures, Method, Speeds};
-use rules::{Domain, Level};
+pub use assess::value_text;
+use assess::{
+    CapKind, Height, Landing, LandingScore, Measures, Method, SpeedSource, Speeds, height_text,
+    item_text, number,
+};
+use rules::{Domain, Level, ScoringClass};
 
 use crate::wire::{
     Assessment, AssessmentDetail, CapNote, Confidence, CriterionAssessment, DomainAssessment,
@@ -61,6 +65,7 @@ impl Analysis<'_> {
             grade: legacy.grade,
             confidence: None,
             caps: Vec::new(),
+            partial_note: None,
             graded_by: None,
             landings,
             other_findings,
@@ -89,10 +94,12 @@ impl Analysis<'_> {
             .extend(flight.reasons.iter().map(|reason| CapNote {
                 kind: "flight".into(),
                 score: flight.score,
+                title: "The flight grade is held below the landing's score".into(),
                 reason: reason.clone(),
                 source: "docs/scoring.md Decision 3: flight grade".into(),
                 landing: None,
             }));
+        detail.partial_note = partial_note(&detail.landings);
         detail.method = method.name.clone();
         detail.score = Some(flight.score);
         detail.grade = flight.grade.into();
@@ -166,17 +173,12 @@ fn domains(
                 .map(|c| {
                     let def = method.criterion(&c.id).expect("a scored criterion");
                     let band = def.band(m.class, c.height).expect("a graded band");
-                    let (name, height_text) = match c.height {
-                        Height::All => (c.id.clone(), None),
-                        Height::Above => (
-                            format!("{} above", c.id),
-                            Some(format!("at or above {split_ft} ft")),
-                        ),
-                        Height::Below => (
-                            format!("{} below", c.id),
-                            Some(format!("below {split_ft} ft")),
-                        ),
+                    let name = match c.height {
+                        Height::All => c.id.clone(),
+                        Height::Above => format!("{} above", c.id),
+                        Height::Below => format!("{} below", c.id),
                     };
+                    let height_text = height_text(c.height, split_ft);
                     let unit = def.unit.map(|u| u.symbol());
                     let text = |x: f64| value_text(&c.id, unit, x);
                     let bands = SideBands {
@@ -222,6 +224,8 @@ fn domains(
             DomainAssessment {
                 id: d.domain,
                 title: domain_title(d.domain),
+                short: domain_short(d.domain),
+                summary: domain_summary(d.domain),
                 weight: d.weight,
                 loss: d.loss,
                 points: (lost * 10.0).round() / 10.0,
@@ -235,71 +239,102 @@ fn domains(
         .collect()
 }
 
-/// Criteria whose value is an offset from a target (speed, crossing
-/// height, touchdown point): shown signed.
-const SIGNED: [&str; 4] = ["A1", "B1", "B2", "C1"];
-
-/// A criterion's value `x` in its unit as the app and the EFB show it:
-/// signed for an offset, two decimals in g, one in dots or under 10 when
-/// not whole, levels as "L2".
-pub fn value_text(id: &str, unit: Option<&str>, x: f64) -> String {
-    let Some(unit) = unit else {
-        return if x != 0.0 && !x.is_nan() {
-            format!("L{}", number(x, 0))
-        } else {
-            "none".into()
-        };
-    };
-    let digits = match unit {
-        "g" => 2,
-        "dot" => 1,
-        _ if x.abs() < 10.0 && x.fract() != 0.0 => 1,
-        _ => 0,
-    };
-    let text = number(x, digits);
-    let zero = !text.bytes().any(|b| (b'1'..=b'9').contains(&b));
-    let sign = if SIGNED.contains(&id) && x > 0.0 && !zero {
-        "+"
-    } else {
-        ""
-    };
-    let unit = match unit {
-        "deg" => "\u{b0}".to_owned(),
-        u => format!(" {u}"),
-    };
-    format!("{sign}{text}{unit}")
-}
-
-/// `x` with `digits` decimals, halves away from zero, thousands grouped
-/// with commas (en-US); a value that rounds to zero is unsigned.
-fn number(x: f64, digits: usize) -> String {
-    let scale = 10f64.powi(digits as i32);
-    let r = (x * scale).round() / scale;
-    let text = format!("{:.*}", digits, r.abs());
-    let (int, frac) = text.split_at(text.find('.').unwrap_or(text.len()));
-    let mut grouped = String::new();
-    for (i, c) in int.chars().enumerate() {
-        if i > 0 && (int.len() - i) % 3 == 0 {
-            grouped.push(',');
-        }
-        grouped.push(c);
-    }
-    let sign = if r < 0.0 { "-" } else { "" };
-    format!("{sign}{grouped}{frac}")
-}
-
 /// The item that set a domain's deduction in words: the criterion with its
-/// value and half ("Descent rate 1,562 fpm at or above 300 ft"), else the
+/// value and half ("Descent rate 1,562 fpm above 300 ft"), else the
 /// finding's event title (its rule without one).
 fn set_by_text(d: &DomainAssessment, events: &[Event]) -> Option<String> {
     if let Some(c) = d.criteria.iter().find(|c| c.sets) {
-        let parts = [Some(&c.title), Some(&c.value_text), c.height_text.as_ref()];
-        let parts: Vec<&str> = parts.into_iter().flatten().map(String::as_str).collect();
-        return Some(parts.join(" "));
+        return Some(item_text(&c.title, &c.value_text, c.height_text.as_deref()));
     }
     let f = d.findings.iter().find(|f| f.sets)?;
     let event = f.event.and_then(|i| events.get(i));
     Some(event.map_or_else(|| f.rule.clone(), |e| e.title.clone()))
+}
+
+/// Why the data is partial, from every landing's missing items.
+fn partial_note(landings: &[LandingAssessment]) -> Option<String> {
+    let items: Vec<&str> = landings
+        .iter()
+        .flat_map(|l| &l.partial)
+        .map(String::as_str)
+        .collect();
+    (!items.is_empty()).then(|| {
+        format!(
+            "Some expected data was missing, so these items were not graded and never get full credit: {}. A challenge would not rank this flight.",
+            items.join("; ")
+        )
+    })
+}
+
+/// A required measurement that is missing, in words.
+fn missing_text(what: &str) -> &str {
+    match what {
+        "runway" => "runway data",
+        "peak_g" => "the touchdown g-load",
+        "sink" => "the touchdown sink rate",
+        "rollout position" => "the rollout position on the runway",
+        other => other,
+    }
+}
+
+/// The class's grading limits, the speeds and the stable height: the facts
+/// under a scored landing's title.
+fn facts(class: ScoringClass, speeds: &Option<Speeds>, stable_from_ft: Option<f64>) -> Vec<String> {
+    let class = match class {
+        ScoringClass::Light => "light-aircraft",
+        ScoringClass::Turboprop => "turboprop",
+        ScoringClass::Jet => "jet",
+    };
+    let speeds = match speeds {
+        None => "No reference speed for this aircraft: speed was not graded".to_owned(),
+        Some(s) => {
+            let note = match (s.source, s.approximate) {
+                (SpeedSource::Selected, _) => " (the selected speed: debrief only)",
+                (_, true) => " (approximate, from the aircraft profile)",
+                _ => "",
+            };
+            format!(
+                "Reference speed {} kt, approach speed {} kt{note}",
+                number(s.vref_kt, 0),
+                number(s.vapp_kt, 0)
+            )
+        }
+    };
+    let stable = stable_from_ft.map_or_else(
+        || "Approach never fully stable".to_owned(),
+        |ft| format!("Approach stable from {} ft down", number(ft, 0)),
+    );
+    vec![format!("Graded with {class} limits"), speeds, stable]
+}
+
+/// A domain's title in a word or two, for the EFB's small bars.
+pub fn domain_short(d: Domain) -> &'static str {
+    match d {
+        Domain::Stability => "Approach",
+        Domain::Energy => "Flare",
+        Domain::Point => "Landing spot",
+        Domain::Lateral => "Centreline",
+        Domain::Contact => "Touchdown",
+        Domain::Rollout => "Rollout",
+        Domain::Other => "Other",
+    }
+}
+
+/// What a domain looks at, in one line.
+pub fn domain_summary(d: Domain) -> &'static str {
+    match d {
+        Domain::Stability => {
+            "Speed, descent rate, bank, pitch, glideslope and configuration on final"
+        }
+        Domain::Energy => "Height over the threshold, touchdown speed and float down the runway",
+        Domain::Point => "How far from the aiming point the wheels touched down",
+        Domain::Lateral => {
+            "Offset from the centreline, crab and drift at touchdown, then on the rollout"
+        }
+        Domain::Contact => "Load, sink rate, bounce, tail clearance and bank at touchdown",
+        Domain::Rollout => "How soon braking began and how hard it had to be to stop",
+        Domain::Other => "Findings outside the other five",
+    }
 }
 
 pub fn domain_title(d: Domain) -> &'static str {
@@ -327,6 +362,7 @@ impl CapNote {
         Self {
             kind: kind.into(),
             score: c.score,
+            title: c.title.clone(),
             reason: c.reason.clone(),
             source: c.source.clone(),
             landing,
@@ -345,6 +381,17 @@ impl LandingAssessment {
             confidence: None,
             class: None,
             partial: Vec::new(),
+            note: Some(format!(
+                "Not scored: {} not recorded, and a score needs {}. Missing data never earns credit, so this landing counts through its findings only (event points).",
+                assess::list(
+                    &missing
+                        .iter()
+                        .map(|m| missing_text(m).to_owned())
+                        .collect::<Vec<_>>()
+                ),
+                if missing.len() == 1 { "it" } else { "them" }
+            )),
+            facts: Vec::new(),
             missing,
             full_stop: true,
             caps: Vec::new(),
@@ -372,6 +419,8 @@ impl LandingAssessment {
             class: Some(score.class),
             partial: score.partial.clone(),
             missing: Vec::new(),
+            note: None,
+            facts: facts(score.class, &speeds, score.stable_from_ft),
             full_stop,
             caps: score.caps.iter().map(|c| CapNote::of(c, None)).collect(),
             stable_from_ft: score.stable_from_ft,
@@ -398,40 +447,5 @@ impl From<assess::Confidence> for Confidence {
             assess::Confidence::Full => Self::Full,
             assess::Confidence::Partial => Self::Partial,
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// As the app showed them: offsets signed, dots to 0.1, g to 0.01,
-    /// thousands grouped, small fractions to 0.1, levels as "L2".
-    #[test]
-    fn values_read_as_the_app_shows_them() {
-        let cases = [
-            ("A1", Some("kt"), 12.4, "+12 kt"),
-            ("A1", Some("kt"), -3.25, "-3.3 kt"),
-            ("B1", Some("ft"), 0.0, "0 ft"),
-            ("C1", Some("ft"), 1234.5, "+1,235 ft"),
-            ("A2", Some("fpm"), -1562.0, "-1,562 fpm"),
-            ("A3", Some("dot"), 1.0, "1.0 dot"),
-            ("A3", Some("dot"), 0.84, "0.8 dot"),
-            ("E1", Some("g"), 1.6, "1.60 g"),
-            ("D1", Some("deg"), 4.5, "4.5\u{b0}"),
-            ("A2", Some("fpm"), 12.5, "13 fpm"),
-            ("A6", None, 2.0, "L2"),
-            ("A6", None, 0.0, "none"),
-        ];
-        for (id, unit, x, want) in cases {
-            assert_eq!(value_text(id, unit, x), want, "{id} {x}");
-        }
-        assert_eq!(number(1_234_567.891, 2), "1,234,567.89");
-        assert_eq!(number(-0.4, 0), "0");
-        assert_eq!(number(-0.04, 1), "0.0");
-        assert_eq!(number(-0.0, 1), "0.0");
-        assert_eq!(number(-0.05, 1), "-0.1");
-        assert_eq!(value_text("A1", Some("ft"), -0.02), "0.0 ft");
-        assert_eq!(value_text("A1", Some("ft"), 0.02), "0.0 ft");
     }
 }
