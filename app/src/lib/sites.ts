@@ -61,6 +61,23 @@ export interface SiteAttempt {
   log: { at: string; seq: number; event: string; [field: string]: unknown }[];
 }
 
+/** A link from a website (docs/challenge-protocol.md A3, B2), as the backend asks about it. */
+export interface DeepLink {
+  /** `ask`: the site isn't the user's, "Connect to <host>?"; `open`: it is, open the challenge;
+   * `refused`: the link is invalid; `disabled`: a build without sites. `text` says why for the last two. */
+  state: "ask" | "open" | "refused" | "disabled";
+  kind?: "challenge" | "connect";
+  origin?: string;
+  /** In ASCII (punycode for an IDN host): shown before any name. */
+  host?: string;
+  /** Self-declared, known sites only. */
+  name?: string;
+  id?: string;
+  v?: number;
+  signed_in: boolean;
+  text?: string;
+}
+
 export interface SitesApi {
   /** Whether this build has the site client; false (or a missing command) hides every site part. */
   connectAvailable(): Promise<boolean>;
@@ -79,6 +96,12 @@ export interface SitesApi {
   attemptUpload(id: string | null): Promise<void>;
   /** Opens a page of a connected site in the browser. */
   siteOpen(url: string): Promise<void>;
+  /** The link waiting for the user, once the window is ready (also in builds without sites). */
+  deepLinkPending(): Promise<DeepLink | null>;
+  /** The answer to "Connect to <host>?"; allowed, the site added. */
+  deepLinkConsent(origin: string, allow: boolean): Promise<SiteView | null>;
+  /** The link was acted on or dismissed. */
+  deepLinkDone(): Promise<void>;
 }
 
 export type Tone = "neutral" | "success" | "info" | "warning" | "danger";

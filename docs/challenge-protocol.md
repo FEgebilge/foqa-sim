@@ -12,10 +12,10 @@ but nothing below names it.
 Status: design. Part A is the wire protocol (what a site implements).
 Part B is the app side (how FOQA-Sim implements the client without
 depending on it). Revised 2026-10-27 after a security and a UX review.
-Built (2026-10-28): slices F1 (marker, slice, golden), F3 and F4
-(`crates/connect`, `app/src-tauri/src/connect.rs`, Challenges → Sites);
-see "Implementation notes" at the end. Deep links (F5) and F6 are not
-built.
+Built (2026-10-28): slices F1 (marker, slice, golden), F3, F4
+(`crates/connect`, `app/src-tauri/src/connect.rs`, Challenges → Sites) and
+F5 (deep links, the in-sim strip and EFB Challenges tab, toasts); see
+"Implementation notes" at the end. F6 is not built.
 
 ## Principles
 
@@ -797,7 +797,7 @@ Each slice keeps the app fully usable with no site configured.
   accepting a band is not enough. How the app sets it is under research
   (docs/challenges.md, "What MSFS 2024 allows").
 
-## Implementation notes (F1, F3, F4)
+## Implementation notes (F1, F3, F4, F5)
 
 - `crates/connect` depends on no FOQA-Sim crate; the app's `connect`
   feature (default on) adds it with `open` (system browser). Off
@@ -848,6 +848,41 @@ Each slice keeps the app fully usable with no site configured.
   (B5).
 - "Allow local sites" is the environment variable
   `FOQA_ALLOW_LOCAL_SITES=1` until the app has a settings screen; the
-  auto-upload, notifications and links toggles (B3), toasts (B7), the
-  stale-attempt sweep at start-up (B6) and site states in the strip/EFB
-  (B9) are not built yet.
+  auto-upload, notifications and links toggles (B3) and the stale-attempt
+  sweep at start-up (B6) are not built yet: links are always on and
+  toasts always shown.
+- **Deep links (F5):** `crates/connect/src/deeplink.rs` parses A3 strictly
+  (512 bytes, printable ASCII only, host `challenge`/`connect` exactly, no
+  userinfo/port/path/fragment, a repeated key refused, `site` by A1's
+  `Origin::parse`, `id` and `v` as A3) and holds the one pending link
+  (`Gate`, 10 minutes, memory only): an unknown site is `ask` until
+  `deep_link_consent` for that very origin; a known one is `open`. The app
+  registers `tauri-plugin-single-instance` (feature `deep-link`) first,
+  then `tauri-plugin-deep-link` (static scheme in `tauri.conf.json`), calls
+  `register("foqa-sim")` at start-up and reads a cold-start link with
+  `get_current()`; forwarded links arrive in `on_open_url`. Every link is
+  logged in the connect log (`deep_link`: kind, origin, id, v, or the
+  reject reason and length, never the URL), every answer too (`consent`).
+  The window then asks: "Connect to <ascii host>?" (fetches nothing before
+  Allow), then the browser sign-in the user starts, then the challenge is
+  taken and its briefing shown; a signed-in site's link opens the briefing
+  directly. Placing and uploading still need the user. The plugin parses
+  the URL before the app does, so a tab or newline is already stripped by
+  then; the app's own checks still apply. Without `connect` the scheme is
+  still registered by the installer; the app recognises `foqa-sim:` in
+  its arguments (first start or second instance) and only says "Sites are
+  disabled in this build".
+- **Toasts (B7):** on a sidecar's change to `scored` or `rejected`, once
+  per attempt and only while the window isn't in front: "Scored 87.4, #3
+  on <title>" with the site, "Scored 81.0, not ranked on <title>" with the
+  reasons, "Rejected on <title>" with the reject copy; a click opens the
+  challenge (`open-challenge`).
+- **In-sim views (B9):** `crates/capture/src/views.rs` (types, size caps,
+  `AppCommand`, the app's `Views` handle) and `app/src-tauri/src/insim.rs`
+  (the strip's words, the cards, the briefing lines). The strip follows the
+  open attempt, else the newest, rebuilt on every attempt change and every
+  5 s; a final one (core done and the site's state final, or no site) goes
+  on for 10 minutes. While it flies, the app grades the open flight every
+  5 s for the gate, which moves the attempt to `approach`
+  (logged `gate` once). `AttemptStrip` also has `can_finish`. Views:
+  `foqa-strip.js` (toolbar board and EFB), `efb/foqa-challenges.js`.

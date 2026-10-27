@@ -37,6 +37,12 @@ Landing) and a **Mark** button while recording.
 | Landings | The newest landing as a card (sink, peak g, IAS, TDZ/long/short, bounce, distance past the threshold and off the centreline, top 3 events of its approach), the two before it as rows. A landing at most 120 s old opens this tab by itself; `×` goes back to the tab before. |
 | Flight | Aircraft, departure, time, phase, landings, event counts, flight id; **Mark event**, **End flight & save**, **Discard flight…** (a second click within 6 s confirms). |
 
+Under the tabs, the **attempt strip** (`foqa-strip.js`) shows the current
+challenge attempt in the app's words ("Attempt 2 · Landed 142 fpm · Graded
+87.4 · Scored 87.4, #3") with **Finish** while it flies and **Fly again**
+(over an open attempt a second click within 6 s confirms, since it abandons
+it); it goes 5 s after the app stops sending it. See Challenges below.
+
 A new event flashes in a banner under the header for 8 s (click opens
 Events). Events already there when the panel opens do not flash. The app's
 `ack` shows as a green or red line at the bottom for 6 s; no ack within 8 s
@@ -51,9 +57,9 @@ Source in `msfs-panel/`:
 | `foqa-sim-panel.xml` | Package tool project; output in `msfs-panel/out` (git-ignored) |
 | `PackageDefinitions/foqa-sim-panel.xml` | Package `foqa-sim-panel`: an SPB group (panel definition) and a Copy group (`html_ui`) |
 | `PackageSources/InGamePanels/InGamePanel_FOQASim.xml` | Panel definition, compiled to `InGamePanel_FOQASim.spb`: id `PANEL_FOQA_SIM`, name "FOQA-Sim", toolbar icon `ICON_TOOLBAR_FOQA_SIM` |
-| `PackageSources/html_ui/InGamePanels/FOQASim/` | `FOQASim.html` and `FOQASim.js` (sim glue: `ingame-ui` frame, Comm Bus listener), `foqa-board.js` (rendering, no sim APIs), `FOQASim.css` |
+| `PackageSources/html_ui/InGamePanels/FOQASim/` | `FOQASim.html` and `FOQASim.js` (sim glue: `ingame-ui` frame, Comm Bus listener), `foqa-board.js` (rendering, no sim APIs), `foqa-strip.js` (the attempt strip, `node efb/test/foqa-strip.test.js`), `FOQASim.css` |
 | `PackageSources/html_ui/icons/toolbar/ICON_TOOLBAR_FOQA_SIM.svg` | Toolbar button |
-| `efb/` | EFB app: `FoqaSimApp.js` (EFB glue, Live and Flights tabs), `foqa-history.js` (Flights, `node efb/test/foqa-history.test.js`), `foqa-weather.js` (weather setter, `node efb/test/foqa-weather.test.js`), `build.ps1` |
+| `efb/` | EFB app: `FoqaSimApp.js` (EFB glue, Live, Challenges and Flights tabs), `foqa-challenges.js` (Challenges, `node efb/test/foqa-challenges.test.js`), `foqa-history.js` (Flights, `node efb/test/foqa-history.test.js`), `foqa-weather.js` (weather setter, `node efb/test/foqa-weather.test.js`), `build.ps1` |
 | `dev/index.html`, `dev/efb.html` | The board and the EFB app in a browser with a stubbed Comm Bus |
 
 `foqa-board.js` is plain ES2015 with no sim dependency, so the EFB app
@@ -152,6 +158,9 @@ values in `monitor.rs`) and the views. JSON, UTF-8. Every message carries
 | `FOQA_SIM_FLIGHTS` | `Flights` | reply to `list_flights`, every 1 s for ~5 s |
 | `FOQA_SIM_DEBRIEF` | `DebriefPart` | reply to `debrief`, all parts every 1 s for ~5 s |
 | `FOQA_SIM_WEATHER` | `{ v: 2, cmd: "set_weather", req, spec: WeatherSpec }` | EFB app only; see Weather. Not sent by any flow yet |
+| `FOQA_SIM_ATTEMPT` | `AttemptStrip` | 1 Hz while an attempt is open and for 10 min after it reached a final state; at once on change. See Challenges |
+| `FOQA_SIM_CHALLENGES` | `{ v, req, challenges: ChallengeCard[] }` | reply to `list_challenges`, every 1 s for ~5 s |
+| `FOQA_SIM_BRIEFING` | `{ v, req, key, title, lines, preflight, error? }` | reply to `briefing`, every 1 s for ~5 s |
 
 `EVENTS` and `LANDINGS` come from the app's own analysis of the open
 journal, run every 5 s in the background (one at a time), so they trail the
@@ -254,6 +263,11 @@ connection and ignores trailing NULs.
 | | `{ v: 2, cmd: "mark", note?: string }` | mark this moment in the journal (pilot report) |
 | | `{ v: 2, cmd: "list_flights", req: string }` | the saved flights, answered in `FOQA_SIM_FLIGHTS` |
 | | `{ v: 2, cmd: "debrief", req: string, id: string }` | one flight's compact debrief, answered in `FOQA_SIM_DEBRIEF` |
+| | `{ v: 2, cmd: "list_challenges", req }` | the app's challenge library, answered in `FOQA_SIM_CHALLENGES` |
+| | `{ v: 2, cmd: "briefing", req, key }` | one challenge's briefing and pre-flight card, answered in `FOQA_SIM_BRIEFING` |
+| | `{ v: 2, cmd: "place", key, practice?: boolean }` | create an attempt and place the aircraft, as the app's Place; `practice`: never uploaded |
+| | `{ v: 2, cmd: "fly_again" }` | abandon the current or last attempt (`replaced`) and place a new one on its challenge |
+| | `{ v: 2, cmd: "finish" }` / `{ v: 2, cmd: "abandon" }` | the open attempt, as the app's buttons |
 
 Commands are acked once in `Status.ack`; the two queries are not (see
 Flight history). The ack has `cmd`, `ok` and, on failure, `message`, e.g.
@@ -273,6 +287,49 @@ Flight history). The ack has `cmd`, `ok` and, on failure, `message`, e.g.
 - `start_flight`: answered at once; the flight opens at the next sim frame.
   It fails with `"a flight is already recording"` while one is open.
 - Any other command while no flight is recorded fails with `"no flight open"`.
+
+### Challenges (toolbar panel and EFB app)
+
+The challenge part of the views (docs/challenge-protocol.md B9); types and
+caps in `crates/capture/src/views.rs`, the words in
+`app/src-tauri/src/insim.rs`. The app carries out `place`, `fly_again`,
+`finish` and `abandon` exactly as its own buttons (one attempt open at a
+time) and acks them in `Status.ack`; the two queries are answered like the
+history's, with `req` echoed back, from the app's own library (no network
+call from the sim). A key is `[a-z0-9-]`, at most 80 bytes; `req` plus `key`
+at most 256 bytes. Each message fits the 6 KB cap: the strip's text and
+reasons are cut to 160 characters, a card list to 12 cards and then to as
+many as fit, a briefing to 12 lines of 120 characters (dropped from the end
+to fit) and 6 pre-flight lines.
+
+```ts
+interface AttemptStrip {
+  v: 2;
+  id: string;                  // local attempt id
+  key: string;                 // challenge's library key
+  n: number;                   // attempt number on this challenge on this PC
+  stage: "placing" | "flying" | "gate" | "rollout" | "finished" | "graded" | "abandoned" | "failed_start";
+  landed?: { sink_fpm: number; peak_g: number };
+  local?: { valid: boolean; score: number | null };
+  site?: { state: "practice" | "uploading" | "waiting" | "scoring" | "scored" | "rejected" | "unverified"
+                 | "expired" | "signed_out" | "unknown"; score?: number; rank?: number; reason?: string };
+  text: string;                // "Attempt 2 · Landed 142 fpm · Graded 87.4 · Scored 87.4, #3"
+  can_fly_again: boolean;      // not while placing
+  can_finish: boolean;         // placed and not yet graded or abandoned
+}
+interface ChallengeCard { key: string; title: string; airport: string; runway: string;
+  source: string;              // "File" or "<name> (<ascii host>)"
+  state: "open" | "upcoming" | "closed" | "needs_update"; last?: string; rank?: number }
+interface PreflightLine { name: "sim" | "aircraft" | "weather" | "ranking";
+  state: "ok" | "warn" | "fail" | "unknown"; text: string; fix?: string }
+```
+
+The strip follows the open attempt, else the newest. The **EFB Challenges
+tab** lists the cards (the challenge flown last first, with its last
+attempt), opens a briefing (its facts, the pre-flight card, asked again
+every 5 s while shown) with **Place** (off while a check fails) and **Fly as
+practice**, and shows the strip with Fly again above. With no reply within
+8 s it says so and asks again on a tap.
 
 ### Weather (EFB app)
 

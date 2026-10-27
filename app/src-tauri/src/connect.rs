@@ -1,10 +1,11 @@
 //! The `connect` feature (docs/challenge-protocol.md B1): the site client
 //! joined to the app. Sites settings, challenges taken from a site, issue
-//! before placing, the background uploader and its Tauri commands. The app
-//! builds and runs without this module.
+//! before placing, the background uploader, deep links from websites (B2),
+//! toasts on a site's verdict (B7) and its Tauri commands. The app builds
+//! and runs without this module.
 
-use std::collections::HashMap;
-use std::path::PathBuf;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -12,13 +13,17 @@ use std::time::Duration;
 
 use ::connect::api::Error;
 use ::connect::copy::{self, Ctx};
+use ::connect::deeplink::{self, Consent, Gate, Link, Pending};
 use ::connect::http::Http;
+use ::connect::sidecar::SiteState;
 use ::connect::sites::{Flow, SiteRecord, Sites};
 use ::connect::store::KeyringStore;
 use ::connect::uploader::{self, Uploader};
+use capture::SiteStrip;
 use serde::Serialize;
 use serde_json::json;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
+use tauri_plugin_notification::NotificationExt;
 
 use crate::attempts::{Record, State as AttemptState};
 use crate::commands::{AttemptHooks, Shared, lock};
@@ -35,6 +40,39 @@ pub struct Connect {
     /// The device code shown while a device sign-in waits, per origin.
     device: Mutex<HashMap<String, Device>>,
     app: AppHandle,
+    /// "Allow local sites" (A1).
+    allow_local: bool,
+    /// The deep link waiting for the user, and the last one refused.
+    links: Mutex<Gate>,
+    refused: Mutex<Option<&'static str>>,
+    /// The attempt folders, for a toast's challenge title.
+    attempts: PathBuf,
+    /// Attempts whose verdict was shown in a toast.
+    toasted: Mutex<HashSet<String>>,
+}
+
+/// A deep link as the app asks about it (`deep-link` event).
+#[derive(Debug, Clone, Serialize)]
+pub struct LinkView {
+    /// `ask`: "Connect to <host>?"; `open`: the site is the user's, open
+    /// the challenge; `refused`: the link is invalid (`text` says why).
+    state: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    kind: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    origin: Option<String>,
+    /// The host in ASCII (punycode for an IDN host), shown before any name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    host: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    v: Option<u32>,
+    signed_in: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    text: Option<&'static str>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -85,8 +123,12 @@ impl Connect {
             allow_local,
         )?);
         let handle = app.clone();
-        let uploader = Uploader::new(Arc::clone(&sites), attempts)
-            .on_change(move |id| emit(&handle, json!({ "attempt": id })));
+        let (changed, verdicts) = mpsc::channel::<String>();
+        let changed = Mutex::new(changed);
+        let uploader = Uploader::new(Arc::clone(&sites), attempts.clone()).on_change(move |id| {
+            emit(&handle, json!({ "attempt": id }));
+            let _ = lock(&changed).send(id.to_owned());
+        });
         let (tx, rx) = mpsc::channel();
         let connect = Arc::new(Self {
             sites,
@@ -94,7 +136,14 @@ impl Connect {
             wake: Mutex::new(tx),
             device: Mutex::new(HashMap::new()),
             app,
+            allow_local,
+            links: Mutex::new(Gate::default()),
+            refused: Mutex::new(None),
+            attempts,
+            toasted: Mutex::new(HashSet::new()),
         });
+        let toasts = Arc::clone(&connect);
+        thread::spawn(move || verdicts.iter().for_each(|id| toasts.toast(&id)));
         connect.uploader.wake(None, None);
         let run = Arc::clone(&connect);
         thread::Builder::new()
@@ -157,6 +206,132 @@ impl Connect {
             .get(origin)
             .ok_or_else(|| format!("{origin} isn't one of your sites."))
     }
+
+    /// A link from a website (B2), forwarded or at a cold start: parsed
+    /// strictly and logged; it only brings the window up and asks. Nothing
+    /// is fetched from a site the user hasn't connected.
+    pub fn open_url(&self, raw: &str) {
+        match deeplink::parse(raw, self.allow_local) {
+            Err(refused) => {
+                self.sites.log(json!({
+                    "event": "deep_link", "accepted": false, "reason": refused.0, "bytes": raw.len(),
+                }));
+                *lock(&self.refused) = Some(refused.text());
+            }
+            Ok(link) => {
+                let (id, v) = match &link {
+                    Link::Challenge { id, version, .. } => (Some(id.as_str()), *version),
+                    Link::Connect { .. } => (None, None),
+                };
+                self.sites.log(json!({
+                    "event": "deep_link", "accepted": true, "kind": link.kind(),
+                    "origin": link.site(), "id": id, "v": v,
+                }));
+                let known = self.sites.get(link.site().as_str()).is_some();
+                lock(&self.links).offer(link, known, ::connect::now_ms());
+            }
+        }
+        if let Some(view) = self.pending_link(false) {
+            let _ = self.app.emit("deep-link", view);
+        }
+        crate::show(&self.app, None);
+    }
+
+    /// The link to ask about; a refused one is told once (`take`).
+    fn pending_link(&self, take: bool) -> Option<LinkView> {
+        let refused = if take {
+            lock(&self.refused).take()
+        } else {
+            *lock(&self.refused)
+        };
+        if let Some(text) = refused {
+            return Some(LinkView {
+                state: "refused",
+                kind: None,
+                origin: None,
+                host: None,
+                name: None,
+                id: None,
+                v: None,
+                signed_in: false,
+                text: Some(text),
+            });
+        }
+        let Pending { link, consent, .. } = lock(&self.links).pending(::connect::now_ms())?;
+        let site = self.sites.get(link.site().as_str());
+        let (id, v) = match &link {
+            Link::Challenge { id, version, .. } => (Some(id.clone()), *version),
+            Link::Connect { .. } => (None, None),
+        };
+        Some(LinkView {
+            state: match consent {
+                Consent::Ask => "ask",
+                Consent::Open => "open",
+            },
+            kind: Some(link.kind()),
+            origin: Some(link.site().as_str().to_owned()),
+            host: Some(link.site().host().to_owned()),
+            name: site.map(|s| s.well_known.name).filter(|n| !n.is_empty()),
+            id,
+            v,
+            signed_in: self.sites.signed_in(link.site().as_str()),
+            text: None,
+        })
+    }
+
+    /// A toast when a site scores or rejects an attempt (B7), once, while
+    /// the window isn't in front; a click opens the challenge.
+    fn toast(&self, id: &str) {
+        let Some(v) = self.uploader.views().into_iter().find(|v| v.id == id) else {
+            return;
+        };
+        if !matches!(v.state, SiteState::Scored | SiteState::Rejected)
+            || !lock(&self.toasted).insert(id.to_owned())
+        {
+            return;
+        }
+        let window = self.app.get_webview_window("main");
+        let in_front = |w: tauri::WebviewWindow| {
+            w.is_focused().unwrap_or(false) && w.is_visible().unwrap_or(false)
+        };
+        if window.is_some_and(in_front) {
+            return;
+        }
+        let (title, key) = attempt_title(&self.attempts, id);
+        let (head, body) = toast_text(v.state, &v.text, &v.site);
+        let mut toast = self
+            .app
+            .notification()
+            .builder()
+            .title(format!("{head} on {title}"))
+            .body(body);
+        if let Some(key) = key {
+            toast = toast.extra(crate::CHALLENGE_KEY, key);
+        }
+        if let Err(e) = toast.show() {
+            eprintln!("notification not shown: {e}");
+        }
+    }
+}
+
+/// A verdict toast's headline and body from the attempt's site copy (A6):
+/// "Scored 87.4, #3" / site; "Scored 81.0, not ranked" / why; "Rejected" / why.
+fn toast_text(state: SiteState, text: &str, site: &str) -> (String, String) {
+    match (state, text.split_once(": ")) {
+        (SiteState::Rejected, _) => ("Rejected".into(), text.into()),
+        (_, Some((head, why))) => (head.into(), why.into()),
+        (_, None) => (text.trim_end_matches('.').into(), site.into()),
+    }
+}
+
+/// The challenge title and library key of a local attempt.
+fn attempt_title(attempts: &Path, id: &str) -> (String, Option<String>) {
+    let record = std::fs::read(attempts.join(id).join("attempt.json")).ok();
+    let v: serde_json::Value = record
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default();
+    let title = v["title"].as_str().unwrap_or("the challenge").to_owned();
+    (title, v["key"].as_str().map(str::to_owned))
 }
 
 impl AttemptHooks for Connect {
@@ -169,6 +344,35 @@ impl AttemptHooks for Connect {
         let (site, _) = self.sites.source(key)?;
         let signed_in = self.sites.signed_in(site.origin.as_str());
         Some(copy::ranking(&site, signed_in))
+    }
+
+    fn source(&self, key: &str) -> Option<String> {
+        self.sites.source(key).map(|(site, _)| site.label())
+    }
+
+    fn site_strip(&self, id: &str) -> Option<(SiteStrip, bool)> {
+        use SiteState::*;
+        let v = self.uploader.views().into_iter().find(|v| v.id == id)?;
+        let status = v.status.as_ref();
+        let state = match v.state {
+            Issuing | Issued => "waiting",
+            UploadPending | UploadRetry if !self.sites.signed_in(&v.origin) => "signed_out",
+            UploadPending | UploadRetry => "uploading",
+            Queued | Scoring => "scoring",
+            Scored if status.is_some_and(|s| s.verified) => "scored",
+            Scored => "unverified",
+            Rejected => "rejected",
+            Expired => "expired",
+            Practice => "practice",
+            _ => "unknown",
+        };
+        let strip = SiteStrip {
+            state: state.into(),
+            score: status.and_then(|s| s.score()),
+            rank: status.and_then(|s| s.rank),
+            reason: Some(v.text),
+        };
+        Some((strip, v.state.is_final()))
     }
 }
 
@@ -192,6 +396,46 @@ type Connected<'a> = State<'a, Arc<Connect>>;
 #[tauri::command]
 pub fn connect_available() -> bool {
     true
+}
+
+/// The deep link waiting for the user, asked when the window is ready so
+/// a link that started the app is not lost.
+#[tauri::command]
+pub fn deep_link_pending(c: Connected<'_>) -> Option<LinkView> {
+    c.pending_link(true)
+}
+
+/// The answer to "Connect to <host>?" for the link waiting: allowed, the
+/// site is added (its well-known document fetched only now) and the link
+/// stays, to open the challenge after sign-in; denied, it is dropped.
+#[tauri::command]
+pub async fn deep_link_consent(
+    origin: String,
+    allow: bool,
+    c: Connected<'_>,
+) -> Result<Option<SiteView>, String> {
+    let c = Arc::clone(&c);
+    blocking(move || {
+        let answered = lock(&c.links).consent(&origin, allow, ::connect::now_ms());
+        let decision = if allow { "allow" } else { "deny" };
+        c.sites.log(json!({
+            "event": "consent", "origin": origin, "decision": decision, "waiting": answered.is_ok(),
+        }));
+        let Some(link) = answered? else {
+            return Ok(None);
+        };
+        let added = c.sites.add(link.site().as_str());
+        let r = added.inspect_err(|_| lock(&c.links).done())?;
+        emit(&c.app, json!({ "origin": r.origin }));
+        Ok(Some(c.view(&r)))
+    })
+    .await
+}
+
+/// The link was acted on or dismissed.
+#[tauri::command]
+pub fn deep_link_done(c: Connected<'_>) {
+    lock(&c.links).done();
 }
 
 #[tauri::command]
@@ -359,6 +603,42 @@ pub fn site_attempts(c: Connected<'_>) -> Vec<uploader::View> {
 pub fn attempt_upload(id: Option<String>, c: Connected<'_>) {
     c.uploader.wake(None, id.as_deref());
     c.kick();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_verdict_toast_reads_like_the_site_copy() {
+        let t = |state, text: &str| toast_text(state, text, "Site (site.example)");
+        assert_eq!(
+            t(SiteState::Scored, "Scored 87.4, #3"),
+            ("Scored 87.4, #3".into(), "Site (site.example)".into())
+        );
+        assert_eq!(
+            t(
+                SiteState::Scored,
+                "Scored 81.0, not ranked: Flown outside the challenge's dates."
+            ),
+            (
+                "Scored 81.0, not ranked".into(),
+                "Flown outside the challenge's dates.".into()
+            )
+        );
+        assert_eq!(
+            t(SiteState::Scored, "Scored 81.0, not ranked."),
+            (
+                "Scored 81.0, not ranked".into(),
+                "Site (site.example)".into()
+            )
+        );
+        let rejected = t(SiteState::Rejected, "The recording couldn't be read.");
+        assert_eq!(
+            rejected,
+            ("Rejected".into(), "The recording couldn't be read.".into())
+        );
+    }
 }
 
 fn plain(e: &Error, site: &SiteRecord) -> String {

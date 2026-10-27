@@ -92,5 +92,22 @@ export function mockSites(mode: string | null): SitesApi {
       Object.assign(a, { state: "queued", text: "Uploaded. Scoring…", detail: null });
     },
     async siteOpen(url) { window.open(url, "_blank", "noopener"); },
+    // `?link=ask|open|refused|disabled` plays a link from a website arriving at start-up.
+    async deepLinkPending() {
+      const state = new URLSearchParams(window.location.search).get("link");
+      if (state !== "ask" && state !== "open" && state !== "refused" && state !== "disabled") return null;
+      if (state === "refused") return { state, signed_in: false, text: "The link's site address isn't one FOQA-Sim can connect to." };
+      if (state === "disabled") return { state, signed_in: false, text: "Sites are disabled in this build." };
+      const origin = state === "ask" ? "https://xn--pilotaptitud-yjb.example" : ORIGIN;
+      return { state, kind: "challenge", origin, host: new URL(origin).host, signed_in: state === "open", id: "lfpg-27r-self", v: 1 };
+    },
+    async deepLinkConsent(origin, allow) {
+      await settle();
+      if (!allow) return null;
+      const added: SiteView = { origin, host: new URL(origin).host, name: "Look-alike", handle: null, signed_in: false, pending: 0, device: null, account_url: null };
+      sites.push(added);
+      return added;
+    },
+    async deepLinkDone() {},
   };
 }

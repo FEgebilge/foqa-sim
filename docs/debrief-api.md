@@ -33,6 +33,9 @@ the recording; units are in the field names.
 | `attempt_finish(id)` | `AttemptRecord` | Ends the attempt and grades it from its flight (`challenge::evaluate`) |
 | `attempt_abandon(id)` | `AttemptRecord` | Abandons an open attempt (`cancelled`) |
 | `attempts_list()` | `AttemptView[]` | Every attempt with its local grade and log, newest first |
+| `deep_link_pending()` | `DeepLink \| null` | The link from a website waiting for the user ([protocol](challenge-protocol.md) A3, B2), asked once the window is ready; also in builds without `connect` (`state: "disabled"`) |
+| `deep_link_consent(origin, allow)` | `SiteView \| null` | `connect` only: the answer to "Connect to <host>?" for the link waiting; allowed, the site is added (nothing is fetched from it before) |
+| `deep_link_done()` | `void` | The link was acted on or dismissed |
 
 ## Events (backend → frontend)
 
@@ -43,6 +46,8 @@ the recording; units are in the field names.
 | `landing` | `LandingNotice` | Seconds after a touchdown (also a Windows notification) |
 | `open-flight` | `{ flight_id: string }` | The window was opened on a flight (a landing notification was clicked): show its debrief |
 | `attempt-changed` | `AttemptRecord` | An attempt changed state |
+| `deep-link` | `DeepLink` | A link from a website arrived (the window is brought up on Challenges) |
+| `open-challenge` | `{ key: string }` | A site's verdict notification was clicked: show that challenge |
 
 Challenges and attempts are kept in `%APPDATA%\com.egebilge.foqa-sim`: `challenges\<id>-v<version>.json` (the bytes imported) and `attempts\<uuid>\` with `attempt.json`, `challenge.json`, `result.local.json` and the append-only `log.jsonl` (protocol B5; the types are in `app/src/types.ts`). Until the recording carries the attempt marker, an attempt grades only a landing after the sim time its flight had reached when it was placed (`begin_s`). After a landing the attempt is graded 120 s later, on Finish, or when the flight closes; a flight closed before the landing abandons it. At start-up an attempt left between placing and its grade is graded from its flight (`recovered`) if it landed, else abandoned (`interrupted`).
 

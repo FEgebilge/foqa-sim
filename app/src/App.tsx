@@ -7,6 +7,7 @@ import { ThemeSwitch } from "@ui/components/theme-switch/theme-switch";
 import { api } from "./api";
 import { AutostartToggle } from "./components/AutostartToggle";
 import { ChallengesScreen } from "./components/challenges/ChallengesScreen";
+import { DeepLinkDialog } from "./components/challenges/DeepLinkDialog";
 import { DevlogScreen } from "./components/devlog/DevlogScreen";
 import { WhatsNewDialog } from "./components/devlog/WhatsNewDialog";
 import { DebriefScreen } from "./components/debrief/DebriefScreen";
@@ -14,7 +15,7 @@ import { FlightsScreen } from "./components/flights/FlightsScreen";
 import { RecorderStatusPill } from "./components/RecorderStatusPill";
 import { SetupScreen } from "./components/setup/SetupScreen";
 import { measured, number } from "./lib/format";
-import { CHALLENGES_HREF, DEVLOG_HREF, flightHref, openFlight, openSetup, SETUP_HREF, useRoute } from "./lib/route";
+import { CHALLENGES_HREF, challengeHref, DEVLOG_HREF, flightHref, openFlight, openSetup, SETUP_HREF, useRoute } from "./lib/route";
 import { useNotify, useTheme } from "./lib/context";
 import { useBackendEvent, useRecorderStatus, useSetup } from "./lib/use-backend";
 import type { LandingNotice, OpenFlight } from "./types";
@@ -39,6 +40,8 @@ export default function App() {
 
   // A click on the Windows landing notification asks the app to show that flight.
   useBackendEvent("open-flight", useCallback((payload: OpenFlight) => openFlight(payload.flight_id), []));
+  // A click on a site's verdict notification (scored, rejected) asks the app to show that challenge.
+  useBackendEvent("open-challenge", useCallback(({ key }: { key: string }) => { window.location.hash = challengeHref(key).slice(1); }, []));
   useBackendEvent("landing", useCallback((notice: LandingNotice) => {
     const { touchdown, events } = notice;
     notify({
@@ -104,6 +107,7 @@ export default function App() {
         : route.screen === "challenges" ? <ChallengesScreen selected={route.key} recorder={recorder} />
         : route.screen === "devlog" ? <DevlogScreen /> : <FlightsScreen recorder={recorder} />}
       <WhatsNewDialog />
+      <DeepLinkDialog />
     </div>
   );
 }
