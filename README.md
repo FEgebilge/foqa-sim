@@ -19,7 +19,7 @@ a debrief that says what happened, why it matters and what to do differently.
   Logical Frame Layout of 63 parameters at flight-data-recorder rates, 14 CFR 121.344) into a
   crash-safe journal; all analysis runs afterwards on that recording, never on live sim state.
   Everything stays on your PC.
-- **Rules from aviation sources.** 26 event definitions in a small, unit-checked rule language
+- **Rules from aviation sources.** 35 event definitions in a small, unit-checked rule language
   (`rules/core.yaml`). Each threshold names its source: EASA EOFDM, Flight Safety Foundation
   ALAR, UK CAA CAP 739, manufacturer manuals. Estimates are marked as such.
 - **Aircraft-aware limits.** 22 type profiles, from the C172 and Vision Jet to the 737, A320neo
