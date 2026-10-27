@@ -7,7 +7,8 @@ import { EmptyState } from "@ui/components/empty-state/empty-state";
 import { phaseName } from "../../lib/format";
 import { contacts, groupLandings } from "../../lib/landings";
 import { levelColor, phaseColor, type Theme } from "../../lib/palette";
-import { indexAt, type TimeBus } from "../../lib/time";
+import { bearing, indexAt, positionAt, type Position } from "../../lib/series";
+import type { TimeBus } from "../../lib/time";
 import type { Debrief, FlightEvent, RunwayEnd } from "../../types";
 
 // MapLibre finds its worker next to its own module, which Vite pre-bundling moves; point it at the emitted file instead.
@@ -15,7 +16,6 @@ setWorkerUrl(workerUrl);
 
 type Style = ReturnType<TransformStyleFunction>;
 type Source = Style["sources"][string];
-type Position = [lon: number, lat: number];
 type Geometry = { type: "LineString"; coordinates: Position[] } | { type: "Polygon"; coordinates: Position[][] } | { type: "Point"; coordinates: Position };
 type Feature = { type: "Feature"; properties: Record<string, string | number>; geometry: Geometry };
 const collection = (features: Feature[]) => ({ type: "FeatureCollection" as const, features });
@@ -67,12 +67,6 @@ function trackFeatures(debrief: Debrief, theme: Theme): Feature[] {
 /** Every recorded position with its sample index, for picking the nearest point under the mouse. */
 const positions = (debrief: Debrief) => debrief.series.t_s.flatMap((_, i) => { const la = debrief.series.lat[i], lo = debrief.series.lon[i]; return la == null || lo == null ? [] : [{ i, p: [lo, la] as Position }]; });
 
-/** Initial bearing from a to b, degrees true. */
-function bearing([lo1, la1]: Position, [lo2, la2]: Position) {
-  const r = Math.PI / 180, dl = (lo2 - lo1) * r;
-  return Math.atan2(Math.sin(dl) * Math.cos(la2 * r), Math.cos(la1 * r) * Math.sin(la2 * r) - Math.sin(la1 * r) * Math.cos(la2 * r) * Math.cos(dl)) / r;
-}
-
 /** About `count` direction arrows spaced evenly along the track, each pointing along it. */
 function arrows(track: { p: Position }[], count: number) {
   const steps = track.slice(1).map((point, k) => Math.hypot(point.p[0] - track[k]!.p[0], point.p[1] - track[k]!.p[1]));
@@ -90,24 +84,13 @@ function arrows(track: { p: Position }[], count: number) {
 
 const marker = (className: string, html: string) => { const el = document.createElement("div"); el.className = className; el.innerHTML = html; return el; };
 
-/** Position at time t, interpolated between the two samples around it (the recording is sparse, about 2 Hz). */
-function positionAt(debrief: Debrief, t: number): Position | null {
-  const { t_s, lat, lon } = debrief.series;
-  const i = indexAt(t_s, t);
-  const la = lat[i], lo = lon[i];
-  if (la == null || lo == null) return null;
-  const la2 = lat[i + 1], lo2 = lon[i + 1], span = (t_s[i + 1] ?? t_s[i]!) - t_s[i]!;
-  if (la2 == null || lo2 == null || span <= 0) return [lo, la];
-  const f = Math.min(1, Math.max(0, (t - t_s[i]!) / span));
-  return [lo + (lo2 - lo) * f, la + (la2 - la) * f];
-}
 
 function selectionFeatures(debrief: Debrief, event: FlightEvent | null, theme: Theme): Feature[] {
   if (!event) return [];
   const { t_s } = debrief.series;
   const coordinates: Position[] = [];
   for (let i = indexAt(t_s, event.start_s); i < t_s.length && t_s[i]! <= Math.max(event.end_s, event.start_s + 1); i++) {
-    const p = positionAt(debrief, t_s[i]!);
+    const p = positionAt(debrief.series, t_s[i]!);
     if (p) coordinates.push(p);
   }
   const color = levelColor(event.level, theme);
@@ -118,7 +101,7 @@ function selectionFeatures(debrief: Debrief, event: FlightEvent | null, theme: T
 
 function overlay(debrief: Debrief, theme: Theme, selected: FlightEvent | null) {
   const dark = theme === "dark";
-  const touchdowns = debrief.touchdowns.flatMap((td): Feature[] => { const p = positionAt(debrief, td.t_s); return p ? [{ type: "Feature", properties: {}, geometry: { type: "Point", coordinates: p } }] : []; });
+  const touchdowns = debrief.touchdowns.flatMap((td): Feature[] => { const p = positionAt(debrief.series, td.t_s); return p ? [{ type: "Feature", properties: {}, geometry: { type: "Point", coordinates: p } }] : []; });
   const sources: Record<string, Source> = {
     "foqa-runways": geojson(runwayFeatures(debrief, theme)),
     "foqa-track": geojson(trackFeatures(debrief, theme)),
@@ -199,7 +182,7 @@ export default function FlightMap({ debrief, theme, focus, selected, bus, onFocu
       }))),
       ...arrows(track, 18).map(({ at, deg }) => new Marker({ element: marker("pointer-events-none text-fg", '<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1 L11 10 L6 7.5 L1 10 Z" fill="currentColor" stroke="var(--surface)" stroke-width="1"/></svg>'), rotation: deg, rotationAlignment: "map" }).setLngLat(at).addTo(map)),
       ...contacts(groupLandings(debrief.touchdowns)).flatMap(({ td, label }) => {
-        const p = positionAt(debrief, td.t_s);
+        const p = positionAt(debrief.series, td.t_s);
         return p ? [new Marker({ element: marker("readout pointer-events-none rounded-sm bg-fg px-1 text-[10px] leading-4 font-semibold text-bg", label), anchor: "bottom", offset: [0, -8] }).setLngLat(p).addTo(map)] : [];
       }),
     ];
@@ -240,7 +223,7 @@ export default function FlightMap({ debrief, theme, focus, selected, bus, onFocu
   useEffect(() => {
     const source = mapRef.current?.getSource("foqa-selection") as GeoJSONSource | undefined;
     source?.setData(collection(selectionFeatures(debrief, selected, theme)));
-    if (selected) { const p = positionAt(debrief, selected.start_s); if (p) mapRef.current?.easeTo({ center: p, duration: 400 }); }
+    if (selected) { const p = positionAt(debrief.series, selected.start_s); if (p) mapRef.current?.easeTo({ center: p, duration: 400 }); }
   }, [selected, debrief, theme]);
 
   // The aircraft dot: at the hovered time, else at the focused time.
@@ -248,14 +231,14 @@ export default function FlightMap({ debrief, theme, focus, selected, bus, onFocu
     const place = (t: number | null) => {
       const marker = cursor.current;
       if (!marker) return;
-      const p = t === null ? null : positionAt(debrief, t);
+      const p = t === null ? null : positionAt(debrief.series, t);
       marker.getElement().style.display = p ? "block" : "none";
       if (p) marker.setLngLat(p);
     };
     place(focus);
     // Keep the focused aircraft in view (playback, stepping, a jump from an event): one smooth pan once it nears the edge.
     // Hover never moves the camera, and neither does this while the user is dragging or zooming; it may retarget its own pan.
-    const map = mapRef.current, p = focus === null ? null : positionAt(debrief, focus);
+    const map = mapRef.current, p = focus === null ? null : positionAt(debrief.series, focus);
     if (map && p && (following.current || !map.isMoving())) {
       const { x, y } = map.project(p), { clientWidth: w, clientHeight: h } = map.getContainer();
       if (x < FOLLOW_PX || y < FOLLOW_PX || x > w - FOLLOW_PX || y > h - FOLLOW_PX) { map.easeTo({ center: p, duration: 500, easing: easeOut }); following.current = true; }

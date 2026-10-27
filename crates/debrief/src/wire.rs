@@ -538,23 +538,59 @@ pub struct Event {
 }
 
 /// Parallel arrays on one time base; `NaN` (sent as `null`) where a
-/// parameter has no valid value.
+/// parameter has no valid value. Each array goes out rounded to the
+/// resolution the app shows (`round`), which keeps the payload small.
 #[derive(Debug, Clone, PartialEq, Default, Serialize)]
 pub struct Series {
+    #[serde(serialize_with = "round::<3, _>")]
     pub t_s: Vec<f64>,
+    #[serde(serialize_with = "round::<1, _>")]
     pub alt_ft: Vec<f64>,
+    #[serde(serialize_with = "round::<1, _>")]
     pub aal_ft: Vec<f64>,
+    #[serde(serialize_with = "round::<1, _>")]
     pub ias_kt: Vec<f64>,
+    #[serde(serialize_with = "round::<1, _>")]
     pub gs_kt: Vec<f64>,
+    /// Inertial vertical speed, derived from pressure altitude and load.
+    #[serde(serialize_with = "round::<0, _>")]
     pub vs_fpm: Vec<f64>,
+    #[serde(serialize_with = "round::<3, _>")]
     pub nz_g: Vec<f64>,
+    #[serde(serialize_with = "round::<2, _>")]
     pub pitch_deg: Vec<f64>,
+    #[serde(serialize_with = "round::<2, _>")]
     pub roll_deg: Vec<f64>,
+    /// Magnetic heading.
+    #[serde(serialize_with = "round::<1, _>")]
+    pub hdg_deg: Vec<f64>,
+    /// Radio height with the on-ground bias removed; `NaN` above 2500 ft.
+    #[serde(serialize_with = "round::<1, _>")]
+    pub ra_ft: Vec<f64>,
+    #[serde(serialize_with = "round::<1, _>")]
     pub flap_deg: Vec<f64>,
     /// The type profile's flap-speed limit at that flap angle.
+    #[serde(serialize_with = "round::<1, _>")]
     pub vfe_kt: Vec<f64>,
+    /// Gear extension (`gear.extended`), 0 up to 100 down, %.
+    #[serde(serialize_with = "round::<1, _>")]
+    pub gear_ext: Vec<f64>,
+    /// Autopilot engaged: 1, else 0.
+    #[serde(serialize_with = "round::<0, _>")]
+    pub ap_engaged: Vec<f64>,
+    /// Autothrottle engaged: 1, else 0.
+    #[serde(serialize_with = "round::<0, _>")]
+    pub at_engaged: Vec<f64>,
+    #[serde(serialize_with = "round::<6, _>")]
     pub lat: Vec<f64>,
+    #[serde(serialize_with = "round::<6, _>")]
     pub lon: Vec<f64>,
+}
+
+/// `v` with each value rounded to `D` decimals (`-0` as `0`); `NaN` stays.
+fn round<const D: i32, S: serde::Serializer>(v: &[f64], s: S) -> Result<S::Ok, S::Error> {
+    let k = 10f64.powi(D);
+    s.collect_seq(v.iter().map(|x| (x * k).round() / k + 0.0))
 }
 
 /// Runway geometry of one recorded airport snapshot, for the map.
@@ -748,6 +784,28 @@ mod grade_band_tests {
         // A high loses its domain and caps at 84.9.
         assert_eq!(landing(&[(Domain::Stability, High)]), 75.0);
         assert_eq!(landing(&[(Domain::Energy, High)]), 84.9);
+    }
+}
+
+#[cfg(test)]
+mod round_tests {
+    use super::Series;
+
+    #[test]
+    fn the_series_goes_out_rounded() {
+        let s = Series {
+            t_s: vec![0.1254, 1.0],
+            alt_ft: vec![18.292_305, f64::NAN],
+            vs_fpm: vec![-0.4, 12.6],
+            lat: vec![38.520_956_939, 1.0],
+            ..Series::default()
+        };
+        let v = serde_json::to_value(&s).unwrap();
+        assert_eq!(v["t_s"], serde_json::json!([0.125, 1.0]));
+        assert_eq!(v["alt_ft"], serde_json::json!([18.3, null]));
+        // No "-0".
+        assert_eq!(serde_json::to_string(&v["vs_fpm"]).unwrap(), "[0.0,13.0]");
+        assert_eq!(v["lat"], serde_json::json!([38.520957, 1.0]));
     }
 }
 

@@ -8,7 +8,8 @@ import { levelVar } from "../../lib/palette";
 import { openFlights } from "../../lib/route";
 import { useTheme } from "../../lib/context";
 import { groupLandings } from "../../lib/landings";
-import { indexAt, TimeBus, useHover, type TimeRange } from "../../lib/time";
+import { adjacentEvent, valueAt } from "../../lib/series";
+import { TimeBus, useHover, type TimeRange } from "../../lib/time";
 import { useDebrief } from "../../lib/use-backend";
 import type { Debrief, Series } from "../../types";
 import { useOpenFolder } from "../use-open-folder";
@@ -17,6 +18,7 @@ import { DebriefHeader } from "./DebriefHeader";
 import { EventList, LevelLegend } from "./EventList";
 import { LandingCard } from "./LandingCard";
 import { PhaseTimeline } from "./PhaseTimeline";
+import { ReplayPfd } from "./ReplayPfd";
 
 // uPlot and MapLibre are the heavy parts; they load after the debrief itself.
 const Charts = lazy(() => import("./Charts"));
@@ -81,14 +83,15 @@ function DebriefView({ debrief, refreshing, onRefresh, onOpenFolder }: { debrief
   }, []);
   const from = useCallback(() => focusRef.current ?? view?.[0] ?? range[0], [view, range]);
 
-  const selectEvent = useCallback((index: number) => {
-    if (index === selected) { setSelected(null); return; }
+  /** Selects an event: the view zooms around it and the cursor goes to its peak. */
+  const openEvent = useCallback((index: number) => {
     const event = events[index];
     if (!event) return;
     setSelected(index);
     setView(around(event.start_s, event.end_s));
     place(event.peak_s ?? event.start_s);
-  }, [events, selected, place]);
+  }, [events, place]);
+  const selectEvent = useCallback((index: number) => { if (index === selected) setSelected(null); else openEvent(index); }, [selected, openEvent]);
   const showTime = useCallback((t: number) => { setView([t - 20, t + 12]); place(t); }, [place]);
   const resetZoom = useCallback(() => { setView(flown); setSelected(null); }, [flown]);
   const step = useCallback((seconds: number) => place(clamp(from() + seconds)), [place, clamp, from]);
@@ -110,10 +113,11 @@ function DebriefView({ debrief, refreshing, onRefresh, onOpenFolder }: { debrief
       if (event.key === "Escape") resetZoom();
       else if (event.key === "ArrowLeft" || event.key === "ArrowRight") { event.preventDefault(); step((event.key === "ArrowLeft" ? -1 : 1) * (event.shiftKey ? 10 : 1)); }
       else if (event.key === " ") { event.preventDefault(); setPlaying((p) => !p); }
+      else if (event.key === "[" || event.key === "]") { const index = adjacentEvent(events, from(), event.key === "]" ? 1 : -1); if (index !== null) openEvent(index); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [resetZoom, step]);
+  }, [resetZoom, step, events, from, openEvent]);
 
   const runwayWidth = (icao: string, runway: string) => debrief.airports.find((a) => a.icao === icao)?.runways.find((r) => r.ends.some((e) => e.runway === runway))?.width_m;
   const eventsAt = (t: number) => events.filter((e) => Math.abs(e.start_s - t) < 1);
@@ -134,7 +138,7 @@ function DebriefView({ debrief, refreshing, onRefresh, onOpenFolder }: { debrief
           {SPEEDS.map((s) => <option key={s} value={s}>{s}×</option>)}
         </select>
       </label>
-      <span className="hidden text-xs text-fg-3 2xl:inline">← → step · Shift ×10 · Space play · Esc reset</span>
+      <span className="hidden text-xs text-fg-3 2xl:inline">← → step · Shift ×10 · [ ] finding · Space play · Esc reset</span>
     </div>
   );
 
@@ -156,54 +160,60 @@ function DebriefView({ debrief, refreshing, onRefresh, onOpenFolder }: { debrief
         </Banner>
       ) : null}
 
-      {/* Replay workspace: on wide screens it fills the window, the timeline on top, findings | charts | map side by side. */}
-      <section aria-label="Replay" className="flex flex-col gap-3 xl:h-[calc(100dvh-4.5rem)] xl:min-h-[620px]">
+      {/* Replay workspace: on wide screens it fills the window. The timeline is the one slider; under it the map and the
+          rebuilt flight display sit side by side in one row (neither turns into a tall column), the charts scroll below. */}
+      <section aria-label="Replay" className="flex flex-col gap-3 xl:h-[calc(100dvh-4.5rem)] xl:min-h-[680px]">
         <PhaseTimeline phases={phases} phaseValues={flight.phase_values ?? {}} events={events} touchdowns={touchdowns} range={range} focus={focus} view={view} selected={selected} bus={bus} onFocus={place} onZoom={setView} onSelectEvent={selectEvent} controls={controls} />
 
-        <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(290px,330px)_minmax(0,1fr)] lg:[grid-template-areas:'rail_map'_'rail_charts'] xl:grid-cols-[minmax(290px,340px)_minmax(0,1fr)_clamp(340px,30vw,800px)] xl:[grid-template-areas:'rail_charts_map']">
-          <aside aria-labelledby="events-title" className="flex min-h-0 flex-col gap-2 lg:[grid-area:rail] xl:overflow-y-auto xl:pr-1">
+        <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(290px,340px)_minmax(0,1fr)]">
+          <aside aria-labelledby="events-title" className="flex min-h-0 flex-col gap-2 xl:overflow-y-auto xl:pr-1">
             <h2 id="events-title" className="eyebrow">Findings <span className="readout">{events.length}</span></h2>
             <LevelLegend />
             <EventList events={events} phases={phases} selected={selected} onSelect={selectEvent} />
           </aside>
 
-          <div className="flex min-h-0 min-w-0 flex-col gap-4 max-lg:order-2 lg:[grid-area:charts] xl:overflow-y-auto xl:pr-1">
-            <section className="panel px-3 pt-2 pb-1" aria-labelledby="charts-title">
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line-subtle pb-2">
-                <h2 id="charts-title" className="eyebrow">Parameters</h2>
-                <span className="text-xs text-fg-3">Drag across a chart to zoom · click to place the cursor</span>
-              </div>
-              <Suspense fallback={<ChartSkeleton />}>
-                <Charts debrief={debrief} theme={theme} view={view} focus={focus} selected={selectedEvent} bus={bus} onView={setView} onFocus={place} />
-              </Suspense>
-            </section>
-            <section aria-labelledby="landings-title">
-              <h2 id="landings-title" className="eyebrow mb-2">Landings <span className="readout">{landings.length}</span></h2>
-              {landings.length ? (
-                <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(min(100%,400px),1fr))]">
-                  {landings.map((landing, index) => (
-                    <LandingCard key={landing.touchdown.t_s} index={index} landing={landing} events={[landing.touchdown, ...landing.bounces].flatMap((td) => eventsAt(td.t_s))} debrief={debrief} runwayWidth={landing.touchdown.runway ? runwayWidth(landing.touchdown.runway.icao, landing.touchdown.runway.runway) : undefined} onShow={showTime} />
-                  ))}
+          <div className="flex min-h-0 min-w-0 flex-col gap-3">
+            {/* One row: the display's width follows the row height at its own aspect, the map takes the rest. */}
+            <div className="grid gap-4 [--deck:clamp(300px,40dvh,480px)] lg:h-[var(--deck)] lg:grid-cols-[minmax(0,1fr)_calc(var(--deck)*1.12)]">
+              <section aria-labelledby="map-title" className="panel flex min-h-0 flex-col overflow-hidden">
+                <h2 id="map-title" className="eyebrow border-b border-line-subtle px-3 py-2">Track and runways</h2>
+                {/* Landscape on a narrow screen; beside the display it takes the row's height and the width that is left. */}
+                <div className="aspect-[16/10] max-h-[55dvh] w-full lg:aspect-auto lg:max-h-none lg:min-h-0 lg:flex-1">
+                  <Suspense fallback={<div className="h-full animate-pulse bg-muted" />}>
+                    <FlightMap debrief={debrief} theme={theme} focus={focus} selected={selectedEvent} bus={bus} onFocus={place} />
+                  </Suspense>
                 </div>
-              ) : (
-                <div className="panel"><EmptyState size="sm" icon={<PlaneLanding size={18} />} title="No touchdown recorded" description={flight.damaged_at !== undefined ? "The recording ends before the aircraft landed." : "The aircraft did not land during this recording."} /></div>
-              )}
-            </section>
-
-          </div>
-
-          <section aria-labelledby="map-title" className="flex min-h-0 flex-col gap-2 max-lg:order-1 lg:[grid-area:map]">
-            <div className="panel flex flex-col overflow-hidden">
-              <h2 id="map-title" className="eyebrow border-b border-line-subtle px-3 py-2">Track and runways</h2>
-              {/* Never taller than wide: 4:3, and on a wide single column capped so it stays a landscape strip. */}
-              <div className="aspect-[4/3] max-h-[60dvh] w-full">
-                <Suspense fallback={<div className="h-full animate-pulse bg-muted" />}>
-                  <FlightMap debrief={debrief} theme={theme} focus={focus} selected={selectedEvent} bus={bus} onFocus={place} />
-                </Suspense>
+              </section>
+              <div className="mx-auto aspect-[1.12] w-full max-w-[560px] lg:aspect-auto lg:h-full lg:max-w-none">
+                <ReplayPfd debrief={debrief} theme={theme} focus={focus} bus={bus} />
               </div>
             </div>
             <CursorReadout series={series} phases={phases} focus={focus} bus={bus} />
-          </section>
+
+            <div className="flex min-h-0 flex-col gap-4 xl:flex-1 xl:overflow-y-auto xl:pr-1">
+              <section className="panel px-3 pt-2 pb-1" aria-labelledby="charts-title">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line-subtle pb-2">
+                  <h2 id="charts-title" className="eyebrow">Parameters</h2>
+                  <span className="text-xs text-fg-3">Drag across a chart to zoom · click to place the cursor</span>
+                </div>
+                <Suspense fallback={<ChartSkeleton />}>
+                  <Charts debrief={debrief} theme={theme} view={view} focus={focus} selected={selectedEvent} bus={bus} onView={setView} onFocus={place} />
+                </Suspense>
+              </section>
+              <section aria-labelledby="landings-title">
+                <h2 id="landings-title" className="eyebrow mb-2">Landings <span className="readout">{landings.length}</span></h2>
+                {landings.length ? (
+                  <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(min(100%,400px),1fr))]">
+                    {landings.map((landing, index) => (
+                      <LandingCard key={landing.touchdown.t_s} index={index} landing={landing} events={[landing.touchdown, ...landing.bounces].flatMap((td) => eventsAt(td.t_s))} debrief={debrief} runwayWidth={landing.touchdown.runway ? runwayWidth(landing.touchdown.runway.icao, landing.touchdown.runway.runway) : undefined} onShow={showTime} />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="panel"><EmptyState size="sm" icon={<PlaneLanding size={18} />} title="No touchdown recorded" description={flight.damaged_at !== undefined ? "The recording ends before the aircraft landed." : "The aircraft did not land during this recording."} /></div>
+                )}
+              </section>
+            </div>
+          </div>
         </div>
       </section>
     </>
@@ -227,8 +237,7 @@ function CursorReadout({ series, phases, focus, bus }: { series: Series; phases:
   const [hover, setHover] = useState<number | null>(null);
   useHover(bus, setHover);
   const t = hover ?? focus;
-  const i = t === null ? -1 : indexAt(series.t_s, t);
-  const value = (values: Series["aal_ft"], unit: string, digits = 0) => { const v = i < 0 ? null : values[i]; return v == null ? "–" : `${number(v, digits)} ${unit}`; };
+  const value = (values: Series["aal_ft"], unit: string, digits = 0) => { const v = t === null ? null : valueAt(series.t_s, values, t); return v === null ? "–" : `${number(v, digits)} ${unit}`; };
   const phase = t === null ? undefined : (phases.find((p) => t >= p.start_s && t < p.end_s) ?? phases.at(-1))?.phase;
   const cells: [string, string][] = [
     ["Time", t === null ? "–" : `T+${clock(t)}`],
@@ -239,15 +248,14 @@ function CursorReadout({ series, phases, focus, bus }: { series: Series; phases:
     ["Load", value(series.nz_g, "g", 2)],
   ];
   return (
-    <dl className="panel grid grid-cols-3 gap-x-3 gap-y-1.5 px-3 py-2" aria-label={hover !== null ? "Values at the hovered time" : "Values at the cursor"}>
+    <dl className="panel grid grid-cols-3 gap-x-3 gap-y-1.5 px-3 py-2 sm:grid-cols-6" aria-label={hover !== null ? "Values at the hovered time" : "Values at the cursor"}>
       {cells.map(([label, text]) => (
         <div key={label} className="min-w-0">
           <dt className="eyebrow">{label}</dt>
           <dd className="readout truncate text-sm">{text}</dd>
         </div>
       ))}
-      {/* Kept in the layout while hidden so hovering never changes the panel height. */}
-      <p className={`col-span-3 text-xs text-fg-3 ${t === null ? "" : "invisible"}`}>Click the timeline, a chart or the track to place the cursor.</p>
+      {t === null ? <p className="col-span-full text-xs text-fg-3">Click the timeline, a chart or the track to place the cursor.</p> : null}
     </dl>
   );
 }

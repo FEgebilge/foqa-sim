@@ -63,6 +63,16 @@ fn stable_airliner_approach_raises_nothing() {
     assert!((td.sink_fpm - 300.0).abs() < 30.0, "{:.0} fpm", td.sink_fpm);
 }
 
+/// The stable approach with the gear left up: not down at 500 ft (High).
+#[test]
+fn gear_up_at_500_ft_is_raised() {
+    let (flight, track) = fly(AIRLINER_LB, TD_S + ROLLOUT_S, |t| Pt {
+        gear: 0.0,
+        ..landing(t, TD_S, 1.2)
+    });
+    assert!(events(CORE, &flight, &track).contains(&("gear-not-down-500".into(), Level::High)));
+}
+
 /// The same landing with a 2.0 g impact: above the transport hard-landing
 /// medium level (1.8 g) but below high (2.1 g).
 #[test]
@@ -464,6 +474,11 @@ max_tailwind: { value: 5 kt, source: synthetic }
 /// The 140 kt approach onto runway 20 with the gear moving for 3 s at
 /// 30 s and the wind `wind`, graded with `LIMITS_PROFILE`.
 fn limits_flight(wind: (f64, f64)) -> Vec<(String, Level)> {
+    limits_flight_with(LIMITS_PROFILE, wind)
+}
+
+/// `limits_flight` graded with `profile`.
+fn limits_flight_with(profile: &str, wind: (f64, f64)) -> Vec<(String, Level)> {
     let events = [
         identity("TEST"),
         SimEvent::Airport(runway_behind_touchdown(400.0)),
@@ -477,8 +492,20 @@ fn limits_flight(wind: (f64, f64)) -> Vec<(String, Level)> {
         wind,
         ..landing(t, TD_S, 1.2)
     });
-    let profiles = ProfileSet::load([("TEST", LIMITS_PROFILE)]).unwrap();
+    let profiles = ProfileSet::load([("TEST", profile)]).unwrap();
     pairs(graded(&profiles, CORE, &flight, &track))
+}
+
+/// With VLE lowered to 128 kt the 140 kt approach is 12 kt over it with
+/// the gear down (High).
+#[test]
+fn gear_down_above_vle_is_an_overspeed() {
+    let profile = LIMITS_PROFILE.replace("vle: { value: 150 kt", "vle: { value: 128 kt");
+    let events = limits_flight_with(&profile, (0.0, 0.0));
+    assert!(
+        events.contains(&("gear-extended-overspeed".into(), Level::High)),
+        "{events:?}"
+    );
 }
 
 /// 140 kt is 8 kt over VMO (Medium) and 15 kt over VLO while the gear

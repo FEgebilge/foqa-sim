@@ -20,17 +20,6 @@ export class TimeBus {
 
 export type TimeRange = [start: number, end: number];
 
-/** Index of the last sample at or before t (binary search over a sorted time base). */
-export function indexAt(times: number[], t: number) {
-  let lo = 0, hi = times.length - 1;
-  if (hi < 0 || t <= times[0]!) return 0;
-  while (lo < hi) {
-    const mid = (lo + hi + 1) >> 1;
-    if (times[mid]! <= t) lo = mid; else hi = mid - 1;
-  }
-  return lo;
-}
-
 /** "Nice" tick step in seconds for a span, aiming at about `count` ticks. */
 export function tickStep(span: number, count: number) {
   const steps = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200];
