@@ -80,7 +80,8 @@ is `floor(ℓ)`. Level 0 is split into "ideal" (ℓ = 0) and "within
 tolerance" (ℓ ≤ 0.5); 0.5 < ℓ < 1 reads "outside checkride tolerance".
 Values that are held over time (approach) use the **sustained worst**: the
 largest value held for the criterion's persistence (S1: 3 s, or 5 s for the
-first descent threshold and for path deviation). This is the rule engine's
+first descent threshold and for path deviation; a descent rate past the
+second threshold, 1500 fpm, needs 3 s). This is the rule engine's
 `sustain` semantics.
 
 The **loss** of a criterion is a fraction of its domain's weight:
@@ -160,15 +161,15 @@ T/J bands are split at 500 ft, as S1 does.
 | A1 | IAS − target | `ias` vs Vapp (tol) and Vref (L1+), sustained 3 s | T/J ≥ 500 ft | Vapp±2.5 \| Vapp±5 \| >Vref+20 or <Vref−5 \| >Vref+35 or <Vref−10 \| – | S2 tol, S1 L1/L2 ✔ |
 | | | | T/J < 500 ft | Vapp±2.5 \| Vapp±5 \| – \| >Vref+20 or <Vref−5 \| >Vref+35 or <Vref−10 | S1 SL2B/SL3 ✔ |
 | | | | light | Vapp +5/−2.5 \| +10/−5 \| +15/−7.5 \| +20/−10 \| +30/−15 | S3/S4 ideal/tol ✔; L1–L3 est |
-| A2 | Descent rate | `−vs`, sustained 3 s (L1: 5 s) | T/J ≥ 500 | ≤ ROD₃°+200 \| 1000 \| 1200 \| 1500 \| – | S5/S6 tol ✔, S1 ✔; ideal est |
+| A2 | Descent rate | `−vs`, sustained 5 s; past 1500 fpm (S1's second threshold) 3 s | T/J ≥ 500 | ≤ ROD₃°+200 \| 1000 \| 1200 \| 1500 \| – | S5/S6 tol ✔, S1 ✔; ideal est |
 | | | ROD₃° = 5.31 × GS kt (**new**, trivial) | T/J < 500 | ≤ ROD₃°+200 \| 1000 \| – \| 1200 \| 1500 | S1 ✔ |
 | | | | light | ≤ ROD₃°+200 \| 1000 \| 1200 \| 1500 \| 2000 | S5 tol ✔; levels est |
 | A3 | \|Roll\| | `roll`, sustained 3 s | T/J ≥ 500 | 3.5 \| 7 \| 15 \| 30 \| – | S6 tol, S1 ✔ |
 | | | | T/J < 500 | 3.5 \| 7 \| – \| 15 \| 30 | S1 ✔ |
 | | | | light < 300 ft | 5 \| 10 \| 15 \| 20 \| 30 | S5 (wings level by 300 ft) ✔; bands est |
 | A4 | Pitch | `pitch`, sustained 3 s | T/J | – \| – \| >10 or <−3 \| >15 or <−10 (≥ 500) / L2–L3 below | S1 ✔ |
-| A5 | ILS deviation | `nav.gs_dev`, `nav.loc_dev`, 5 s, 1000–500 ft; below 500 ft the existing gate rules | all with a valid ILS | 0.25 \| 0.5 \| 1 dot \| GS 2 / LOC 1.5 \| – | S5 1 dot ✔, S1 ✔; tol ⚠ App. 9 half scale |
-| A6 | Configuration | gear change/not down; `flap.te_angle` change > 2° (**new**: config change in window) | T/J | change 1000–500 → L2; below 500 or gear not down → L3 | S1 ✔ (single-threshold criteria use SL2A/SL3) |
+| A5 | ILS deviation | `nav.gs_dev`, `nav.loc_dev`, 5 s, 1000–500 ft, one criterion for the unstable rule (§4); below 500 ft the existing gate rules | all with a valid ILS | 0.25 \| 0.5 \| 1 dot \| GS 2 / LOC 1.5 \| – | S5 1 dot ✔, S1 ✔; tol ⚠ App. 9 half scale |
+| A6 | Configuration | gear or `flap.te_angle` change > 2° (**new**: config change in window), at its first movement; gear at the bottom of the window | T/J | change 1000–500 → L2; change below 500 or gear not down at the bottom → L3 | S1 ✔ (single-threshold criteria use SL2A/SL3) |
 | | | | light | flap change < 200 ft → L1; retractable gear not down < 300 ft → L3 | est; POH flaps "as desired" ✔ |
 | A7 | Low thrust | all `engN.throttle` at idle > 10 s in window (**new**) | T/J | → L1 | S1 defines it per fleet percentile; ours est. Later slice |
 
@@ -221,7 +222,7 @@ goes away: outside the TDZ is level 2, not zero.
 | D2 | Crab at touchdown | **new**: \|true heading − runway true heading\| at contact | light | 1° \| 3° \| 5° \| 8° \| 12° | S3/S4 "axis aligned" ✔; numbers est |
 | | | | T/J | 2° \| 5° \| 7° \| 10° \| 15° | S9: crab touchdown accepted ✔; numbers est |
 | D3 | Drift at touchdown | **new**: GS · sin(track − runway), track over the 1 s before contact | all | 1 \| 2 \| 4 \| 6 \| 8 kt | S3/S4 "no side drift" ✔; numbers est |
-| D4 | Rollout centreline | max \|cross\| from touchdown to 30 kt (exists: `rollout_cross_m`) | all | ½ track \| 3 m \| 7.6 m \| 12.2 m \| runway exit → cap | S6 RE.7 ✔ (measure); numbers est |
+| D4 | Rollout centreline | max \|cross\| from touchdown to 30 kt or the next liftoff (exists: `rollout_cross_m`) | all | ½ track \| 3 m \| 7.6 m \| 12.2 m \| runway exit → cap | S6 RE.7 ✔ (measure); numbers est |
 
 Main-gear track: new profile field `main_gear_track` (with its source).
 Fallbacks, all est: light 2.5 m, turboprop 4 m, jet 6 m.
@@ -328,7 +329,7 @@ event that caused it.
 | Condition | Cap | Basis |
 |---|---|---|
 | Any criterion or finding at level ≥ 2 | 84.9 (cannot be Good) | A material FDM event; same as today's grades |
-| **Continued unstable approach**: T/J by the D4S rule (≥ 1 A criterion at SL2B/SL3, i.e. L2/L3 below 500 ft, or ≥ 3 distinct A criteria at L1/L2 above 500 ft) without a go-around; light: any A criterion at L2+ below 300 ft, or ≥ 3 at L1+ | 59 (Poor) | S1 ✔, S5 "go around" ✔; light adaptation est |
+| **Continued unstable approach**: T/J by the D4S rule (≥ 1 A criterion at SL2B/SL3, i.e. L2/L3 below 500 ft, or ≥ 3 distinct A criteria at L1/L2 above 500 ft, glideslope and localizer counting as one A5) without a go-around; light: any A criterion at L2+ below 300 ft, or ≥ 3 at L1+ | 59 (Poor) | S1 ✔, S5 "go around" ✔; light adaptation est |
 | **Inspection-level contact**: `hard-landing-inspection` (peak g > the manufacturer's `hard_landing_g`, Decision 5; no separate sink cap), or tail margin < 0 (tail strike) | 39 | S10 ✔, S12 ⚠ |
 | **Undershoot**: touchdown before the threshold | 39 | `short-landing` |
 | **Runway excursion or crash**: left the runway sides before 30 kt, overran (F3), sim crash/damage flag | 0, outcome shown | S6 RE.7/RE.8 |
@@ -345,7 +346,10 @@ event that caused it.
   The pilot can fly again; the attempt is kept as "go-around" in the
   history.
 - A touch-and-go is scored A–E. F is n/a by design, and its weight is
-  redistributed (below).
+  redistributed (below); so is D4. A landing is a touch-and-go when the
+  aircraft leaves the ground for longer than a bounce (5 s) before taxi
+  speed, also when the recording ends airborne. Its rollout ends at that
+  liftoff, so the climb-out never counts as leaving the runway.
 
 **Insufficient data.** Missing data never earns full credit.
 
@@ -357,9 +361,12 @@ event that caused it.
   without a true heading, A7 before its slice) are **n/a by design**. Their
   domain is scored on what remains. If a whole domain is n/a, its weight
   is redistributed proportionally: `score = 100 − Σ W·loss × 100 / ΣW_avail`.
-- **Missing but expected** data (a gap over the window > 1.5 s, no Vref
-  source, RA invalid at the threshold): the criterion is n/a and the result
-  is marked `confidence: partial`. The debrief shows the score with a
+- **Missing but expected** data (a gap > 1.5 s in a criterion's own series
+  in the window: A1–A4; no Vref source: A1, B2; RA invalid at the
+  threshold: B1): the criterion is n/a, its domain is scored on what
+  remains (or redistributed as above), and the result is marked
+  `confidence: partial` with the reason. The ILS deviations have no gap
+  check: without a signal they are n/a by design. The debrief shows the score with a
   "partial" badge. A challenge requires `full` to rank. Vref only counts
   as missing when §5 finds no source at all.
 

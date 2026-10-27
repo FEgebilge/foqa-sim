@@ -142,6 +142,9 @@ pub struct Criterion {
     pub unit: Option<Unit>,
     /// How long a series value must be held (0: scalar values).
     pub sustain_us: i64,
+    /// Values at or above the first, in the criterion's unit, need only be
+    /// held the second, in us (S1: 3 s past the second descent threshold).
+    pub beyond: Option<(f64, i64)>,
     pub source: String,
     pub bands: Vec<Band>,
 }
@@ -283,8 +286,16 @@ struct CriterionDoc {
     domain: Domain,
     unit: String,
     sustain: Option<Scalar>,
+    sustain_beyond: Option<BeyondDoc>,
     source: String,
     bands: Vec<BandDoc>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BeyondDoc {
+    value: Scalar,
+    sustain: Scalar,
 }
 
 #[derive(Deserialize)]
@@ -420,12 +431,18 @@ fn criterion(doc: CriterionDoc, rules: &[Rule]) -> Result<Criterion, MethodError
     let id = doc.id.clone();
     let err = |m: String| MethodError(format!("criterion `{id}`: {m}"));
     let unit = unit_named(&doc.unit).map_err(err)?;
-    let sustain_us = match &doc.sustain {
-        None => 0,
-        Some(s) => {
-            let secs = expr::quantity(&s.to_string(), Some(Unit::Seconds), "sustain", "it")
+    let us = |s: &Scalar| {
+        expr::quantity(&s.to_string(), Some(Unit::Seconds), "sustain", "it")
+            .map(|secs| (secs * 1e6).round() as i64)
+            .map_err(err)
+    };
+    let sustain_us = doc.sustain.as_ref().map_or(Ok(0), us)?;
+    let beyond = match &doc.sustain_beyond {
+        None => None,
+        Some(b) => {
+            let value = expr::quantity(&b.value.to_string(), unit, "value", "the criterion")
                 .map_err(err)?;
-            (secs * 1e6).round() as i64
+            Some((value, us(&b.sustain)?))
         }
     };
     if doc.bands.is_empty() {
@@ -479,6 +496,7 @@ fn criterion(doc: CriterionDoc, rules: &[Rule]) -> Result<Criterion, MethodError
         domain: doc.domain,
         unit,
         sustain_us,
+        beyond,
         source: doc.source,
         bands,
     })

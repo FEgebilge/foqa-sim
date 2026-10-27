@@ -25,13 +25,24 @@ vref:
 /// The stable airliner landing, its threshold 400 m back on a 3000 m
 /// runway (`airport`), assessed as `TEST` with `profiles`.
 fn assess(profiles: &ProfileSet, airport: bool, ranked: bool) -> Assessment {
+    flown(profiles, airport, ranked, TD_S + ROLLOUT_S, |t| {
+        landing(t, TD_S, 1.2)
+    })
+}
+
+/// `script` flown for `duration` s onto that runway and assessed.
+fn flown(
+    profiles: &ProfileSet,
+    airport: bool,
+    ranked: bool,
+    duration: f64,
+    script: impl Fn(f64) -> Pt,
+) -> Assessment {
     let mut events = vec![identity("TEST")];
     if airport {
         events.push(SimEvent::Airport(runway_behind_touchdown(400.0)));
     }
-    let (flight, track): (Flight, Track) = fly_to(&events, AIRLINER_LB, TD_S + ROLLOUT_S, |t| {
-        landing(t, TD_S, 1.2)
-    });
+    let (flight, track): (Flight, Track) = fly_to(&events, AIRLINER_LB, duration, script);
     let rules = load(CORE).unwrap();
     let selection = profiles.select(&flight);
     let found = evaluate(&rules, &selection, &flight, &track);
@@ -48,6 +59,26 @@ fn assess(profiles: &ProfileSet, airport: bool, ranked: bool) -> Assessment {
         gate_ft: None,
         target_m: None,
     })
+}
+
+/// The TEST jet's ranked score of `script` flown for `duration` s.
+fn scored(duration: f64, script: impl Fn(f64) -> Pt) -> (LandingScore, bool) {
+    let profiles = ProfileSet::load([("TEST", PROFILE)]).unwrap();
+    match flown(&profiles, true, true, duration, script) {
+        Assessment::Scored {
+            score, full_stop, ..
+        } => (score, full_stop),
+        a => panic!("not scored: {a:?}"),
+    }
+}
+
+/// The graded criteria `id` (one per half of the window for a series).
+fn criteria<'a>(s: &'a LandingScore, id: &str) -> Vec<&'a CriterionScore> {
+    s.domains
+        .iter()
+        .flat_map(|d| &d.criteria)
+        .filter(|c| c.id == id)
+        .collect()
 }
 
 #[test]
@@ -111,5 +142,109 @@ fn a_landing_without_a_runway_is_not_scored() {
         Assessment::Insufficient {
             missing: vec!["runway"]
         }
+    );
+}
+
+/// A touch-and-go whose recording ends in the climb-out, turned 60 deg off
+/// the runway: the rollout ends at the liftoff, so it is no full stop, no
+/// excursion and no D4.
+#[test]
+fn a_touch_and_go_ending_airborne_is_no_full_stop() {
+    const LIFTOFF_S: f64 = TD_S + 14.0;
+    let (s, full_stop) = scored(LIFTOFF_S + 40.0, |t| {
+        let p = landing(t, TD_S, 1.2);
+        if t < TD_S {
+            return p;
+        }
+        Pt {
+            alt: lerp(&[(LIFTOFF_S, 0.0), (LIFTOFF_S + 40.0, 800.0)], t),
+            speed: lerp(&[(TD_S, 140.0), (TD_S + 6.0, 122.0), (LIFTOFF_S, 140.0)], t),
+            track: if t > LIFTOFF_S + 5.0 { 260.0 } else { 200.0 },
+            heading: if t > LIFTOFF_S + 5.0 { 260.0 } else { 200.0 },
+            ground: t < LIFTOFF_S,
+            ..p
+        }
+    });
+    assert!(!full_stop);
+    assert!(s.caps.is_empty(), "{:?}", s.caps);
+    assert!(criteria(&s, "D4").is_empty() && criteria(&s, "F2").is_empty());
+}
+
+/// Data4Safety late gear: lowered between 1000 ft and the 500 ft split is
+/// L2, below it L3, still up at the bottom of the window L3.
+#[test]
+fn late_gear_is_graded_by_where_it_moved() {
+    // 700 ft at 60 s before contact, 325 ft at 30 s.
+    let a6 = |gear: &'static [(f64, f64)]| {
+        let (s, _) = scored(TD_S + ROLLOUT_S, |t| Pt {
+            gear: lerp(gear, t),
+            ..landing(t, TD_S, 1.2)
+        });
+        criteria(&s, "A6")[0].ell
+    };
+    assert_eq!(a6(&[(0.0, 100.0)]), 0.0);
+    assert_eq!(a6(&[(TD_S - 60.0, 0.0), (TD_S - 55.0, 100.0)]), 2.0);
+    assert_eq!(a6(&[(TD_S - 30.0, 0.0), (TD_S - 25.0, 100.0)]), 3.0);
+    assert_eq!(a6(&[(0.0, 0.0)]), 3.0);
+}
+
+/// A2's persistence (S1): a 4 s dive above 500 ft holds over 1500 fpm
+/// for 3 s at 2200 fpm, L2 by the second threshold (held 5 s it is only
+/// 1390 fpm, L1). At 1800 fpm it stays under 1500 fpm and is graded by its
+/// 5 s value, about 1214 fpm (the inertial rate smooths the dive).
+#[test]
+fn the_descent_rate_is_held_3_s_only_past_the_second_threshold() {
+    // 875 ft at 50 s, then `fpm` for 4 s, back on the path at 100 ft.
+    let a2 = |fpm: f64| {
+        let dive = [
+            (0.0, 1500.0),
+            (50.0, 875.0),
+            (54.0, 875.0 - fpm / 15.0),
+            (TD_S - 12.0, 100.0),
+            (TD_S - 2.0, 10.0),
+            (TD_S, 0.0),
+        ];
+        let (s, _) = scored(TD_S + ROLLOUT_S, |t| Pt {
+            alt: lerp(&dive, t),
+            ..landing(t, TD_S, 1.2)
+        });
+        let above = criteria(&s, "A2")
+            .into_iter()
+            .find(|c| c.height == Height::Above)
+            .cloned();
+        above.unwrap()
+    };
+    let steep = a2(2200.0);
+    assert!(steep.level == 2 && steep.value >= 1500.0, "{steep:?}");
+    let firm = a2(1800.0);
+    assert!(firm.level == 1 && firm.value < 1250.0, "{firm:?}");
+}
+
+/// A 3 s IAS dropout in the window and no radio height at the threshold:
+/// A1 and B1 are n/a, not graded, and the score is partial.
+#[test]
+fn data_gaps_make_their_criteria_n_a() {
+    let (s, _) = scored(TD_S + ROLLOUT_S, |t| {
+        let lost: &'static [&'static str] = if (60.0..63.0).contains(&t) {
+            &["AIRSPEED INDICATED"]
+        } else if (TD_S - 8.0..TD_S - 3.0).contains(&t) {
+            &["RADIO HEIGHT"]
+        } else {
+            &[]
+        };
+        Pt {
+            lost,
+            ..landing(t, TD_S, 1.2)
+        }
+    });
+    assert!(criteria(&s, "A1").is_empty() && criteria(&s, "B1").is_empty());
+    assert!(!criteria(&s, "A2").is_empty());
+    assert_eq!(s.confidence, Confidence::Partial);
+    assert_eq!(
+        s.partial,
+        [
+            "A1 n/a: data gap over 1.5 s in the approach window",
+            "B1 n/a: no radio height at the threshold"
+        ]
     );
 }

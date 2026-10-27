@@ -173,6 +173,13 @@ fn the_unstable_rule_counts_like_data4safety() {
     assert!(unstable(&s));
     assert!(s.score <= 59.0);
     assert!(unstable(&jet(vec![scalar("A3", Below, 16.0)])));
+    // Glideslope and localizer are one criterion (A5): two in all.
+    let ils = vec![
+        scalar("A1", Above, 22.0),
+        scalar("A5G", Above, 1.2),
+        scalar("A5L", Above, 1.2),
+    ];
+    assert!(!unstable(&jet(ils)));
     // Late flap below 500 ft (A6 at L3) is SL3 on its own.
     assert!(unstable(&jet(vec![scalar("A6", All, 3.0)])));
 }

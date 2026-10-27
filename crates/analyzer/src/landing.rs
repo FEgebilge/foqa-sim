@@ -9,7 +9,7 @@ use crate::{Flight, Track};
 /// Airborne hop between two touchdowns up to which the second makes the
 /// landing a bounced one. Longer than track.rs's `BOUNCE_MAX_US`, which only
 /// decides whether a brief ground contact still belongs to the same leg.
-const BOUNCE_AIRBORNE_MAX_US: i64 = 5_000_000;
+pub(crate) const BOUNCE_AIRBORNE_MAX_US: i64 = 5_000_000;
 /// A flight loaded in the air that is on the ground within this long was
 /// placed there by the sim (spawn, slew), not landed.
 const SETTLE_MAX_US: i64 = 5_000_000;

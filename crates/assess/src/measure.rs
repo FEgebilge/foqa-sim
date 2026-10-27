@@ -143,12 +143,9 @@ impl Method {
         let top = l.gate_ft.map_or(window.top_ft, |g| g.min(window.top_ft));
         let bottom = window.bottom_ft.unwrap_or(l.selection.phases.flare_ft);
         let a = Approach::of(flight, track, td, top, bottom);
-        let next = l.touchdowns[l.index + 1..].iter().find(|t| !t.bounce);
-        let full_stop = match (&a.slowed, next) {
-            (_, None) => true,
-            (Some(s), Some(n)) => s.t < n.t,
-            (None, Some(_)) => false,
-        };
+        // Slowed to taxi speed on the ground, or still rolling where the
+        // recording ends; a liftoff first is a touch-and-go.
+        let full_stop = a.slowed.is_some() || a.liftoff.is_none();
         let mut missing = Vec::new();
         let fix = td.runway.as_ref();
         if fix.is_none() {
@@ -193,9 +190,6 @@ impl Method {
             let icao = l.selection.icao.as_deref().unwrap_or("this aircraft");
             partial.push(format!("No Vref for {icao}"));
         }
-        if gap(&w.t, &w.ias_kt) || gap(&w.t, &w.sink_fpm) {
-            partial.push("data gap in the approach window".into());
-        }
         let light = class == ScoringClass::Light;
         let reference = speeds
             .as_ref()
@@ -218,9 +212,17 @@ impl Method {
         };
 
         let mut values: Vec<(String, Value)> = Vec::new();
-        let mut series = |id: &str, x: Vec<f64>| {
+        // A gap in a recorded series makes its criterion n/a; the ILS
+        // deviations are unknown without a signal, n/a by design.
+        let mut series = |id: &str, x: Vec<f64>, recorded: bool| {
             let Some(c) = self.criterion(id) else { return };
             if x.iter().all(|v| v.is_nan()) {
+                return;
+            }
+            if recorded && gap(&w.t, &x) {
+                partial.push(format!(
+                    "{id} n/a: data gap over 1.5 s in the approach window"
+                ));
                 return;
             }
             let neg: Vec<f64> = x.iter().map(|v| -v).collect();
@@ -228,22 +230,34 @@ impl Method {
                 .into_iter()
                 .map(|v| -v)
                 .collect();
-            let high = held(&w.t, &x, c.sustain_us);
+            let mut high = held(&w.t, &x, c.sustain_us);
+            if let Some((beyond, sustain_us)) = c.beyond {
+                for (h, s) in high.iter_mut().zip(held(&w.t, &x, sustain_us)) {
+                    if s >= beyond && (h.is_nan() || s > *h) {
+                        *h = s;
+                    }
+                }
+            }
             values.push((id.to_owned(), Value::Series { high, low }));
         };
         if let Some(r) = reference {
-            series("A1", w.ias_kt.iter().map(|v| v - r).collect());
+            series("A1", w.ias_kt.iter().map(|v| v - r).collect(), true);
         }
-        series("A2", w.sink_fpm.clone());
-        series("A3", w.roll_deg.iter().map(|v| v.abs()).collect());
-        series("A4", w.pitch_deg.clone());
-        series("A5G", w.gs_dev_dot.iter().map(|v| v.abs()).collect());
-        series("A5L", w.loc_dev_dot.iter().map(|v| v.abs()).collect());
+        series("A2", w.sink_fpm.clone(), true);
+        series("A3", w.roll_deg.iter().map(|v| v.abs()).collect(), true);
+        series("A4", w.pitch_deg.clone(), true);
+        series("A5G", w.gs_dev_dot.iter().map(|v| v.abs()).collect(), false);
+        series(
+            "A5L",
+            w.loc_dev_dot.iter().map(|v| v.abs()).collect(),
+            false,
+        );
 
         let retractable = l.selection.profile.is_some_and(|p| p.vle.is_some());
-        let crossing = a.threshold.as_ref();
+        let mut crossing = a.threshold.as_ref();
         if crossing.is_some_and(|c| track.ra_ft[track.index_at(c.t)].is_nan()) {
-            partial.push("no radio height at the threshold".into());
+            partial.push("B1 n/a: no radio height at the threshold".into());
+            crossing = None;
         }
         let tail = profile_value(rules::ProfileField::TailLandingPitch);
         let scalars = [
@@ -334,8 +348,9 @@ fn gap(t: &[SimTime], x: &[f64]) -> bool {
     })
 }
 
-/// A6 as a level: a jet's flap change at or above the split L2, below it
-/// L3, gear not down L3 (Data4Safety late flap and gear); a light
+/// A6 as a level: a jet's flap or gear change at or above the split L2,
+/// below it L3, gear not down at the bottom of the window L3 (Data4Safety
+/// late flap and gear, SL2A / SL3); a light
 /// aircraft's flap change under 200 ft L1, retractable gear not down below
 /// its split L3 (est). `None` without flap or gear data.
 fn configuration(a: &Approach, light: bool, split: f64, retractable: bool) -> Option<f64> {
@@ -344,26 +359,28 @@ fn configuration(a: &Approach, light: bool, split: f64, retractable: bool) -> Op
     if !known(&w.flap_deg) && !known(&w.gear_pct) {
         return None;
     }
-    let flaps = a
-        .config_changes
-        .iter()
-        .filter(|c| c.what == analyzer::Config::Flaps);
-    let gear_up = |below: f64| {
-        w.gear_pct
+    let changes = |what| a.config_changes.iter().filter(move |c| c.what == what);
+    let level = if light {
+        let gear_up = w
+            .gear_pct
             .iter()
             .zip(&w.height_ft)
-            .any(|(g, h)| *g < GEAR_DOWN_PCT && *h < below)
-    };
-    let level = if light {
-        let late = flaps
+            .any(|(g, h)| *g < GEAR_DOWN_PCT && *h < split);
+        let late = changes(analyzer::Config::Flaps)
             .filter(|c| c.height_ft < LIGHT_LATE_FLAP_FT)
             .map(|_| 1.0);
-        late.chain((retractable && gear_up(split)).then_some(3.0))
+        late.chain((retractable && gear_up).then_some(3.0))
             .fold(0.0, f64::max)
     } else {
-        let late = flaps.map(|c| if c.height_ft >= split { 2.0 } else { 3.0 });
-        late.chain(gear_up(f64::INFINITY).then_some(3.0))
-            .fold(0.0, f64::max)
+        let not_down = w
+            .gear_pct
+            .iter()
+            .rfind(|g| g.is_finite())
+            .is_some_and(|&g| g < GEAR_DOWN_PCT);
+        let late = changes(analyzer::Config::Flaps)
+            .chain(changes(analyzer::Config::Gear))
+            .map(|c| if c.height_ft >= split { 2.0 } else { 3.0 });
+        late.chain(not_down.then_some(3.0)).fold(0.0, f64::max)
     };
     Some(level)
 }

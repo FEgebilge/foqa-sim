@@ -398,8 +398,8 @@ fn height_name(id: &str, height: Height) -> String {
 
 /// A continued unstable approach, Data4Safety's rule (S1): any approach
 /// criterion at L2/L3 below the split (SL2B/SL3), or three at L1 or more
-/// above it (SL1/SL2A); a light aircraft, any at L2 below its split or
-/// three at L1 anywhere. A finding of the stability domain at medium or
+/// above it (SL1/SL2A), the glideslope and localizer counting as one (A5);
+/// a light aircraft, any at L2 below its split or three at L1 anywhere. A finding of the stability domain at medium or
 /// above below the split counts as an L2 there; a criterion graded for the
 /// whole window (late configuration) counts at L3 as below the split.
 fn unstable(m: &Measures, scored: &[(Domain, CriterionScore)], split: f64) -> Option<String> {
@@ -431,7 +431,7 @@ fn unstable(m: &Measures, scored: &[(Domain, CriterionScore)], split: f64) -> Op
     let mut ids: Vec<&str> = approach
         .iter()
         .filter(|c| c.ell >= 1.0 && (light || c.height != Height::Below))
-        .map(|c| c.id.as_str())
+        .map(|c| if c.id.starts_with("A5") { "A5" } else { &c.id })
         .collect();
     ids.sort_unstable();
     ids.dedup();

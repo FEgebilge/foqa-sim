@@ -55,8 +55,10 @@ criteria:
     title: Descent rate
     domain: stability
     unit: fpm
+    # S1 persistence: 5 s, and 3 s past the second threshold (1500 fpm).
     sustain: 5 s
-    source: "S5/S6 1000 fpm (tol); S1 1200/1500 fpm; light levels est; ideal est"
+    sustain_beyond: { value: 1500 fpm, sustain: 3 s }
+    source: "S5/S6 1000 fpm (tol); S1 1200 fpm (5 s) / 1500 fpm (3 s); light levels est; ideal est"
     bands:
       - { classes: [turboprop, jet], height: above, levels_from: high-sink-above-500, above: [rod3 + 200 fpm, 1000 fpm, ~, ~, ~] }
       - { classes: [turboprop, jet], height: below, levels_from: high-sink-below-500, above: [rod3 + 200 fpm, 1000 fpm, ~, ~, ~] }

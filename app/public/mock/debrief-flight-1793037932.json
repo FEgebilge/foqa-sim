@@ -118,8 +118,8 @@
               "id": "stability",
               "title": "Approach stability",
               "weight": 25.0,
-              "loss": 0.6935283525221868,
-              "points": 17.3,
+              "loss": 0.695674071595807,
+              "points": 17.4,
               "level": 2,
               "criteria": [
                 {
@@ -182,11 +182,11 @@
                   "id": "A2",
                   "title": "Descent rate",
                   "height": "above",
-                  "value": 1562.1833607459812,
+                  "value": 1565.2486737082957,
                   "unit": "fpm",
-                  "ell": 2.1243667214919624,
+                  "ell": 2.130497347416591,
                   "level": 2,
-                  "loss": 0.6935283525221868,
+                  "loss": 0.695674071595807,
                   "bands": {
                     "above": [
                       606.0215013351312,
@@ -203,7 +203,7 @@
                       null
                     ]
                   },
-                  "standard": "S5/S6 1000 fpm (tol); S1 1200/1500 fpm; light levels est; ideal est",
+                  "standard": "S5/S6 1000 fpm (tol); S1 1200 fpm (5 s) / 1500 fpm (3 s); light levels est; ideal est",
                   "sets": true
                 },
                 {
@@ -231,7 +231,7 @@
                       null
                     ]
                   },
-                  "standard": "S5/S6 1000 fpm (tol); S1 1200/1500 fpm; light levels est; ideal est",
+                  "standard": "S5/S6 1000 fpm (tol); S1 1200 fpm (5 s) / 1500 fpm (3 s); light levels est; ideal est",
                   "sets": false
                 },
                 {

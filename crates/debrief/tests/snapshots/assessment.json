@@ -107,7 +107,7 @@
               "level": 0,
               "loss": 0.0,
               "sets": false,
-              "standard": "S5/S6 1000 fpm (tol); S1 1200/1500 fpm; light levels est; ideal est",
+              "standard": "S5/S6 1000 fpm (tol); S1 1200 fpm (5 s) / 1500 fpm (3 s); light levels est; ideal est",
               "title": "Descent rate",
               "unit": "fpm",
               "value": 750.0504
@@ -135,7 +135,7 @@
               "level": 0,
               "loss": 0.0,
               "sets": false,
-              "standard": "S5/S6 1000 fpm (tol); S1 1200/1500 fpm; light levels est; ideal est",
+              "standard": "S5/S6 1000 fpm (tol); S1 1200 fpm (5 s) / 1500 fpm (3 s); light levels est; ideal est",
               "title": "Descent rate",
               "unit": "fpm",
               "value": 750.0

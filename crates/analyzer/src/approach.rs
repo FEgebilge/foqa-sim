@@ -9,7 +9,7 @@ use std::ops::Range;
 use fdm_core::SimTime;
 use fdm_core::geo::distance_m;
 
-use crate::landing::position;
+use crate::landing::{BOUNCE_AIRBORNE_MAX_US, position};
 use crate::phase::runway_height;
 use crate::runway::{RunwayFix, ground_track_deg, wrap180};
 use crate::{Flight, Touchdown, Track};
@@ -143,8 +143,14 @@ pub struct Approach {
     /// from the ground speed at contact, GS² / 2d, g (EAFDM RE.8); `None`
     /// with no distance left.
     pub required_decel_g: Option<f64>,
-    /// Largest centreline offset from contact down to 30 kt, m.
+    /// Where the aircraft next left the ground for longer than a bounce:
+    /// a touch-and-go, or the recording ending airborne; `None` if it ends
+    /// on the ground. The rollout ends there.
+    pub liftoff: Option<SimTime>,
+    /// Largest centreline offset from contact down to 30 kt or the
+    /// liftoff, m.
     pub rollout_cross_m: Option<f64>,
+    /// Taxi speed reached before the liftoff.
     pub slowed: Option<Slowed>,
 }
 
@@ -167,6 +173,9 @@ impl Approach {
             .collect();
         config_changes.sort_by_key(|c| c.t);
         let gs = flight.at("groundspeed", td.t);
+        let td_i = track.index_at(td.t);
+        let liftoff = liftoff(track, td_i);
+        let ground_end = liftoff.unwrap_or(track.len());
         Self {
             config_changes,
             threshold: fix.and_then(|f| crossing(flight, track, f, td.t)),
@@ -187,17 +196,16 @@ impl Approach {
                 (left_m > 0.0).then(|| (gs * KT_MS).powi(2) / (2.0 * left_m) / G_MS2)
             }),
             rollout_cross_m: fix.and_then(|f| {
-                let td_i = track.index_at(td.t);
-                let end = (td_i..track.len())
+                let end = (td_i..ground_end)
                     .find(|&i| track.gs_kt[i] < ROLLOUT_END_KT)
-                    .unwrap_or(track.len());
+                    .unwrap_or(ground_end);
                 (td_i..end)
                     .filter_map(|i| position(flight, track.t[i]))
                     .map(|(lat, lon)| f.offsets(lat, lon).1.abs())
                     .reduce(f64::max)
             }),
             slowed: fix.and_then(|f| {
-                let i = (track.index_at(td.t)..track.len()).find(|&i| track.gs_kt[i] <= TAXI_KT)?;
+                let i = (td_i..ground_end).find(|&i| track.gs_kt[i] <= TAXI_KT)?;
                 let (along_m, cross_m) =
                     position(flight, track.t[i]).map(|(a, b)| f.offsets(a, b))?;
                 Some(Slowed {
@@ -206,6 +214,7 @@ impl Approach {
                     cross_m,
                 })
             }),
+            liftoff: liftoff.map(|i| track.t[i]),
             window,
         }
     }
@@ -225,6 +234,19 @@ fn before_contact(track: &Track, t: SimTime) -> Range<usize> {
         .find(|l| l.airborne.contains(&last.saturating_sub(1)))
         .map_or(0, |l| l.airborne.start);
     start..last
+}
+
+/// The first point from `from` that leaves the ground for longer than a
+/// bounce (`landing.rs`); `None` if the track ends on the ground.
+fn liftoff(track: &Track, from: usize) -> Option<usize> {
+    let mut i = from;
+    loop {
+        let off = (i..track.len()).find(|&k| !track.on_ground[k])?;
+        match (off..track.len()).find(|&k| track.on_ground[k]) {
+            Some(on) if track.t[on].us_since(track.t[off]) <= BOUNCE_AIRBORNE_MAX_US => i = on,
+            _ => return Some(off),
+        }
+    }
 }
 
 /// The window before the contact at `td`: from just below the last point
