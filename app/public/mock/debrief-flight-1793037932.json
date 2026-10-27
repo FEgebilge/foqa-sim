@@ -106,6 +106,7 @@
             }
           ],
           "stable_from_ft": 179.296722057793,
+          "split_ft": 300.0,
           "speeds": {
             "vref_kt": 60.0,
             "vapp_kt": 65.0,
@@ -127,6 +128,8 @@
                   "title": "IAS off the approach speed",
                   "height": "above",
                   "value": 14.09610662027535,
+                  "value_text": "+14 kt",
+                  "height_text": "at or above 300 ft",
                   "unit": "kt",
                   "ell": 0.909610662027535,
                   "level": 0,
@@ -147,6 +150,22 @@
                       -15.0
                     ]
                   },
+                  "bands_text": {
+                    "above": [
+                      "+5 kt",
+                      "+10 kt",
+                      "+15 kt",
+                      "+20 kt",
+                      "+30 kt"
+                    ],
+                    "below": [
+                      "-2.5 kt",
+                      "-5 kt",
+                      "-7.5 kt",
+                      "-10 kt",
+                      "-15 kt"
+                    ]
+                  },
                   "standard": "S2 ATP ACS +/-5 kt (tol); S1 Data4Safety Vref+20/+35, Vref-5/-10; light S3/S4 +10/-5 (tol), levels est",
                   "sets": false
                 },
@@ -155,6 +174,8 @@
                   "title": "IAS off the approach speed",
                   "height": "below",
                   "value": 10.356569372753725,
+                  "value_text": "+10 kt",
+                  "height_text": "below 300 ft",
                   "unit": "kt",
                   "ell": 0.5356569372753726,
                   "level": 0,
@@ -175,6 +196,22 @@
                       -15.0
                     ]
                   },
+                  "bands_text": {
+                    "above": [
+                      "+5 kt",
+                      "+10 kt",
+                      "+15 kt",
+                      "+20 kt",
+                      "+30 kt"
+                    ],
+                    "below": [
+                      "-2.5 kt",
+                      "-5 kt",
+                      "-7.5 kt",
+                      "-10 kt",
+                      "-15 kt"
+                    ]
+                  },
                   "standard": "S2 ATP ACS +/-5 kt (tol); S1 Data4Safety Vref+20/+35, Vref-5/-10; light S3/S4 +10/-5 (tol), levels est",
                   "sets": false
                 },
@@ -183,6 +220,8 @@
                   "title": "Descent rate",
                   "height": "above",
                   "value": 1565.2486737082957,
+                  "value_text": "1,565 fpm",
+                  "height_text": "at or above 300 ft",
                   "unit": "fpm",
                   "ell": 2.130497347416591,
                   "level": 2,
@@ -203,6 +242,22 @@
                       null
                     ]
                   },
+                  "bands_text": {
+                    "above": [
+                      "606 fpm",
+                      "1,000 fpm",
+                      "1,200 fpm",
+                      "1,500 fpm",
+                      "2,000 fpm"
+                    ],
+                    "below": [
+                      null,
+                      null,
+                      null,
+                      null,
+                      null
+                    ]
+                  },
                   "standard": "S5/S6 1000 fpm (tol); S1 1200 fpm (5 s) / 1500 fpm (3 s); light levels est; ideal est",
                   "sets": true
                 },
@@ -211,6 +266,8 @@
                   "title": "Descent rate",
                   "height": "below",
                   "value": 1173.769367191016,
+                  "value_text": "1,174 fpm",
+                  "height_text": "below 300 ft",
                   "unit": "fpm",
                   "ell": 0.9344234179775401,
                   "level": 0,
@@ -231,6 +288,22 @@
                       null
                     ]
                   },
+                  "bands_text": {
+                    "above": [
+                      "606 fpm",
+                      "1,000 fpm",
+                      "1,200 fpm",
+                      "1,500 fpm",
+                      "2,000 fpm"
+                    ],
+                    "below": [
+                      null,
+                      null,
+                      null,
+                      null,
+                      null
+                    ]
+                  },
                   "standard": "S5/S6 1000 fpm (tol); S1 1200 fpm (5 s) / 1500 fpm (3 s); light levels est; ideal est",
                   "sets": false
                 },
@@ -239,6 +312,8 @@
                   "title": "Bank",
                   "height": "below",
                   "value": 1.4826576942854213,
+                  "value_text": "1.5°",
+                  "height_text": "below 300 ft",
                   "unit": "deg",
                   "ell": 0.0,
                   "level": 0,
@@ -259,6 +334,22 @@
                       null
                     ]
                   },
+                  "bands_text": {
+                    "above": [
+                      "5°",
+                      "10°",
+                      "15°",
+                      "20°",
+                      "30°"
+                    ],
+                    "below": [
+                      null,
+                      null,
+                      null,
+                      null,
+                      null
+                    ]
+                  },
                   "standard": "S6 7 deg (tol); S1 15/30 deg; light S5 wings level by 300 ft, bands est",
                   "sets": false
                 },
@@ -267,6 +358,8 @@
                   "title": "Configuration change or gear not down in the window",
                   "height": "all",
                   "value": 0.0,
+                  "value_text": "none",
+                  "height_text": null,
                   "unit": null,
                   "ell": 0.0,
                   "level": 0,
@@ -278,6 +371,22 @@
                       1.0,
                       2.0,
                       3.0
+                    ],
+                    "below": [
+                      null,
+                      null,
+                      null,
+                      null,
+                      null
+                    ]
+                  },
+                  "bands_text": {
+                    "above": [
+                      null,
+                      null,
+                      "L1",
+                      "L2",
+                      "L3"
                     ],
                     "below": [
                       null,
@@ -309,7 +418,8 @@
                   "sets": false
                 }
               ],
-              "sets_by": "A2 above"
+              "sets_by": "A2 above",
+              "set_by_text": "Descent rate 1,565 fpm at or above 300 ft"
             },
             {
               "id": "energy",
@@ -324,6 +434,8 @@
                   "title": "Threshold crossing height off 50 ft",
                   "height": "all",
                   "value": 5.242330074054948,
+                  "value_text": "+5.2 ft",
+                  "height_text": null,
                   "unit": "ft",
                   "ell": 0.012116503702747394,
                   "level": 0,
@@ -344,6 +456,22 @@
                       -40.0
                     ]
                   },
+                  "bands_text": {
+                    "above": [
+                      "+5 ft",
+                      "+15 ft",
+                      "+25 ft",
+                      "+50 ft",
+                      "+100 ft"
+                    ],
+                    "below": [
+                      "-5 ft",
+                      "-10 ft",
+                      "-20 ft",
+                      "-30 ft",
+                      "-40 ft"
+                    ]
+                  },
                   "standard": "S8 50 ft standard, +200 ft landing distance per 10 ft; bands est",
                   "sets": false
                 },
@@ -352,6 +480,8 @@
                   "title": "Touchdown IAS",
                   "height": "all",
                   "value": -17.014644622802734,
+                  "value_text": "-17 kt",
+                  "height_text": null,
                   "unit": "kt",
                   "ell": 0.0,
                   "level": 0,
@@ -372,6 +502,22 @@
                       null
                     ]
                   },
+                  "bands_text": {
+                    "above": [
+                      "-10 kt",
+                      "-5 kt",
+                      "0 kt",
+                      "+10 kt",
+                      "+20 kt"
+                    ],
+                    "below": [
+                      null,
+                      null,
+                      null,
+                      null,
+                      null
+                    ]
+                  },
                   "standard": "S9 no lower than Vref-5, Vref-10 tail clearance; light POH main wheels first; L1, L3 and light bands est",
                   "sets": false
                 },
@@ -380,6 +526,8 @@
                   "title": "Float from 50 ft to touchdown",
                   "height": "all",
                   "value": 10.954136617967574,
+                  "value_text": "11 s",
+                  "height_text": null,
                   "unit": "s",
                   "ell": 0.23853415449189352,
                   "level": 0,
@@ -400,12 +548,29 @@
                       null
                     ]
                   },
+                  "bands_text": {
+                    "above": [
+                      "10 s",
+                      "12 s",
+                      "15 s",
+                      "20 s",
+                      "25 s"
+                    ],
+                    "below": [
+                      null,
+                      null,
+                      null,
+                      null,
+                      null
+                    ]
+                  },
                   "standard": "S7 RE28 long flare; S9 flare 4-8 s; bands est",
                   "sets": true
                 }
               ],
               "findings": [],
-              "sets_by": "B3"
+              "sets_by": "B3",
+              "set_by_text": "Float from 50 ft to touchdown 11 s"
             },
             {
               "id": "point",
@@ -420,6 +585,8 @@
                   "title": "Touchdown past the target",
                   "height": "all",
                   "value": -46.152217897522014,
+                  "value_text": "-46 ft",
+                  "height_text": null,
                   "unit": "ft",
                   "ell": 0.23076108948761007,
                   "level": 0,
@@ -440,12 +607,29 @@
                       -1312.3359580052493
                     ]
                   },
+                  "bands_text": {
+                    "above": [
+                      "+200 ft",
+                      "+400 ft",
+                      "+800 ft",
+                      "+1,688 ft",
+                      "+3,589 ft"
+                    ],
+                    "below": [
+                      "0 ft",
+                      "-100 ft",
+                      "-200 ft",
+                      "-1,212 ft",
+                      "-1,312 ft"
+                    ]
+                  },
                   "standard": "S2 aiming point -250/+500 ft; S3/S4 0/+400 and +200 ft; S7 deep landing; S9 at least 1000 ft; long-landing (L2), short-landing (L3); rest est",
                   "sets": true
                 }
               ],
               "findings": [],
-              "sets_by": "C1"
+              "sets_by": "C1",
+              "set_by_text": "Touchdown past the target -46 ft"
             },
             {
               "id": "lateral",
@@ -460,6 +644,8 @@
                   "title": "Centreline offset at touchdown",
                   "height": "all",
                   "value": 17.077978363476372,
+                  "value_text": "17 ft",
+                  "height_text": null,
                   "unit": "ft",
                   "ell": 0.8104779512793391,
                   "level": 0,
@@ -480,6 +666,22 @@
                       null
                     ]
                   },
+                  "bands_text": {
+                    "above": [
+                      "2.1 ft",
+                      "4.1 ft",
+                      "25 ft",
+                      "40 ft",
+                      "53 ft"
+                    ],
+                    "below": [
+                      null,
+                      null,
+                      null,
+                      null,
+                      null
+                    ]
+                  },
                   "standard": "S2 centreline between the main gear (tol); off-centreline-touchdown 25/40/60 ft est; outer gear 3 m from the edge",
                   "sets": true
                 },
@@ -488,6 +690,8 @@
                   "title": "Crab at touchdown",
                   "height": "all",
                   "value": 3.544784760071366,
+                  "value_text": "3.5°",
+                  "height_text": null,
                   "unit": "deg",
                   "ell": 0.6361961900178414,
                   "level": 0,
@@ -508,6 +712,22 @@
                       null
                     ]
                   },
+                  "bands_text": {
+                    "above": [
+                      "1°",
+                      "3°",
+                      "5°",
+                      "8°",
+                      "12°"
+                    ],
+                    "below": [
+                      null,
+                      null,
+                      null,
+                      null,
+                      null
+                    ]
+                  },
                   "standard": "S3/S4 longitudinal axis aligned; S9 crab touchdown accepted; numbers est",
                   "sets": false
                 },
@@ -516,6 +736,8 @@
                   "title": "Drift at touchdown",
                   "height": "all",
                   "value": 0.6950615618555567,
+                  "value_text": "0.7 kt",
+                  "height_text": null,
                   "unit": "kt",
                   "ell": 0.0,
                   "level": 0,
@@ -536,6 +758,22 @@
                       null
                     ]
                   },
+                  "bands_text": {
+                    "above": [
+                      "1 kt",
+                      "2 kt",
+                      "4 kt",
+                      "6 kt",
+                      "8 kt"
+                    ],
+                    "below": [
+                      null,
+                      null,
+                      null,
+                      null,
+                      null
+                    ]
+                  },
                   "standard": "S3/S4 no side drift; numbers est",
                   "sets": false
                 },
@@ -544,6 +782,8 @@
                   "title": "Rollout centreline offset to 30 kt",
                   "height": "all",
                   "value": 17.169932157071084,
+                  "value_text": "17 ft",
+                  "height_text": null,
                   "unit": "ft",
                   "ell": 0.7389977385690362,
                   "level": 0,
@@ -564,12 +804,29 @@
                       null
                     ]
                   },
+                  "bands_text": {
+                    "above": [
+                      "4.1 ft",
+                      "10 ft",
+                      "25 ft",
+                      "40 ft",
+                      null
+                    ],
+                    "below": [
+                      null,
+                      null,
+                      null,
+                      null,
+                      null
+                    ]
+                  },
                   "standard": "S6 RE.7 (measure); numbers est; leaving the runway caps the score",
                   "sets": false
                 }
               ],
               "findings": [],
-              "sets_by": "D1"
+              "sets_by": "D1",
+              "set_by_text": "Centreline offset at touchdown 17 ft"
             },
             {
               "id": "contact",
@@ -584,6 +841,8 @@
                   "title": "Peak normal load at touchdown",
                   "height": "all",
                   "value": 1.2744001969894996,
+                  "value_text": "1.27 g",
+                  "height_text": null,
                   "unit": "g",
                   "ell": 0.0,
                   "level": 0,
@@ -604,6 +863,22 @@
                       null
                     ]
                   },
+                  "bands_text": {
+                    "above": [
+                      "1.30 g",
+                      "1.60 g",
+                      "1.80 g",
+                      "2.20 g",
+                      "2.60 g"
+                    ],
+                    "below": [
+                      null,
+                      null,
+                      null,
+                      null,
+                      null
+                    ]
+                  },
                   "standard": "S6 RE.6 monitor below the manufacturer's limit; S12; hard-landing and hard-landing-light levels est",
                   "sets": false
                 },
@@ -612,6 +887,8 @@
                   "title": "Sink rate at touchdown",
                   "height": "all",
                   "value": 200.02974995615358,
+                  "value_text": "200 fpm",
+                  "height_text": null,
                   "unit": "fpm",
                   "ell": 0.0,
                   "level": 0,
@@ -632,6 +909,22 @@
                       null
                     ]
                   },
+                  "bands_text": {
+                    "above": [
+                      "240 fpm",
+                      "300 fpm",
+                      "400 fpm",
+                      "500 fpm",
+                      "700 fpm"
+                    ],
+                    "below": [
+                      null,
+                      null,
+                      null,
+                      null,
+                      null
+                    ]
+                  },
                   "standard": "S10 6 / 10 ft/s; 240 fpm Boeing service experience (not re-read); light est; soft is not rewarded (S9)",
                   "sets": false
                 },
@@ -640,6 +933,8 @@
                   "title": "Bounce",
                   "height": "all",
                   "value": 0.0,
+                  "value_text": "none",
+                  "height_text": null,
                   "unit": null,
                   "ell": 0.0,
                   "level": 0,
@@ -660,6 +955,22 @@
                       null
                     ]
                   },
+                  "bands_text": {
+                    "above": [
+                      null,
+                      null,
+                      null,
+                      "L1",
+                      "L2"
+                    ],
+                    "below": [
+                      null,
+                      null,
+                      null,
+                      null,
+                      null
+                    ]
+                  },
                   "standard": "S7 RE30 main-gear air-to-ground count > 1; airborne > 2 s or > 5 ft est",
                   "sets": false
                 },
@@ -668,6 +979,8 @@
                   "title": "Pitch at touchdown (nose first)",
                   "height": "all",
                   "value": 7.041614563451406,
+                  "value_text": "7.0°",
+                  "height_text": null,
                   "unit": "deg",
                   "ell": 0.0,
                   "level": 0,
@@ -688,6 +1001,22 @@
                       null
                     ]
                   },
+                  "bands_text": {
+                    "above": [
+                      null,
+                      null,
+                      null,
+                      null,
+                      null
+                    ],
+                    "below": [
+                      null,
+                      "0°",
+                      null,
+                      "0°",
+                      null
+                    ]
+                  },
                   "standard": "POH main wheels first; EOFDM example (not re-read)",
                   "sets": false
                 },
@@ -696,6 +1025,8 @@
                   "title": "Bank at touchdown",
                   "height": "all",
                   "value": 0.7031557403021894,
+                  "value_text": "0.7°",
+                  "height_text": null,
                   "unit": "deg",
                   "ell": 0.0,
                   "level": 0,
@@ -716,12 +1047,29 @@
                       null
                     ]
                   },
+                  "bands_text": {
+                    "above": [
+                      "3°",
+                      "5°",
+                      "7°",
+                      "10°",
+                      "15°"
+                    ],
+                    "below": [
+                      null,
+                      null,
+                      null,
+                      null,
+                      null
+                    ]
+                  },
                   "standard": "S12 roll <= 2 deg (not re-read); 8 deg EOFDM example (not re-read); rest est",
                   "sets": false
                 }
               ],
               "findings": [],
-              "sets_by": null
+              "sets_by": null,
+              "set_by_text": null
             },
             {
               "id": "rollout",
@@ -736,6 +1084,8 @@
                   "title": "Required deceleration",
                   "height": "all",
                   "value": 0.016555021873382526,
+                  "value_text": "0.02 g",
+                  "height_text": null,
                   "unit": "g",
                   "ell": 0.0,
                   "level": 0,
@@ -756,12 +1106,29 @@
                       null
                     ]
                   },
+                  "bands_text": {
+                    "above": [
+                      "0.10 g",
+                      "0.15 g",
+                      "0.20 g",
+                      "0.30 g",
+                      "0.40 g"
+                    ],
+                    "below": [
+                      null,
+                      null,
+                      null,
+                      null,
+                      null
+                    ]
+                  },
                   "standard": "S6 RE.8 a = GS^2 / 2d; bands est",
                   "sets": false
                 }
               ],
               "findings": [],
-              "sets_by": null
+              "sets_by": null,
+              "set_by_text": null
             }
           ]
         }

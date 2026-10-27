@@ -2,7 +2,7 @@ import { useState } from "react";
 import { ChevronRight, Crosshair, Gauge, Info, Scale } from "lucide-react";
 import SegmentedControl from "@ui/components/segmented-control/segmented-control";
 import { Tooltip } from "@ui/components/tooltip/tooltip";
-import { againstText, domainBar, ellColor, ellWords, heightText, LEVEL_WORD, levelColor, setByText, stripRange, topDomain, valueText, ZONE_COLOR, ZONES, zoneOf, zones } from "../../lib/assessment";
+import { againstText, anchorTicks, domainBar, ellColor, ellWords, LEVEL_WORD, levelColor, stripRange, topDomain, ZONE_COLOR, ZONES, zoneOf, zones } from "../../lib/assessment";
 import { clock, GRADE_LABEL, number } from "../../lib/format";
 import { levelVar } from "../../lib/palette";
 import type { CriterionAssessment, Debrief, DomainAssessment, FindingAssessment, LandingAssessment } from "../../types";
@@ -104,7 +104,7 @@ function DomainBar({ domain, maxWeight, active, onSelect }: { domain: DomainAsse
 }
 
 function DomainDetail({ domain, landing, debrief, onSelectEvent }: { domain: DomainAssessment; landing: LandingAssessment; debrief: Debrief; onSelectEvent: (index: number) => void }) {
-  const set = setByText(domain, landing, debrief);
+  const set = domain.set_by_text;
   return (
     <div className="flex min-w-0 flex-col gap-3" aria-live="polite">
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
@@ -132,7 +132,7 @@ function DomainDetail({ domain, landing, debrief, onSelectEvent }: { domain: Dom
 }
 
 function CriterionRow({ c, landing, domain }: { c: CriterionAssessment; landing: LandingAssessment; domain: DomainAssessment }) {
-  const where = [heightText(c, landing.class), againstText(c, landing)].filter(Boolean).join(" · ");
+  const where = [c.height_text, againstText(c, landing)].filter(Boolean).join(" · ");
   const cost = (c.loss * domain.weight * domain.points) / Math.max(1e-9, (domain.loss ?? 0) * domain.weight);
   return (
     <li className={`grid gap-x-4 gap-y-1.5 px-3 py-2 md:grid-cols-[minmax(11rem,15rem)_minmax(0,1fr)] ${c.sets ? "bg-[color-mix(in_oklab,var(--accent)_7%,transparent)]" : ""}`}>
@@ -143,7 +143,7 @@ function CriterionRow({ c, landing, domain }: { c: CriterionAssessment; landing:
         </p>
         {where ? <p className="text-[11px] text-fg-3">{where}</p> : null}
         <p className="mt-0.5 flex flex-wrap items-baseline gap-x-2">
-          <span className="readout text-base leading-tight" style={c.ell > 0.5 ? { color: ellColor(c.ell) } : undefined}>{valueText(c, c.value)}</span>
+          <span className="readout text-base leading-tight" style={c.ell > 0.5 ? { color: ellColor(c.ell) } : undefined}>{c.value_text}</span>
           <span className="text-[11px] text-fg-2">{ellWords(c.ell)} <span className="readout text-fg-3">ℓ {number(c.ell, 2)}</span></span>
         </p>
         {c.sets ? <SetsMark points={Number.isFinite(cost) ? cost : domain.points} /> : null}
@@ -169,11 +169,11 @@ function BandStrip({ c }: { c: CriterionAssessment }) {
   const [lo, hi] = stripRange(c);
   const list = zones(c.bands);
   // Anchor labels, each at least 9% from the last one kept.
-  const ticks = [...new Set([...c.bands.below, ...c.bands.above].filter((a): a is number => a !== null))].sort((a, b) => a - b)
-    .reduce<number[]>((kept, v) => (kept.length && pct(lo, hi, v) - pct(lo, hi, kept.at(-1)!) < 9 ? kept : [...kept, v]), []);
+  const ticks = anchorTicks(c)
+    .reduce<{ at: number; text: string }[]>((kept, t) => (kept.length && pct(lo, hi, t.at) - pct(lo, hi, kept.at(-1)!.at) < 9 ? kept : [...kept, t]), []);
 
   const zone = zoneOf(list, c.value);
-  const label = `${valueText(c, c.value)}: ${ZONES[zone]}. Anchors ${ticks.map((t) => valueText(c, t)).join(", ")}`;
+  const label = `${c.value_text}: ${ZONES[zone]}. Anchors ${ticks.map((t) => t.text).join(", ")}`;
   return (
     <div role="img" aria-label={label}>
       <div className="relative mt-1.5 h-2.5 overflow-hidden rounded-sm bg-muted">
@@ -186,7 +186,7 @@ function BandStrip({ c }: { c: CriterionAssessment }) {
         <span className="absolute top-0 h-4 w-[3px] -translate-x-1/2 rounded-full ring-2 ring-surface" style={{ left: `${pct(lo, hi, c.value)}%`, background: c.ell > 0.5 ? ellColor(c.ell) : "var(--foreground)" }} />
       </div>
       <div className="readout relative h-3 text-[9.5px] text-fg-3" aria-hidden="true">
-        {ticks.map((t) => <span key={t} className="absolute -translate-x-1/2 whitespace-nowrap" style={{ left: `${pct(lo, hi, t)}%` }}>{valueText(c, t)}</span>)}
+        {ticks.map((t) => <span key={t.at} className="absolute -translate-x-1/2 whitespace-nowrap" style={{ left: `${pct(lo, hi, t.at)}%` }}>{t.text}</span>)}
       </div>
     </div>
   );

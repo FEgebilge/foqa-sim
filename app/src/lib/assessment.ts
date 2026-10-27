@@ -1,7 +1,7 @@
 // The landing-2 assessment (docs/scoring.md) for display: the domain bars' geometry, the zones of a criterion's band strip
 // and the words for values, levels and deductions. Pure functions, so the panel, the landing card's gauges and the EFB
 // mirror read one set of bands and cannot disagree with the score.
-import type { Anchors, CriterionAssessment, Debrief, DomainAssessment, LandingAssessment, ScoringClass } from "../types";
+import type { Anchors, CriterionAssessment, Debrief, DomainAssessment, LandingAssessment } from "../types";
 import { number } from "./format";
 
 /** The six zones of the scale: before the ideal anchor, then past each anchor in turn. */
@@ -80,26 +80,11 @@ export function stripRange(c: CriterionAssessment): [number, number] {
   return [lo - pad, hi + pad];
 }
 
-const UNIT: Record<string, string> = { deg: "°", kt: " kt", fpm: " fpm", ft: " ft", g: " g", s: " s", dot: " dot" };
-/** Criteria whose value is an offset from a target (speed, crossing height, touchdown point): shown signed. */
-const SIGNED = new Set(["A1", "B1", "B2", "C1"]);
-
-/** A value in its unit, as the panel shows it: signed for an offset, two decimals in g, levels as "L2". */
-export function valueText(c: Pick<CriterionAssessment, "id" | "unit">, x: number) {
-  if (c.unit === null) return x ? `L${number(x)}` : "none";
-  const digits = c.unit === "g" ? 2 : c.unit === "dot" || (Math.abs(x) < 10 && Math.round(x) !== x) ? 1 : 0;
-
-  const sign = SIGNED.has(c.id) && x > 0 ? "+" : "";
-  return `${sign}${number(x, digits)}${UNIT[c.unit] ?? ` ${c.unit}`}`;
-}
-
-/** The split height of the approach window by class (scoring/landing-2.yaml `windows`). */
-const SPLIT_FT: Record<ScoringClass, number> = { light: 300, turboprop: 500, jet: 500 };
-/** "at or above 500 ft" for a criterion graded on one half of the approach window. */
-export function heightText(c: CriterionAssessment, cls: ScoringClass | null) {
-  if (c.height === "all") return "";
-  const split = SPLIT_FT[cls ?? "jet"];
-  return c.height === "above" ? `at or above ${split} ft` : `below ${split} ft`;
+/** The finite anchors of a criterion with their texts from the debrief (`bands_text`), ascending and each value once. */
+export function anchorTicks(c: CriterionAssessment) {
+  const pairs = (["below", "above"] as const).flatMap((side) => c.bands[side].map((at, k) => ({ at, text: c.bands_text[side][k] })));
+  const byValue = new Map(pairs.filter((p): p is { at: number; text: string } => p.at !== null && !!p.text).map((p) => [p.at, p.text]));
+  return [...byValue].map(([at, text]) => ({ at, text })).sort((a, b) => a.at - b.at);
 }
 
 /** What the value of a criterion is measured against, where its title does not say. */
@@ -124,11 +109,3 @@ export function criterion(landing: LandingAssessment | undefined, id: string) {
 /** The domain that cost the most, for the opening view and the EFB's one line. */
 export const topDomain = (landing: LandingAssessment) => [...landing.domains].sort((a, b) => b.points - a.points)[0];
 
-/** The item that set a domain's deduction, in words: "Descent rate 1,562 fpm at or above 300 ft" or the event's title. */
-export function setByText(domain: DomainAssessment, landing: LandingAssessment, debrief: Debrief) {
-  const c = domain.criteria.find((x) => x.sets);
-  if (c) return [c.title, valueText(c, c.value), heightText(c, landing.class)].filter(Boolean).join(" ");
-  const f = domain.findings.find((x) => x.sets);
-  if (f) return f.event !== null ? debrief.events[f.event]?.title ?? f.rule : f.rule;
-  return null;
-}

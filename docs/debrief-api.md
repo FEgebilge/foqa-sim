@@ -211,6 +211,7 @@ interface LandingAssessment {
   full_stop: boolean;        // false: a touch-and-go, no rollout scored, does not set the flight grade
   caps: CapNote[];
   stable_from_ft: number | null;   // lowest height above which every approach criterion stayed within tolerance
+  split_ft: number | null;   // the approach window's split height for its class (light 300, else 500); null when insufficient
   speeds: { vref_kt: number; vapp_kt: number; source: "profile" | "selected"; approximate: boolean; basis: string } | null;
   domains: DomainAssessment[];     // stability, energy, point, lateral, contact, rollout; empty when insufficient
 }
@@ -225,6 +226,7 @@ interface DomainAssessment {
   criteria: CriterionAssessment[];
   findings: FindingAssessment[];   // its events inside the landing's window
   sets_by: string | null;    // the item that set the loss: "A2 above" or a rule id
+  set_by_text: string | null;   // that item as the app and the EFB show it: "Descent rate 1,562 fpm at or above 300 ft", or its event's title
 }
 
 interface CriterionAssessment {
@@ -232,6 +234,8 @@ interface CriterionAssessment {
   title: string;
   height: "all" | "above" | "below";   // the half of the approach window (split 500 ft, light 300 ft)
   value: number;             // its worst value, in `unit`; offsets (A1, B1, B2, C1) signed
+  value_text: string;        // `value` as shown: "+12 kt" (offsets signed), "1.48 g", "0.8 dot", "1,562 fpm", "L2"
+  height_text: string | null;   // "at or above 500 ft" / "below 500 ft"; null for "all"
   unit: string | null;       // null: a level 0-3 (A6, E3)
   ell: number;               // continuous level 0-3: 0 ideal, 0.5 tolerance edge, 1-3 the FDM levels
   level: number;             // floor(ell)
@@ -239,6 +243,7 @@ interface CriterionAssessment {
   // [ideal, tolerance, L1, L2, L3] resolved for this landing; `above` grades
   // larger values, `below` smaller; null where the anchor does not exist
   bands: { above: (number | null)[]; below: (number | null)[] };
+  bands_text: { above: (string | null)[]; below: (string | null)[] };   // each anchor as shown, like `value_text`
   standard: string;          // the published source, with "est" for FOQA-Sim choices
   sets: boolean;             // it set its domain's loss
 }

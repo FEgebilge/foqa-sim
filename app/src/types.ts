@@ -72,12 +72,18 @@ export interface CriterionAssessment {
   height: "all" | "above" | "below";
   /** The worst value in `unit` (none: a level). */
   value: number;
+  /** `value` as shown: "+12 kt", "1.48 g", "L2". */
+  value_text: string;
+  /** "at or above 500 ft" for a criterion graded on one half of the approach window; null for `all`. */
+  height_text: string | null;
   unit: string | null;
   /** Continuous level 0-3. */
   ell: number;
   level: number;
   loss: number;
   bands: { above: Anchors; below: Anchors };
+  /** Each anchor as shown, like `value_text`. */
+  bands_text: { above: (string | null)[]; below: (string | null)[] };
   standard: string;
   /** It set its domain's deduction. */
   sets: boolean;
@@ -105,6 +111,8 @@ export interface DomainAssessment {
   criteria: CriterionAssessment[];
   findings: FindingAssessment[];
   sets_by: string | null;
+  /** The item that set the deduction, in words: "Descent rate 1,562 fpm at or above 300 ft" or the event's title. */
+  set_by_text: string | null;
 }
 
 export interface LandingAssessment {
@@ -121,6 +129,8 @@ export interface LandingAssessment {
   full_stop: boolean;
   caps: CapNote[];
   stable_from_ft: number | null;
+  /** The approach window's split height for its class; null when insufficient. */
+  split_ft: number | null;
   speeds: { vref_kt: number; vapp_kt: number; source: "profile" | "selected"; approximate: boolean; basis: string } | null;
   domains: DomainAssessment[];
 }

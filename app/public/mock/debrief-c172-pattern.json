@@ -67,6 +67,7 @@
           "full_stop": true,
           "caps": [],
           "stable_from_ft": null,
+          "split_ft": null,
           "speeds": null,
           "domains": []
         }

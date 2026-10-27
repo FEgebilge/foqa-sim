@@ -423,8 +423,9 @@ impl From<Event> for CompactEvent {
 type Bar = (f64, Option<f64>, u8, f64);
 
 /// The grading landing's domains as mini-bars and its largest deduction in
-/// words: "Approach stability −17.3: Descent rate 1562 fpm".
-fn bars(d: &AssessmentDetail, events: &[Event]) -> (Vec<Bar>, Option<String>) {
+/// words, as the app words it: "Approach stability −17.3: Descent rate
+/// 1,562 fpm at or above 500 ft".
+fn bars(d: &AssessmentDetail) -> (Vec<Bar>, Option<String>) {
     let Some(landing) = d.graded_by.and_then(|i| d.landings.get(i)) else {
         return (Vec::new(), None);
     };
@@ -446,17 +447,7 @@ fn bars(d: &AssessmentDetail, events: &[Event]) -> (Vec<Bar>, Option<String>) {
         .filter(|x| x.points > 0.0)
         .max_by(|a, b| a.points.total_cmp(&b.points))
         .map(|x| {
-            let criterion = x.criteria.iter().find(|c| c.sets).map(|c| {
-                let digits = if c.unit == Some("g") { 2 } else { 0 };
-                let unit = c.unit.map_or(String::new(), |u| format!(" {u}"));
-                format!("{} {:.*}{unit}", c.title, digits, c.value)
-            });
-            let finding = || {
-                let f = x.findings.iter().find(|f| f.sets)?;
-                let e = f.event.and_then(|i| events.get(i));
-                Some(e.map_or(f.rule.clone(), |e| e.title.clone()))
-            };
-            let why = criterion.or_else(finding).unwrap_or_default();
+            let why = x.set_by_text.as_deref().unwrap_or_default();
             format!("{} \u{2212}{:.1}: {why}", x.title, x.points)
         });
     (bars, top)
@@ -488,7 +479,7 @@ impl From<Debrief> for CompactDebrief {
         let params = [("alt_ft", &s.alt_ft[..], 10.0), ("ias_kt", &s.ias_kt, 1.0)];
         let profile = Grid::new(s, f64::MIN, f64::MAX, step, &params);
         let detail = &d.flight.assessment_detail;
-        let (bars, top) = bars(detail, &d.events);
+        let (bars, top) = bars(detail);
         Self {
             approaches,
             profile,
@@ -683,7 +674,7 @@ mod tests {
         let domains = &mut detail.landings[graded].domains;
         (domains[0].loss, domains[0].points) = (Some(0.5), 14.7);
         domains[5].loss = None;
-        let (mini, _) = bars(&detail, &debrief.events);
+        let (mini, _) = bars(&detail);
         assert_eq!((mini[0].1, mini[0].3), (Some(14.7), 0.5));
         assert_eq!((mini[5].1, mini[5].3), (None, 0.0));
         let doc = serde_json::to_string(&CompactDebrief::from(debrief)).unwrap();
@@ -694,9 +685,10 @@ mod tests {
         assert_eq!(bars.len(), 6);
         assert_eq!(bars[0], json!([25.0, 0.0, 0, 0.0]));
         let top = f["top"].as_str().unwrap();
-        assert!(
-            top.starts_with("Touchdown contact \u{2212}7.0: Peak normal load"),
-            "{top}"
+        // In the app's words: two decimals in g.
+        assert_eq!(
+            top,
+            "Touchdown contact \u{2212}7.0: Peak normal load at touchdown 1.60 g"
         );
         assert!(doc.len() < 3 * JSON_MAX, "{}", doc.len());
     }

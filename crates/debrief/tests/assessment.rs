@@ -76,7 +76,24 @@ fn the_assessment_matches_its_snapshot() {
                 + dom.findings.iter().filter(|f| f.sets).count();
             assert_eq!(set, 1, "{dom:?}");
         }
+        // The words the app and the EFB show come with the numbers.
+        let why = dom.set_by_text.as_deref();
+        if let Some(c) = dom.criteria.iter().find(|c| c.sets) {
+            assert!(
+                why.unwrap()
+                    .starts_with(&format!("{} {}", c.title, c.value_text))
+            );
+        }
+        for c in &dom.criteria {
+            let half = c.height_text.as_deref();
+            match c.height {
+                assess::Height::All => assert_eq!(half, None),
+                assess::Height::Above => assert_eq!(half, Some("at or above 500 ft")),
+                assess::Height::Below => assert_eq!(half, Some("below 500 ft")),
+            }
+        }
     }
+    assert_eq!(landing.split_ft, Some(500.0), "a jet's split");
     let lost: f64 = landing.domains.iter().map(|d| d.points).sum();
     assert!((100.0 - lost - landing.raw.unwrap()).abs() < 0.3, "{lost}");
 

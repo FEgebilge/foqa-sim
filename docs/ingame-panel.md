@@ -371,7 +371,7 @@ interface CompactDebrief {
     // absent without a scored landing. The bar draws the share: the points
     // are rescaled when a domain is n/a.
     bars?: [number, number | null, number, number][];
-    top?: string;            // its largest deduction in one line, e.g. "Approach stability −17.3: Descent rate 1562 fpm"
+    top?: string;            // its largest deduction in one line, the domain's `set_by_text`, e.g. "Approach stability −17.3: Descent rate 1,562 fpm at or above 300 ft"
     points: number; findings: number;   // the points method's, for one release
 
     parts: { title: string; level: Level; points: number; count: number }[];   // only rules with points, most first

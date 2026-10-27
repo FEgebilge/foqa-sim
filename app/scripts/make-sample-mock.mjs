@@ -315,6 +315,15 @@ const sideEll = (anchors, x, sign) => {
 }
 const NONE = [null, null, null, null, null]
 const round1 = (x) => Math.round(x * 10) / 10
+/** The approach window's split height by class (`windows`). */
+const SPLIT_FT = Object.fromEntries([...SCORING.matchAll(/^\s+(light|turboprop|jet): \{[^}]*split: (\d+) ft/gm)].map(([, cls, ft]) => [cls, Number(ft)]))
+/** A criterion's value as the debrief words it (crates/debrief/src/assessment.rs `value_text`). */
+const valueText = (id, unit, x) => {
+  if (!unit) return x ? `L${x.toLocaleString("en-US")}` : "none"
+  const digits = unit === "g" ? 2 : unit === "dot" || (Math.abs(x) < 10 && Math.round(x) !== x) ? 1 : 0
+  const sign = ["A1", "B1", "B2", "C1"].includes(id) && x > 0 ? "+" : ""
+  return `${sign}${x.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits })}${unit === "deg" ? "°" : ` ${unit}`}`
+}
 
 function landing2({ touchdowns, events, samples, phases, lastT, cls, legacy }) {
   const VREF = 60, VAPP = 65, TRACK_FT = 8.2, M = 1 / FT
@@ -322,19 +331,23 @@ function landing2({ touchdowns, events, samples, phases, lastT, cls, legacy }) {
   const counted = new Set()
   const landings = firsts.map((td, n) => {
     const next = firsts[n + 1]
-    if (!td.runway) return { t_s: td.t_s, status: "insufficient", score: null, raw: null, grade: null, confidence: null, class: null, partial: [], missing: ["runway"], full_stop: !next, caps: [], stable_from_ft: null, speeds: null, domains: [] }
+    if (!td.runway) return { t_s: td.t_s, status: "insufficient", score: null, raw: null, grade: null, confidence: null, class: null, partial: [], missing: ["runway"], full_stop: !next, caps: [], stable_from_ft: null, split_ft: null, speeds: null, domains: [] }
     const fix = td.runway, full = !next
     const approach = phases.filter((p) => p.phase === "Approach" && p.start_s <= td.t_s).at(-1)
     const from = approach?.start_s ?? td.t_s - 120, to = next ? Math.min(next.t_s, td.t_s + 30) : lastT
     const win = samples.filter((x) => x.t < td.t_s && x.h / FT <= 500 && x.h / FT >= 20 && x.t > td.t_s - 200)
     const worst = (xs, f) => xs.length ? xs.reduce((a, b) => (Math.abs(f(b)) > Math.abs(f(a)) ? b : a)) : null
     const target = fix.aiming_point_m * M, tdz = fix.tdz_m * M, lda = fix.lda_m * M
-    const crit = []
+    const crit = [], split = SPLIT_FT[cls === "transport" ? "jet" : "light"]
     const add = (id, height, value, above, below = NONE) => {
       if (value === null || value === undefined) return
       const ell = Math.max(sideEll(above, value, 1), sideEll(below, value, -1))
-      crit.push({ id, title: CRITERIA[id].title, height, value: round1(value * 100) / 100, unit: { A1: "kt", A2: "fpm", A3: "deg", B1: "ft", B2: "kt", C1: "ft", D1: "ft", E1: "g", E2: "fpm", E5: "deg", F2: "g" }[id],
-        ell, level: Math.min(3, Math.floor(ell)), loss: curveAt(LOSS, ell), bands: { above, below }, standard: CRITERIA[id].source, sets: false })
+      const unit = { A1: "kt", A2: "fpm", A3: "deg", B1: "ft", B2: "kt", C1: "ft", D1: "ft", E1: "g", E2: "fpm", E5: "deg", F2: "g" }[id]
+      const text = (x) => (x === null ? null : valueText(id, unit, x))
+      value = round1(value * 100) / 100
+      crit.push({ id, title: CRITERIA[id].title, height, value, value_text: text(value),
+        height_text: height === "all" ? null : height === "above" ? `at or above ${split} ft` : `below ${split} ft`, unit,
+        ell, level: Math.min(3, Math.floor(ell)), loss: curveAt(LOSS, ell), bands: { above, below }, bands_text: { above: above.map(text), below: below.map(text) }, standard: CRITERIA[id].source, sets: false })
     }
     for (const [height, xs] of [["above", win.filter((x) => x.h / FT >= 300)], ["below", win.filter((x) => x.h / FT < 300)]]) {
       const s = worst(xs, (x) => x.ias - VAPP); if (s) add("A1", height, s.ias - VAPP, [5, 10, 15, 20, 30], [-2.5, -5, -7.5, -10, -15])
@@ -362,7 +375,9 @@ function landing2({ touchdowns, events, samples, phases, lastT, cls, legacy }) {
       if (top[1] && top[0] > 0) top[1].sets = true
       const sets_by = top[1] && top[0] > 0 ? (top[1].id ? (top[1].height === "all" ? top[1].id : `${top[1].id} ${top[1].height}`) : top[1].rule) : null
       const ell = top[1]?.ell ?? 0
-      return { id, title, weight, loss: items.length ? top[0] : null, points: 0, level: Math.min(3, Math.floor(ell)), criteria, findings: fs, sets_by }
+      const set = sets_by && top[1]
+      const set_by_text = !set ? null : set.id ? [set.title, set.value_text, set.height_text].filter(Boolean).join(" ") : events[set.event]?.title ?? set.rule
+      return { id, title, weight, loss: items.length ? top[0] : null, points: 0, level: Math.min(3, Math.floor(ell)), criteria, findings: fs, sets_by, set_by_text }
     })
     const available = domains.filter((d) => d.loss !== null).reduce((a, d) => a + d.weight, 0)
     for (const d of domains) d.points = d.loss === null ? 0 : round1((d.weight * d.loss * 100) / available)
@@ -372,7 +387,7 @@ function landing2({ touchdowns, events, samples, phases, lastT, cls, legacy }) {
     if (material.length) caps.push({ kind: "material", score: 84.9, reason: `level 2 or more: ${material.join(", ")}`, source: "A material FDM event (level 2 or more); docs/scoring.md 4" })
     if (fix.short_landing) caps.push({ kind: "undershoot", score: 39, reason: "touchdown before the threshold", source: "short-landing: touchdown before the threshold" })
     const score = round1(Math.min(raw, ...caps.map((c) => c.score)))
-    return { t_s: td.t_s, status: "scored", score, raw, grade: score >= 85 ? "good" : score >= 60 ? "fair" : "poor", confidence: "full", class: cls === "transport" ? "jet" : "light", partial: [], missing: [], full_stop: full, caps, stable_from_ft: null,
+    return { t_s: td.t_s, status: "scored", score, raw, grade: score >= 85 ? "good" : score >= 60 ? "fair" : "poor", confidence: "full", class: cls === "transport" ? "jet" : "light", partial: [], missing: [], full_stop: full, caps, stable_from_ft: null, split_ft: split,
       speeds: { vref_kt: VREF, vapp_kt: VAPP, source: "profile", approximate: false, basis: "Cessna 172S POH, Section 4 (sample)" }, domains }
   })
   const other_findings = events.map((_, i) => i).filter((i) => !counted.has(i))

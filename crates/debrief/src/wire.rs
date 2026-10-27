@@ -187,6 +187,9 @@ pub struct LandingAssessment {
     pub full_stop: bool,
     pub caps: Vec<CapNote>,
     pub stable_from_ft: Option<f64>,
+    /// The height splitting the approach window into its two halves, by
+    /// class (`windows` of scoring/landing-2.yaml); `None` when insufficient.
+    pub split_ft: Option<f64>,
     pub speeds: Option<Speeds>,
     pub domains: Vec<DomainAssessment>,
 }
@@ -205,6 +208,9 @@ pub struct DomainAssessment {
     pub findings: Vec<FindingAssessment>,
     /// The criterion (`A1 below`) or rule that set the loss.
     pub sets_by: Option<String>,
+    /// That item in words, as the app and the EFB show it: "Descent rate
+    /// 1,562 fpm at or above 300 ft", or its event's title.
+    pub set_by_text: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -215,11 +221,18 @@ pub struct CriterionAssessment {
     pub height: Height,
     /// The worst value, in `unit` (none: a level).
     pub value: f64,
+    /// `value` in its unit as shown: "+12 kt", "1.48 g", "0.8 dot", "L2".
+    pub value_text: String,
+    /// The half it was graded in, in words ("at or above 500 ft"); `None`
+    /// for `all`.
+    pub height_text: Option<String>,
     pub unit: Option<&'static str>,
     pub ell: f64,
     pub level: u8,
     pub loss: f64,
     pub bands: SideBands,
+    /// Each anchor of `bands` as shown, like `value_text`.
+    pub bands_text: SideBands<String>,
     pub standard: String,
     /// It set its domain's loss.
     pub sets: bool,
@@ -228,9 +241,9 @@ pub struct CriterionAssessment {
 /// The anchors [ideal, tolerance, L1, L2, L3] as resolved for the landing:
 /// `above` grades larger values, `below` smaller; `null` where absent.
 #[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct SideBands {
-    pub above: [Option<f64>; 5],
-    pub below: [Option<f64>; 5],
+pub struct SideBands<T = f64> {
+    pub above: [Option<T>; 5],
+    pub below: [Option<T>; 5],
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]

@@ -28,11 +28,14 @@ impl Analysis<'_> {
                 .position(|w| w.rule == e.rule && w.start_s == t)
         };
         let method = self.method;
-        let (landings, scores): (Vec<LandingAssessment>, Vec<Option<LandingScore>>) =
+        let (mut landings, scores): (Vec<LandingAssessment>, Vec<Option<LandingScore>>) =
             (0..self.touchdowns.len())
                 .filter(|&k| !self.touchdowns[k].bounce)
                 .map(|k| self.assess_landing(method, k, &wire))
                 .unzip();
+        for d in landings.iter_mut().flat_map(|l| &mut l.domains) {
+            d.set_by_text = set_by_text(d, events);
+        }
         let counted: Vec<usize> = landings
             .iter()
             .flat_map(|l| &l.domains)
@@ -122,8 +125,10 @@ impl Analysis<'_> {
             Err(missing) => (LandingAssessment::insufficient(t_s, missing), None),
             Ok((m, speeds, full_stop)) => {
                 let score = method.score(&m);
-                let domains = domains(method, &m, &score, wire);
-                let wire = LandingAssessment::scored(t_s, &score, speeds, full_stop, domains);
+                let split_ft = method.windows[&m.class].split_ft;
+                let domains = domains(method, &m, &score, split_ft, wire);
+                let mut wire = LandingAssessment::scored(t_s, &score, speeds, full_stop, domains);
+                wire.split_ft = Some(split_ft);
                 (wire, Some(score))
             }
         }
@@ -136,6 +141,7 @@ fn domains(
     method: &Method,
     m: &Measures,
     score: &LandingScore,
+    split_ft: f64,
     wire: &impl Fn(usize) -> Option<usize>,
 ) -> Vec<DomainAssessment> {
     let available: f64 = score
@@ -160,10 +166,22 @@ fn domains(
                 .map(|c| {
                     let def = method.criterion(&c.id).expect("a scored criterion");
                     let band = def.band(m.class, c.height).expect("a graded band");
-                    let name = match c.height {
-                        Height::All => c.id.clone(),
-                        Height::Above => format!("{} above", c.id),
-                        Height::Below => format!("{} below", c.id),
+                    let (name, height_text) = match c.height {
+                        Height::All => (c.id.clone(), None),
+                        Height::Above => (
+                            format!("{} above", c.id),
+                            Some(format!("at or above {split_ft} ft")),
+                        ),
+                        Height::Below => (
+                            format!("{} below", c.id),
+                            Some(format!("below {split_ft} ft")),
+                        ),
+                    };
+                    let unit = def.unit.map(|u| u.symbol());
+                    let text = |x: f64| value_text(&c.id, unit, x);
+                    let bands = SideBands {
+                        above: assess::resolve(&band.above, &m.context, 1.0),
+                        below: assess::resolve(&band.below, &m.context, -1.0),
                     };
                     CriterionAssessment {
                         sets: sets(name, c.loss),
@@ -171,14 +189,17 @@ fn domains(
                         title: def.title.clone(),
                         height: c.height,
                         value: c.value,
-                        unit: def.unit.map(|u| u.symbol()),
+                        value_text: text(c.value),
+                        height_text,
+                        unit,
                         ell: c.ell,
                         level: c.level,
                         loss: c.loss,
-                        bands: SideBands {
-                            above: assess::resolve(&band.above, &m.context, 1.0),
-                            below: assess::resolve(&band.below, &m.context, -1.0),
+                        bands_text: SideBands {
+                            above: bands.above.map(|a| a.map(text)),
+                            below: bands.below.map(|a| a.map(text)),
                         },
+                        bands,
                         standard: def.source.clone(),
                     }
                 })
@@ -206,11 +227,81 @@ fn domains(
                 points: (lost * 10.0).round() / 10.0,
                 level: d.level,
                 sets_by: d.set_by.clone(),
+                set_by_text: None,
                 criteria,
                 findings,
             }
         })
         .collect()
+}
+
+/// Criteria whose value is an offset from a target (speed, crossing
+/// height, touchdown point): shown signed.
+const SIGNED: [&str; 4] = ["A1", "B1", "B2", "C1"];
+
+/// A criterion's value `x` in its unit as the app and the EFB show it:
+/// signed for an offset, two decimals in g, one in dots or under 10 when
+/// not whole, levels as "L2".
+pub fn value_text(id: &str, unit: Option<&str>, x: f64) -> String {
+    let Some(unit) = unit else {
+        return if x != 0.0 && !x.is_nan() {
+            format!("L{}", number(x, 0))
+        } else {
+            "none".into()
+        };
+    };
+    let digits = match unit {
+        "g" => 2,
+        "dot" => 1,
+        _ if x.abs() < 10.0 && x.fract() != 0.0 => 1,
+        _ => 0,
+    };
+    let sign = if SIGNED.contains(&id) && x > 0.0 {
+        "+"
+    } else {
+        ""
+    };
+    let unit = match unit {
+        "deg" => "\u{b0}".to_owned(),
+        u => format!(" {u}"),
+    };
+    format!("{sign}{}{unit}", number(x, digits))
+}
+
+/// `x` with `digits` decimals, halves away from zero, thousands grouped
+/// with commas (en-US).
+fn number(x: f64, digits: usize) -> String {
+    let scale = 10f64.powi(digits as i32);
+    let r = (x * scale).round() / scale;
+    let text = format!("{:.*}", digits, r.abs());
+    let (int, frac) = text.split_at(text.find('.').unwrap_or(text.len()));
+    let mut grouped = String::new();
+    for (i, c) in int.chars().enumerate() {
+        if i > 0 && (int.len() - i) % 3 == 0 {
+            grouped.push(',');
+        }
+        grouped.push(c);
+    }
+    let sign = if r.is_sign_negative() && !r.is_nan() {
+        "-"
+    } else {
+        ""
+    };
+    format!("{sign}{grouped}{frac}")
+}
+
+/// The item that set a domain's deduction in words: the criterion with its
+/// value and half ("Descent rate 1,562 fpm at or above 300 ft"), else the
+/// finding's event title (its rule without one).
+fn set_by_text(d: &DomainAssessment, events: &[Event]) -> Option<String> {
+    if let Some(c) = d.criteria.iter().find(|c| c.sets) {
+        let parts = [Some(&c.title), Some(&c.value_text), c.height_text.as_ref()];
+        let parts: Vec<&str> = parts.into_iter().flatten().map(String::as_str).collect();
+        return Some(parts.join(" "));
+    }
+    let f = d.findings.iter().find(|f| f.sets)?;
+    let event = f.event.and_then(|i| events.get(i));
+    Some(event.map_or_else(|| f.rule.clone(), |e| e.title.clone()))
 }
 
 pub fn domain_title(d: Domain) -> &'static str {
@@ -259,6 +350,7 @@ impl LandingAssessment {
             full_stop: true,
             caps: Vec::new(),
             stable_from_ft: None,
+            split_ft: None,
             speeds: None,
             domains: Vec::new(),
         }
@@ -284,6 +376,7 @@ impl LandingAssessment {
             full_stop,
             caps: score.caps.iter().map(|c| CapNote::of(c, None)).collect(),
             stable_from_ft: score.stable_from_ft,
+            split_ft: None,
             speeds,
             domains,
         }
@@ -306,5 +399,35 @@ impl From<assess::Confidence> for Confidence {
             assess::Confidence::Full => Self::Full,
             assess::Confidence::Partial => Self::Partial,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// As the app showed them: offsets signed, dots to 0.1, g to 0.01,
+    /// thousands grouped, small fractions to 0.1, levels as "L2".
+    #[test]
+    fn values_read_as_the_app_shows_them() {
+        let cases = [
+            ("A1", Some("kt"), 12.4, "+12 kt"),
+            ("A1", Some("kt"), -3.25, "-3.3 kt"),
+            ("B1", Some("ft"), 0.0, "0 ft"),
+            ("C1", Some("ft"), 1234.5, "+1,235 ft"),
+            ("A2", Some("fpm"), -1562.0, "-1,562 fpm"),
+            ("A3", Some("dot"), 1.0, "1.0 dot"),
+            ("A3", Some("dot"), 0.84, "0.8 dot"),
+            ("E1", Some("g"), 1.6, "1.60 g"),
+            ("D1", Some("deg"), 4.5, "4.5\u{b0}"),
+            ("A2", Some("fpm"), 12.5, "13 fpm"),
+            ("A6", None, 2.0, "L2"),
+            ("A6", None, 0.0, "none"),
+        ];
+        for (id, unit, x, want) in cases {
+            assert_eq!(value_text(id, unit, x), want, "{id} {x}");
+        }
+        assert_eq!(number(1_234_567.891, 2), "1,234,567.89");
+        assert_eq!(number(-0.4, 0), "-0");
     }
 }
