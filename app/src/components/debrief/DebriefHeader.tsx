@@ -1,11 +1,13 @@
 import type { ReactNode } from "react";
-import { ArrowLeft, ArrowRight, FolderOpen, RefreshCw } from "lucide-react";
+import { ArrowLeft, ArrowRight, FolderOpen, RefreshCw, ShieldAlert } from "lucide-react";
+import { Badge } from "@ui/components/badge/badge";
 import { Button } from "@ui/components/button/button";
-import { aircraftName, assessmentText, duration, flightDate, flightTimeUtc } from "../../lib/format";
+import { Tooltip } from "@ui/components/tooltip/tooltip";
+import { aircraftName, assessmentText, duration, flightDate, flightTimeUtc, number } from "../../lib/format";
 import { openFlights } from "../../lib/route";
-import type { Debrief } from "../../types";
+import type { CapNote, Debrief } from "../../types";
 import { AssessmentBreakdown } from "./AssessmentBreakdown";
-import { EventCounts, GradeBadge } from "../level";
+import { EventCounts, GradeBadge, GradeTag } from "../level";
 
 interface Props { flight: Debrief["flight"]; refreshing: boolean; onRefresh: () => void; onOpenFolder: () => void }
 
@@ -38,15 +40,10 @@ export function DebriefHeader({ flight, refreshing, onRefresh, onOpenFolder }: P
           </h1>
           {flight.aircraft?.icao ? <p className="mt-0.5 text-sm text-fg-2">{flight.aircraft.title}</p> : null}
         </div>
-        <div className="flex flex-col items-start gap-1 sm:items-end">
-          <div className="flex items-center gap-3">
-            <GradeBadge assessment={flight.assessment} size="md" />
-            <EventCounts counts={flight.event_counts} />
-          </div>
-          <p className="text-xs text-fg-3">{assessmentText(flight.assessment)}; each rule counts once, at its worst level.</p>
-        </div>
+        <Score flight={flight} />
       </div>
-      <AssessmentBreakdown detail={flight.assessment_detail} points={flight.assessment.points} />
+      <CapBanner flight={flight} />
+      {flight.assessment_detail.landings?.length ? null : <AssessmentBreakdown detail={flight.assessment_detail} points={flight.assessment.points} />}
       <dl className="flex flex-wrap gap-x-8 gap-y-2 border-y border-line-subtle py-2.5">
         {facts.map(([label, value]) => (
           <div key={label} className="flex items-baseline gap-2">
@@ -58,3 +55,70 @@ export function DebriefHeader({ flight, refreshing, onRefresh, onOpenFolder }: P
     </header>
   );
 }
+
+/** The flight's score out of 100 with its grade and data confidence; the points method's grade without a scored landing. */
+function Score({ flight }: { flight: Debrief["flight"] }) {
+  const a = flight.assessment_detail, score = flight.assessment.score;
+  if (score === undefined) {
+    return (
+      <div className="flex flex-col items-start gap-1 sm:items-end">
+        <div className="flex items-center gap-3"><GradeBadge assessment={flight.assessment} size="md" /><EventCounts counts={flight.event_counts} /></div>
+        <p className="text-xs text-fg-3">{assessmentText(flight.assessment)}</p>
+      </div>
+    );
+  }
+  const partial = (a.landings ?? []).flatMap((l) => l.partial);
+  const graded = a.graded_by ?? 0, many = (a.landings?.length ?? 0) > 1;
+  return (
+    <div className="flex flex-col items-start gap-1 sm:items-end">
+      <div className="flex items-center gap-3">
+        <p className="flex items-baseline gap-1" aria-label={`Score ${number(score, 1)} of 100`}>
+          <span className="readout text-4xl font-semibold leading-none tracking-tight">{number(score, 1)}</span>
+          <span className="readout text-sm text-fg-3">/100</span>
+        </p>
+        <div className="flex flex-col items-start gap-1">
+          <GradeTag grade={flight.assessment.grade} size="md" />
+          {flight.assessment.confidence === "partial" ? (
+            <Tooltip content={<span className="block max-w-[320px] text-xs">Expected data was missing, so those criteria are n/a (never full credit): {partial.join("; ")}. A challenge would not rank it.</span>}>
+              <span><Badge size="sm" tone="warning" animated={false}>Partial data</Badge></span>
+            </Tooltip>
+          ) : <Badge size="sm" tone="neutral" animated={false}>Full data</Badge>}
+        </div>
+        <EventCounts counts={flight.event_counts} />
+      </div>
+      <p className="text-xs text-fg-3">landing-2{many ? ` · from landing ${graded + 1}, the last full stop` : ""} · points method {flight.assessment.points} pt{flight.assessment.points === 1 ? "" : "s"}</p>
+    </div>
+  );
+}
+
+const CAP_TITLE: Record<CapNote["kind"], string> = {
+  material: "A level 2 finding: cannot be Good",
+  unstable: "Unstable approach continued to a landing",
+  inspection: "Inspection-level touchdown",
+  undershoot: "Touchdown before the threshold",
+  excursion: "Runway excursion",
+  flight: "The flight grade is below the landing's score",
+};
+
+/** The caps that hold the flight's score down, the lowest first, each with what caused it (docs/scoring.md §4, Decision 3). */
+function CapBanner({ flight }: { flight: Debrief["flight"] }) {
+  const caps = [...(flight.assessment_detail.caps ?? [])].sort((a, b) => a.score - b.score);
+  if (!caps.length) return null;
+  const worst = caps[0]!;
+  const color = worst.score < 60 ? "var(--danger)" : "var(--warning)";
+  return (
+    <div role="note" className="flex gap-3 rounded-[var(--radius-panel)] border px-4 py-2.5" style={{ borderColor: `color-mix(in oklab, ${color} 40%, var(--border))`, background: `color-mix(in oklab, ${color} 8%, var(--surface))` }}>
+      <ShieldAlert size={16} className="mt-0.5 shrink-0" style={{ color }} aria-hidden="true" />
+      <ul className="flex min-w-0 flex-col gap-1 text-sm">
+        {caps.map((c, i) => (
+          <li key={i}>
+            <span className="font-medium">{CAP_TITLE[c.kind]}</span>
+            <span className="readout ml-2 text-xs text-fg-2">capped at {number(c.score, 1)}</span>
+            <span className="block text-xs text-fg-2">{c.landing !== undefined && (flight.assessment_detail.landings?.length ?? 0) > 1 ? `Landing ${c.landing + 1}: ` : ""}{c.reason}{c.kind === "unstable" ? ". Go around next time: a go-around is never a deduction." : "."}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+

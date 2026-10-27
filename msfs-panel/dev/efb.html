@@ -153,7 +153,24 @@ function compact(d) {
         return { title: p.title, level: p.level, points: p.points, count: p.count };
     });
     flight.bands = detail.bands;
+    // history.rs bars: the grading landing's domains and its largest deduction.
+    flight.method = detail.method || "points";
+    if (detail.score !== undefined && detail.score !== null) flight.score = detail.score;
+    if (detail.confidence) flight.confidence = detail.confidence;
+    var landing = detail.graded_by !== undefined && detail.graded_by !== null && detail.landings ? detail.landings[detail.graded_by] : null;
+    if (landing) {
+        flight.bars = landing.domains.map(function (x) { return [x.weight, x.loss === null ? null : x.points, x.level]; });
+        var top = landing.domains.filter(function (x) { return x.points > 0; })
+            .sort(function (a, b) { return b.points - a.points; })[0];
+        if (top) {
+            var c = top.criteria.filter(function (k) { return k.sets; })[0], f = top.findings.filter(function (k) { return k.sets; })[0];
+            var why = c ? c.title + " " + c.value.toFixed(c.unit === "g" ? 2 : 0) + (c.unit ? " " + c.unit : "")
+                : f ? (f.event !== null && d.events[f.event] ? d.events[f.event].title : f.rule) : "";
+            flight.top = top.title + " −" + top.points.toFixed(1) + ": " + why;
+        }
+    }
     return {
+
         approaches: d.touchdowns.map(function (td) {
             return grid(s, td.t_s - 180, td.t_s + 10, 2, [["aal_ft", 1], ["vs_fpm", 10], ["ias_kt", 1]]);
         }),

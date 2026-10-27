@@ -11,8 +11,8 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 
 use debrief::{
-    Aircraft, AssessmentPart, Debrief, Event, FlightSummary, Grade, GradeBand, Index, Level,
-    PILOT_REPORT, PhaseSpan, Series, Station, Touchdown,
+    Aircraft, AssessmentDetail, AssessmentPart, Confidence, Debrief, Event, FlightSummary, Grade,
+    GradeBand, Index, Level, PILOT_REPORT, PhaseSpan, Series, Station, Touchdown,
 };
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -332,6 +332,19 @@ struct CompactFlight {
     #[serde(flatten)]
     item: FlightItem,
     profile: String,
+    /// `landing-2`, or `points` without a scored landing.
+    method: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    score: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    confidence: Option<Confidence>,
+    /// The grading landing's six domains in order: `[weight, points lost
+    /// or null when n/a, level]`.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    bars: Vec<Bar>,
+    /// The deduction that cost the most, in one line.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    top: Option<String>,
     points: u32,
     findings: usize,
     /// The rules that count (above 0 points), most first.
@@ -404,6 +417,42 @@ impl From<Event> for CompactEvent {
     }
 }
 
+/// A domain mini-bar: weight, points lost (`None`: n/a), level.
+type Bar = (f64, Option<f64>, u8);
+
+/// The grading landing's domains as mini-bars and its largest deduction in
+/// words: "Approach stability −17.3: Descent rate 1562 fpm".
+fn bars(d: &AssessmentDetail, events: &[Event]) -> (Vec<Bar>, Option<String>) {
+    let Some(landing) = d.graded_by.and_then(|i| d.landings.get(i)) else {
+        return (Vec::new(), None);
+    };
+    let bars = landing
+        .domains
+        .iter()
+        .map(|x| (x.weight, x.loss.map(|_| x.points), x.level))
+        .collect();
+    let top = landing
+        .domains
+        .iter()
+        .filter(|x| x.points > 0.0)
+        .max_by(|a, b| a.points.total_cmp(&b.points))
+        .map(|x| {
+            let criterion = x.criteria.iter().find(|c| c.sets).map(|c| {
+                let digits = if c.unit == Some("g") { 2 } else { 0 };
+                let unit = c.unit.map_or(String::new(), |u| format!(" {u}"));
+                format!("{} {:.*}{unit}", c.title, digits, c.value)
+            });
+            let finding = || {
+                let f = x.findings.iter().find(|f| f.sets)?;
+                let e = f.event.and_then(|i| events.get(i));
+                Some(e.map_or(f.rule.clone(), |e| e.title.clone()))
+            };
+            let why = criterion.or_else(finding).unwrap_or_default();
+            format!("{} \u{2212}{:.1}: {why}", x.title, x.points)
+        });
+    (bars, top)
+}
+
 impl From<Debrief> for CompactDebrief {
     fn from(d: Debrief) -> Self {
         let s = &d.series;
@@ -429,11 +478,19 @@ impl From<Debrief> for CompactDebrief {
         let step = (span / PROFILE_POINTS).ceil().max(1.0);
         let params = [("alt_ft", &s.alt_ft[..], 10.0), ("ias_kt", &s.ias_kt, 1.0)];
         let profile = Grid::new(s, f64::MIN, f64::MAX, step, &params);
+        let detail = &d.flight.assessment_detail;
+        let (bars, top) = bars(detail, &d.events);
         Self {
             approaches,
             profile,
             flight: CompactFlight {
+                method: detail.method.clone(),
+                score: detail.score,
+                confidence: detail.confidence,
+                bars,
+                top,
                 points: d.flight.summary.assessment.points,
+
                 findings: d.flight.summary.assessment.findings,
                 parts: (d.flight.assessment_detail.parts.into_iter())
                     .filter(|p| p.points > 0)
@@ -592,6 +649,36 @@ mod tests {
             p.len()
         );
         // Charts and all, a debrief stays a few messages.
+        assert!(doc.len() < 3 * JSON_MAX, "{}", doc.len());
+    }
+
+    /// A scored landing goes out as its score, six mini-bars and its
+    /// largest deduction in one line, the debrief still a few messages.
+    #[test]
+    fn a_scored_landing_goes_out_as_bars_and_one_line() {
+        use recorder::SimEvent;
+        use testkit::*;
+        let events = [
+            identity("B738"),
+            SimEvent::Airport(runway_behind_touchdown(400.0)),
+        ];
+        let (flight, _) = fly_to(&events, AIRLINER_LB, TD_S + ROLLOUT_S, |t| {
+            landing(t, TD_S, 1.6)
+        });
+        let station = Station::core().unwrap();
+        let debrief = station.analyse("f".into(), flight).unwrap().debrief();
+        let doc = serde_json::to_string(&CompactDebrief::from(debrief)).unwrap();
+        let f = &serde_json::from_str::<Value>(&doc).unwrap()["flight"];
+        assert_eq!(f["method"], "landing-2");
+        assert!(f["score"].as_f64().is_some_and(|s| s > 0.0 && s <= 100.0));
+        let bars = f["bars"].as_array().unwrap();
+        assert_eq!(bars.len(), 6);
+        assert_eq!(bars[0], json!([25.0, 0.0, 0]));
+        let top = f["top"].as_str().unwrap();
+        assert!(
+            top.starts_with("Touchdown contact \u{2212}7.0: Peak normal load"),
+            "{top}"
+        );
         assert!(doc.len() < 3 * JSON_MAX, "{}", doc.len());
     }
 

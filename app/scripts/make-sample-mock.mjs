@@ -275,8 +275,11 @@ function build(id, opts = {}) {
   // As Assessment::parts: by rule name, then most points first (stable); the bands are Grade::BANDS.
   const parts = Object.values(worstOf).sort((a, b) => (a.rule < b.rule ? -1 : a.rule > b.rule ? 1 : 0)).sort((a, b) => b.points - a.points)
   const points = parts.reduce((a, p) => a + p.points, 0)
-  const assessment = { grade: points <= 1 ? "good" : points <= 5 ? "fair" : "poor", points, findings: parts.filter((p) => p.points > 0).length }
-  const assessment_detail = { parts, bands: [{ grade: "good", up_to: 1 }, { grade: "fair", up_to: 5 }, { grade: "poor" }] }
+  const legacy = { grade: points <= 1 ? "good" : points <= 5 ? "fair" : "poor", points, findings: parts.filter((p) => p.points > 0).length }
+  const scored = landing2({ touchdowns, events: ordered, samples, phases, lastT, cls: opts.class, legacy })
+  const assessment = { ...legacy, method: scored.method, score: scored.score ?? undefined, confidence: scored.confidence ?? undefined }
+  if (scored.method === "landing-2") assessment.grade = scored.grade
+  const assessment_detail = { ...scored, legacy_points: points, legacy_findings: legacy.findings, parts, bands: [{ grade: "good", up_to: 1 }, { grade: "fair", up_to: 5 }, { grade: "poor" }], grades: { good: 85, fair: 60 } }
   const summary = {
     id, started_utc: opts.started, duration_s: r1(lastT), aircraft: opts.aircraft,
     departure: "LTFA", arrival: withRunway && touchdowns.length ? "LTFA" : undefined,
@@ -294,7 +297,100 @@ function build(id, opts = {}) {
   return { summary, debrief }
 }
 
+// landing-2 (docs/scoring.md) for the light class, approximated in JS for these synthetic flights only: the scalar criteria
+// at touchdown, the approach criteria as their worst sample in the window (no sustain), the findings by their rule's domain,
+// the material and undershoot caps and Decision 3's flight grade. Real debriefs come from crates/assess.
+const SCORING = readFileSync(join(import.meta.dirname, "../../scoring/landing-2.yaml"), "utf8").replace(/\r/g, "")
+const CRITERIA = Object.fromEntries([...SCORING.matchAll(/- id: (\w+)\n\s+title: (.*)\n(?:.*\n)*?\s+source: "(.*)"/g)].map(([, id, title, source]) => [id, { title, source }]))
+const RULE_DOMAIN = Object.fromEntries(readFileSync(join(import.meta.dirname, "../../rules/core.yaml"), "utf8").replace(/\r/g, "").split(/^---$/m)
+  .map((doc) => [doc.match(/^rule: (.*)$/m)?.[1], doc.match(/^domain: (\w+)$/m)?.[1]]))
+const DOMAINS = [["stability", "Approach stability", 25], ["energy", "Threshold and flare", 10], ["point", "Touchdown point", 20], ["lateral", "Lateral control", 15], ["contact", "Touchdown contact", 20], ["rollout", "Rollout and stopping", 10]]
+const DOMAIN_OF = { A: "stability", B: "energy", C: "point", D: "lateral", E: "contact", F: "rollout" }
+const LOSS = [[0, 0], [0.5, 0.1], [1, 0.35], [2, 0.65], [3, 1]]
+const curveAt = (keys, x) => { if (x <= keys[0][0]) return keys[0][1]; for (let i = 1; i < keys.length; i++) if (x <= keys[i][0]) { const [a, b] = [keys[i - 1], keys[i]]; return a[1] + ((x - a[0]) / (b[0] - a[0])) * (b[1] - a[1]) } return keys.at(-1)[1] }
+const sideEll = (anchors, x, sign) => {
+  const keys = []
+  anchors.forEach((a, k) => { if (a === null) return; const ell = [0, 0.5, 1, 2, 3][k]; if (!keys.length && ell > 0) keys.push([sign * a, 0]); keys.push([sign * a, ell]) })
+  return keys.length ? curveAt(keys, sign * x) : 0
+}
+const NONE = [null, null, null, null, null]
+const round1 = (x) => Math.round(x * 10) / 10
+
+function landing2({ touchdowns, events, samples, phases, lastT, cls, legacy }) {
+  const VREF = 60, VAPP = 65, TRACK_FT = 8.2, M = 1 / FT
+  const firsts = touchdowns.filter((td) => !td.bounce)
+  const counted = new Set()
+  const landings = firsts.map((td, n) => {
+    const next = firsts[n + 1]
+    if (!td.runway) return { t_s: td.t_s, status: "insufficient", score: null, raw: null, grade: null, confidence: null, class: null, partial: [], missing: ["runway"], full_stop: !next, caps: [], stable_from_ft: null, speeds: null, domains: [] }
+    const fix = td.runway, full = !next
+    const approach = phases.filter((p) => p.phase === "Approach" && p.start_s <= td.t_s).at(-1)
+    const from = approach?.start_s ?? td.t_s - 120, to = next ? Math.min(next.t_s, td.t_s + 30) : lastT
+    const win = samples.filter((x) => x.t < td.t_s && x.h / FT <= 500 && x.h / FT >= 20 && x.t > td.t_s - 200)
+    const worst = (xs, f) => xs.length ? xs.reduce((a, b) => (Math.abs(f(b)) > Math.abs(f(a)) ? b : a)) : null
+    const target = fix.aiming_point_m * M, tdz = fix.tdz_m * M, lda = fix.lda_m * M
+    const crit = []
+    const add = (id, height, value, above, below = NONE) => {
+      if (value === null || value === undefined) return
+      const ell = Math.max(sideEll(above, value, 1), sideEll(below, value, -1))
+      crit.push({ id, title: CRITERIA[id].title, height, value: round1(value * 100) / 100, unit: { A1: "kt", A2: "fpm", A3: "deg", B1: "ft", B2: "kt", C1: "ft", D1: "ft", E1: "g", E2: "fpm", E5: "deg", F2: "g" }[id],
+        ell, level: Math.min(3, Math.floor(ell)), loss: curveAt(LOSS, ell), bands: { above, below }, standard: CRITERIA[id].source, sets: false })
+    }
+    for (const [height, xs] of [["above", win.filter((x) => x.h / FT >= 300)], ["below", win.filter((x) => x.h / FT < 300)]]) {
+      const s = worst(xs, (x) => x.ias - VAPP); if (s) add("A1", height, s.ias - VAPP, [5, 10, 15, 20, 30], [-2.5, -5, -7.5, -10, -15])
+      const v = worst(xs, (x) => -x.vs); if (v) add("A2", height, -v.vs, [Math.round(5.31 * VAPP + 200), 1000, 1200, 1500, 2000])
+      const r = worst(xs, (x) => x.roll); if (r && height === "below") add("A3", height, Math.abs(r.roll), [5, 10, 15, 20, 30])
+    }
+    add("B2", "all", td.ias_kt - VAPP, [-10, -5, 0, 10, 20])
+    add("C1", "all", (fix.along_m - fix.aiming_point_m) * M, [200, 400, Math.min(800, tdz - target), tdz - target, lda / 2 - target], [0, -100, -200, 100 - target, -target])
+    add("D1", "all", Math.abs(fix.cross_m) * M, [TRACK_FT / 4, TRACK_FT / 2, 25, 40, 60])
+    add("E1", "all", td.peak_g, [1.3, 1.6, 1.8, 2.2, 2.6])
+    add("E2", "all", td.sink_fpm, [240, 300, 400, 500, 700])
+    add("E5", "all", Math.abs(td.roll_deg ?? 0), [3, 5, 7, 10, 15])
+    if (full) add("F2", "all", (td.ias_kt * KT) ** 2 / (2 * (fix.lda_m - fix.along_m)) / G, [0.1, 0.15, 0.2, 0.3, 0.4])
+    const findings = events.flatMap((e, i) => {
+      const domain = RULE_DOMAIN[e.rule]
+      if (!domain || domain === "other" || e.start_s < from || e.start_s > to) return []
+      counted.add(i)
+      const ell = { advisory: 0, low: 1, medium: 2, high: 3 }[e.level]
+      return [{ event: i, rule: e.rule, level: e.level, ell, loss: curveAt(LOSS, ell), sets: false, domain }]
+    })
+    const domains = DOMAINS.map(([id, title, weight]) => {
+      const criteria = crit.filter((c) => DOMAIN_OF[c.id[0]] === id), fs = findings.filter((f) => f.domain === id).map((f) => Object.fromEntries(Object.entries(f).filter(([k]) => k !== "domain")))
+      const items = [...criteria.map((c) => [c.loss, c]), ...fs.map((f) => [f.loss, f])]
+      const top = items.reduce((a, b) => (b[0] > a[0] ? b : a), [0, null])
+      if (top[1] && top[0] > 0) top[1].sets = true
+      const sets_by = top[1] && top[0] > 0 ? (top[1].id ? (top[1].height === "all" ? top[1].id : `${top[1].id} ${top[1].height}`) : top[1].rule) : null
+      const ell = top[1]?.ell ?? 0
+      return { id, title, weight, loss: items.length ? top[0] : null, points: 0, level: Math.min(3, Math.floor(ell)), criteria, findings: fs, sets_by }
+    })
+    const available = domains.filter((d) => d.loss !== null).reduce((a, d) => a + d.weight, 0)
+    for (const d of domains) d.points = d.loss === null ? 0 : round1((d.weight * d.loss * 100) / available)
+    const raw = round1(100 - domains.reduce((a, d) => a + (d.loss === null ? 0 : d.weight * d.loss), 0) * 100 / available)
+    const caps = []
+    const material = [...crit.filter((c) => c.ell >= 2).map((c) => (c.height === "all" ? c.id : `${c.id} ${c.height}`)), ...findings.filter((f) => f.ell >= 2).map((f) => f.rule)]
+    if (material.length) caps.push({ kind: "material", score: 84.9, reason: `level 2 or more: ${material.join(", ")}`, source: "A material FDM event (level 2 or more); docs/scoring.md 4" })
+    if (fix.short_landing) caps.push({ kind: "undershoot", score: 39, reason: "touchdown before the threshold", source: "short-landing: touchdown before the threshold" })
+    const score = round1(Math.min(raw, ...caps.map((c) => c.score)))
+    return { t_s: td.t_s, status: "scored", score, raw, grade: score >= 85 ? "good" : score >= 60 ? "fair" : "poor", confidence: "full", class: cls === "transport" ? "jet" : "light", partial: [], missing: [], full_stop: full, caps, stable_from_ft: null,
+      speeds: { vref_kt: VREF, vapp_kt: VAPP, source: "profile", approximate: false, basis: "Cessna 172S POH, Section 4 (sample)" }, domains }
+  })
+  const other_findings = events.map((_, i) => i).filter((i) => !counted.has(i))
+  const scoredAt = landings.map((l, i) => [l, i]).filter(([l]) => l.status === "scored")
+  if (!scoredAt.length) return { method: "points", score: null, grade: legacy.grade, confidence: null, caps: [], graded_by: null, landings, other_findings }
+  const [grading, graded_by] = scoredAt.findLast(([l]) => l.full_stop) ?? scoredAt.at(-1)
+  let score = grading.score
+  const caps = grading.caps.map((c) => ({ ...c, landing: graded_by })), reasons = []
+  for (const [l, i] of scoredAt) if (i !== graded_by) for (const c of l.caps) if (c.kind !== "material" && c.score < score) { score = c.score; reasons.push(`landing ${i + 1}: ${c.reason}`) }
+  const highs = other_findings.filter((i) => events[i].level === "high").length
+  const limit = highs === 1 ? 84.9 : highs > 1 ? 59.9 : 100
+  if (limit < score) { score = limit; reasons.push(highs === 1 ? "a high finding elsewhere in the flight" : `${highs} high findings elsewhere in the flight`) }
+  caps.push(...reasons.map((reason) => ({ kind: "flight", score, reason, source: "docs/scoring.md Decision 3: flight grade" })))
+  return { method: "landing-2", score, grade: score >= 85 ? "good" : score >= 60 ? "fair" : "poor", confidence: "full", caps, graded_by, landings, other_findings }
+}
+
 const c172 = { aircraft: { icao: "C172", title: "Cessna Skyhawk G1000 Asobo" }, profile: "C172 profile", class: "light" }
+
 const flights = [
   build("flight-1793027213", { started: "2026-10-26T14:26:53Z", ...c172 }),
   build("flight-1792941000", { started: "2026-10-25T14:30:00Z", ...c172, bounce: false, overspeed: false, secondAlong: 420, secondCross: 1.2, radius: 1100 }),

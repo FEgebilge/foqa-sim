@@ -49,11 +49,103 @@ export interface GradeBand {
   up_to?: number;
 }
 
-/** How the assessment was reached: the parts, most points first, and the scale they are read on. */
+export type Domain = "stability" | "energy" | "point" | "lateral" | "contact" | "rollout";
+export type ScoringClass = "light" | "turboprop" | "jet";
+
+/** A safety cap on a landing, or (`kind: "flight"`) why the flight's score is below its grading landing's. */
+export interface CapNote {
+  kind: "material" | "unstable" | "inspection" | "undershoot" | "excursion" | "flight";
+  score: number;
+  reason: string;
+  source: string;
+  /** Index in `AssessmentDetail.landings`. */
+  landing?: number;
+}
+
+/** [ideal, tolerance, L1, L2, L3] at levels 0, 0.5, 1, 2, 3; `above` grades larger values, `below` smaller; null: absent. */
+export type Anchors = [number | null, number | null, number | null, number | null, number | null];
+
+export interface CriterionAssessment {
+  id: string;
+  title: string;
+  /** The half of the approach window it was graded in. */
+  height: "all" | "above" | "below";
+  /** The worst value in `unit` (none: a level). */
+  value: number;
+  unit: string | null;
+  /** Continuous level 0-3. */
+  ell: number;
+  level: number;
+  loss: number;
+  bands: { above: Anchors; below: Anchors };
+  standard: string;
+  /** It set its domain's deduction. */
+  sets: boolean;
+}
+
+export interface FindingAssessment {
+  /** Index in `Debrief.events`. */
+  event: number | null;
+  rule: string;
+  level: Level;
+  ell: number;
+  loss: number;
+  sets: boolean;
+}
+
+export interface DomainAssessment {
+  id: Domain;
+  title: string;
+  weight: number;
+  /** Fraction of the weight lost; null: n/a, its weight shared out. */
+  loss: number | null;
+  /** Points it cost. */
+  points: number;
+  level: number;
+  criteria: CriterionAssessment[];
+  findings: FindingAssessment[];
+  sets_by: string | null;
+}
+
+export interface LandingAssessment {
+  t_s: number;
+  status: "scored" | "insufficient";
+  score: number | null;
+  raw: number | null;
+  grade: Grade | null;
+  confidence: Confidence | null;
+  class: ScoringClass | null;
+  partial: string[];
+  missing: string[];
+  /** false: a touch-and-go, scored without its rollout, not setting the flight grade. */
+  full_stop: boolean;
+  caps: CapNote[];
+  stable_from_ft: number | null;
+  speeds: { vref_kt: number; vapp_kt: number; source: "profile" | "selected"; approximate: boolean; basis: string } | null;
+  domains: DomainAssessment[];
+}
+
+/**
+ * How the assessment was reached (docs/scoring.md §7.5): each landing in six domains, the caps and the rest of the flight.
+ * `method: "points"` (no scored landing, or an older backend without `landings`) grades by the parts and bands.
+ */
 export interface AssessmentDetail {
+  method?: "landing-2" | "points";
+  score?: number | null;
+  grade?: Grade;
+  confidence?: Confidence | null;
+  caps?: CapNote[];
+  graded_by?: number | null;
+  landings?: LandingAssessment[];
+  /** Indices in `Debrief.events` outside every landing. */
+  other_findings?: number[];
+  legacy_points?: number;
+  legacy_findings?: number;
   parts: AssessmentPart[];
   bands: GradeBand[];
+  grades?: { good: number; fair: number };
 }
+
 
 export interface FlightSummary {
   id: string;

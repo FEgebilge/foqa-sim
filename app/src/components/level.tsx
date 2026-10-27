@@ -49,3 +49,7 @@ export function EventCounts({ counts }: { counts: Record<Level, number> }) {
     </span>
   );
 }
+
+/** A grade as a coloured pill; `label` replaces the grade's name. */
+export const GradeTag = ({ grade, size = "sm", label }: { grade: Grade; size?: "sm" | "md"; label?: string }) =>
+  <Badge size={size} tone={GRADE_TONE[grade]} animated={false}>{label ?? GRADE_LABEL[grade]}</Badge>;

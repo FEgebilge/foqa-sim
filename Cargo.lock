@@ -532,6 +532,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sim-link",
+ "testkit",
 ]
 
 [[package]]
