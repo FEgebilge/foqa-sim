@@ -374,9 +374,9 @@ impl OneOrMany {
 }
 
 /// A YAML scalar: `30 deg` arrives as text, `30` as a number.
-#[derive(Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
-pub(crate) enum Scalar {
+pub enum Scalar {
     Num(f64),
     Text(String),
 }

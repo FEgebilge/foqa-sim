@@ -18,5 +18,5 @@ pub use profile::{
     class_phases, interpolate,
 };
 pub use rule::{
-    Aircraft, Domain, Level, Limits, LoadError, Rule, Side, TdField, Trigger, Var, load,
+    Aircraft, Domain, Level, Limits, LoadError, Rule, Scalar, Side, TdField, Trigger, Var, load,
 };

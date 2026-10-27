@@ -19,7 +19,7 @@ mod track;
 mod vs;
 
 pub use approach::{
-    Approach, Config, ConfigChange, Crossing, Slowed, Window, held, sustained_worst,
+    Approach, Config, ConfigChange, Crossing, Slowed, Window, held, stable_from, sustained_worst,
 };
 pub use flight::Flight;
 pub use landing::{Touchdown, touchdowns};

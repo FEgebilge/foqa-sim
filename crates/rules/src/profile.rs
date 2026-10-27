@@ -224,7 +224,7 @@ const VSO_FACTOR: f64 = 1.3;
 
 /// The class a landing is scored in (docs/scoring.md §2.2); its bands and
 /// leaderboards differ by class.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ScoringClass {
     Light,

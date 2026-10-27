@@ -1,0 +1,224 @@
+# Landing assessment landing-2: anchors, weights, caps and sources.
+# Method and sources (S1-S14): docs/scoring.md. Once published this file
+# never changes; a correction becomes landing-3.
+#
+# A criterion grades one measured value x on the scale of docs/scoring.md
+# 2.1: its anchors [ideal, tolerance, L1, L2, L3] sit at levels 0, 0.5, 1,
+# 2, 3 (`~` where the anchor does not exist). `above` grades values beyond
+# the anchors upward, `below` downward. `levels_from: <rule>` takes L1-L3
+# from that rule's low/medium/high thresholds on the same side, so the
+# thresholds have one home; an anchor given here wins where it is known.
+# Anchors are expressions in the criterion's unit over these names:
+#   add     kt   Vapp - Vref (the wind additive)
+#   gust    kt   gust factor (not recorded: 0)
+#   rod3    fpm  3 deg path descent rate at the ground speed, 5.31 x GS
+#   target  ft   touchdown target past the threshold
+#   tdz lda width  ft  touchdown zone length, landing distance, width
+#   track   ft   main-gear track (profile, else the class fallback)
+#   hard_g  g    the type's hard-landing inspection load (profile)
+# What x is for each criterion: crates/assess/src/measure.rs.
+
+method: landing-2
+loss: { ell: [0, 0.5, 1, 2, 3], loss: [0, 0.10, 0.35, 0.65, 1.00] }
+grades: { good: 85, fair: 60 }
+weights: { stability: 25, energy: 10, point: 20, lateral: 15, contact: 20, rollout: 10 }
+caps:
+  material: { score: 84.9, source: "A material FDM event (level 2 or more); docs/scoring.md 4" }
+  unstable: { score: 59, source: "S1 Data4Safety unstable approach, S5 FSF ALAR: go around" }
+  inspection: { score: 39, source: "S12 manufacturer hard-landing criteria; tail strike (Decision 5)" }
+  undershoot: { score: 39, source: "short-landing: touchdown before the threshold" }
+  excursion: { score: 0, source: "S6 EAFDM RE.7/RE.8: runway excursion" }
+# The approach window above the runway (S1: 1000 ft to 50 ft; S5: 500 ft
+# VMC gate, light to the flare), split where S1 (500 ft) or the light
+# adaptation (300 ft, S5 circling) changes the bands.
+windows:
+  light: { top: 500 ft, split: 300 ft }
+  turboprop: { top: 1000 ft, split: 500 ft, bottom: 50 ft }
+  jet: { top: 1000 ft, split: 500 ft, bottom: 50 ft }
+# Main-gear track without a profile value: 2.5 / 4 / 6 m (est).
+fallback_track: { light: 8.2 ft, turboprop: 13.1 ft, jet: 19.7 ft }
+# Vapp = Vref + clamp(1/2 headwind + gust, 5, 15) kt; autothrottle: Vref+5 (S9).
+wind_additive: { min: 5 kt, max: 15 kt, autothrottle: 5 kt }
+
+criteria:
+  - id: A1
+    title: IAS off the approach speed
+    domain: stability
+    unit: kt
+    sustain: 3 s
+    source: "S2 ATP ACS +/-5 kt (tol); S1 Data4Safety Vref+20/+35, Vref-5/-10; light S3/S4 +10/-5 (tol), levels est"
+    bands:
+      - { classes: [turboprop, jet], height: above, levels_from: unstable-speed-above-500, above: [add + 2.5 kt, add + 5 kt, ~, ~, ~], below: [add - 2.5 kt, add - 5 kt, ~, ~, ~] }
+      - { classes: [turboprop, jet], height: below, levels_from: unstable-speed-below-500, above: [add + 2.5 kt, add + 5 kt, ~, ~, ~], below: [add - 2.5 kt, add - 5 kt, ~, ~, ~] }
+      - { classes: [light], levels_from: unstable-speed-light, above: [5 kt, 10 kt, ~, ~, ~], below: [-2.5 kt, -5 kt, ~, ~, ~] }
+  - id: A2
+    title: Descent rate
+    domain: stability
+    unit: fpm
+    sustain: 5 s
+    source: "S5/S6 1000 fpm (tol); S1 1200/1500 fpm; light levels est; ideal est"
+    bands:
+      - { classes: [turboprop, jet], height: above, levels_from: high-sink-above-500, above: [rod3 + 200 fpm, 1000 fpm, ~, ~, ~] }
+      - { classes: [turboprop, jet], height: below, levels_from: high-sink-below-500, above: [rod3 + 200 fpm, 1000 fpm, ~, ~, ~] }
+      - { classes: [light], levels_from: high-sink-light, above: [rod3 + 200 fpm, 1000 fpm, ~, ~, ~] }
+  - id: A3
+    title: Bank
+    domain: stability
+    unit: deg
+    sustain: 3 s
+    source: "S6 7 deg (tol); S1 15/30 deg; light S5 wings level by 300 ft, bands est"
+    bands:
+      - { classes: [turboprop, jet], height: above, levels_from: bank-above-500, above: [3.5 deg, 7 deg, ~, ~, ~] }
+      - { classes: [turboprop, jet], height: below, levels_from: bank-below-500, above: [3.5 deg, 7 deg, ~, ~, ~] }
+      - { classes: [light], height: below, levels_from: bank-light, above: [5 deg, 10 deg, ~, ~, ~] }
+  - id: A4
+    title: Pitch
+    domain: stability
+    unit: deg
+    sustain: 3 s
+    source: "S1 Data4Safety pitch > 10 / < -3 and > 15 / < -10 deg"
+    bands:
+      - { classes: [turboprop, jet], height: above, above: [~, ~, 10 deg, 15 deg, ~], below: [~, ~, -3 deg, -10 deg, ~] }
+      - { classes: [turboprop, jet], height: below, above: [~, ~, ~, 10 deg, 15 deg], below: [~, ~, ~, -3 deg, -10 deg] }
+  - id: A5G
+    title: Glideslope deviation, 1000 ft to 500 ft
+    domain: stability
+    unit: dot
+    sustain: 5 s
+    source: "S5 1 dot; S1 1 / 2 dots; tol half scale (EASA Part-FCL App. 9, not re-read)"
+    bands:
+      - { classes: [turboprop, jet], height: above, levels_from: glideslope-deviation-above-500, above: [0.25 dot, 0.5 dot, ~, ~, ~] }
+  - id: A5L
+    title: Localizer deviation, 1000 ft to 500 ft
+    domain: stability
+    unit: dot
+    sustain: 5 s
+    source: "S5 1 dot; S1 1 / 1.5 dots; tol half scale (EASA Part-FCL App. 9, not re-read)"
+    bands:
+      - { classes: [turboprop, jet], height: above, levels_from: localizer-deviation-above-500, above: [0.25 dot, 0.5 dot, ~, ~, ~] }
+  - id: A6
+    title: Configuration change or gear not down in the window
+    domain: stability
+    unit: level
+    source: "S1 late flap / late gear (SL2A, SL3); light est"
+    bands:
+      - { classes: [light, turboprop, jet], above: [~, ~, 1, 2, 3] }
+  - id: B1
+    title: Threshold crossing height off 50 ft
+    domain: energy
+    unit: ft
+    source: "S8 50 ft standard, +200 ft landing distance per 10 ft; bands est"
+    bands:
+      - { classes: [light, turboprop, jet], above: [5 ft, 15 ft, 25 ft, 50 ft, 100 ft], below: [-5 ft, -10 ft, -20 ft, -30 ft, -40 ft] }
+  - id: B2
+    title: Touchdown IAS
+    domain: energy
+    unit: kt
+    source: "S9 no lower than Vref-5, Vref-10 tail clearance; light POH main wheels first; L1, L3 and light bands est"
+    bands:
+      - { classes: [turboprop, jet], above: [3 kt, 5 kt + gust, 10 kt, 15 kt, 25 kt], below: [-2 kt, -5 kt, -7 kt, -10 kt, -15 kt] }
+      - { classes: [light], above: [-10 kt, -5 kt, 0 kt, 10 kt, 20 kt] }
+  - id: B3
+    title: Float from 50 ft to touchdown
+    domain: energy
+    unit: s
+    source: "S7 RE28 long flare; S9 flare 4-8 s; bands est"
+    bands:
+      - { classes: [turboprop, jet], above: [8 s, 10 s, 12 s, 15 s, 20 s] }
+      - { classes: [light], above: [10 s, 12 s, 15 s, 20 s, 25 s] }
+  - id: C1
+    title: Touchdown past the target
+    domain: point
+    unit: ft
+    source: "S2 aiming point -250/+500 ft; S3/S4 0/+400 and +200 ft; S7 deep landing; S9 at least 1000 ft; long-landing (L2), short-landing (L3); rest est"
+    bands:
+      - { classes: [turboprop, jet], above: [250 ft, 500 ft, 1000 ft, tdz - target, lda / 2 - target], below: [-125 ft, -250 ft, -500 ft, 200 ft - target, -target] }
+      - { classes: [light], above: [200 ft, 400 ft, 800 ft, tdz - target, lda / 2 - target], below: [0 ft, -100 ft, -200 ft, 100 ft - target, -target] }
+  - id: D1
+    title: Centreline offset at touchdown
+    domain: lateral
+    unit: ft
+    source: "S2 centreline between the main gear (tol); off-centreline-touchdown 25/40/60 ft est; outer gear 3 m from the edge"
+    bands:
+      - { classes: [light, turboprop, jet], levels_from: off-centreline-touchdown, above: [track / 4, track / 2, ~, ~, "min(60 ft, width / 2 - track / 2 - 10 ft)"] }
+  - id: D2
+    title: Crab at touchdown
+    domain: lateral
+    unit: deg
+    source: "S3/S4 longitudinal axis aligned; S9 crab touchdown accepted; numbers est"
+    bands:
+      - { classes: [turboprop, jet], above: [2 deg, 5 deg, 7 deg, 10 deg, 15 deg] }
+      - { classes: [light], above: [1 deg, 3 deg, 5 deg, 8 deg, 12 deg] }
+  - id: D3
+    title: Drift at touchdown
+    domain: lateral
+    unit: kt
+    source: "S3/S4 no side drift; numbers est"
+    bands:
+      - { classes: [light, turboprop, jet], above: [1 kt, 2 kt, 4 kt, 6 kt, 8 kt] }
+  - id: D4
+    title: Rollout centreline offset to 30 kt
+    domain: lateral
+    unit: ft
+    source: "S6 RE.7 (measure); numbers est; leaving the runway caps the score"
+    bands:
+      - { classes: [light, turboprop, jet], above: [track / 2, 10 ft, 25 ft, 40 ft, ~] }
+  - id: E1
+    title: Peak normal load at touchdown
+    domain: contact
+    unit: g
+    source: "S6 RE.6 monitor below the manufacturer's limit; S12; hard-landing and hard-landing-light levels est"
+    bands:
+      - { classes: [turboprop, jet], levels_from: hard-landing, above: [1.3 g, 1.5 g, ~, ~, hard_g] }
+      - { classes: [light], levels_from: hard-landing-light, above: [1.3 g, 1.6 g, ~, ~, ~] }
+  - id: E2
+    title: Sink rate at touchdown
+    domain: contact
+    unit: fpm
+    source: "S10 6 / 10 ft/s; 240 fpm Boeing service experience (not re-read); light est; soft is not rewarded (S9)"
+    bands:
+      - { classes: [turboprop, jet], levels_from: high-sink-touchdown, above: [240 fpm, 360 fpm, ~, ~, ~] }
+      - { classes: [light], levels_from: high-sink-touchdown-light, above: [240 fpm, 300 fpm, ~, ~, ~] }
+  - id: E3
+    title: Bounce
+    domain: contact
+    unit: level
+    source: "S7 RE30 main-gear air-to-ground count > 1; airborne > 2 s or > 5 ft est"
+    bands:
+      - { classes: [light, turboprop, jet], above: [~, ~, ~, 1, 2] }
+  - id: E4
+    title: Tail clearance at touchdown
+    domain: contact
+    unit: deg
+    source: "tailstrike-risk-landing (EOFDM 2 deg, not re-read)"
+    bands:
+      - { classes: [turboprop, jet], levels_from: tailstrike-risk-landing, below: [~, 2 deg, ~, ~, ~] }
+  - id: E4N
+    title: Pitch at touchdown (nose first)
+    domain: contact
+    unit: deg
+    source: "POH main wheels first; EOFDM example (not re-read)"
+    bands:
+      - { classes: [light, turboprop, jet], below: [~, 0 deg, ~, 0 deg, ~] }
+  - id: E5
+    title: Bank at touchdown
+    domain: contact
+    unit: deg
+    source: "S12 roll <= 2 deg (not re-read); 8 deg EOFDM example (not re-read); rest est"
+    bands:
+      - { classes: [turboprop, jet], above: [2 deg, 3 deg, 4 deg, 6 deg, 8 deg] }
+      - { classes: [light], above: [3 deg, 5 deg, 7 deg, 10 deg, 15 deg] }
+  - id: F1
+    title: Delay to the first deceleration means
+    domain: rollout
+    unit: s
+    source: "S8 1 s per action, +200 ft per s beyond 2 s; S9 immediate reverse; L1-L3 est; light n/a (POH braking minimum required)"
+    bands:
+      - { classes: [turboprop, jet], above: [1 s, 2 s, 4 s, 6 s, 10 s] }
+  - id: F2
+    title: Required deceleration
+    domain: rollout
+    unit: g
+    source: "S6 RE.8 a = GS^2 / 2d; bands est"
+    bands:
+      - { classes: [light, turboprop, jet], above: [0.10 g, 0.15 g, 0.20 g, 0.30 g, 0.40 g] }

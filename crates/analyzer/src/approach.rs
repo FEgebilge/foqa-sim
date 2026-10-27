@@ -65,14 +65,13 @@ pub struct Window {
     pub gear_pct: Vec<f64>,
 }
 
-impl Window {
-    /// The height from which every point stayed `ok` down to the window's
-    /// end (the stable height): the first point after the last one that is
-    /// not. `None` if the last one is not, or the window is empty.
-    pub fn stable_from(&self, ok: &[bool]) -> Option<f64> {
-        let first = ok.iter().rposition(|&o| !o).map_or(0, |i| i + 1);
-        self.height_ft.get(first).copied()
-    }
+/// The height from which every point stayed `ok` down to the end of a
+/// series (the stable height of a window's `height_ft`): the first point
+/// after the last one that is not. `None` if the last one is not, or the
+/// series is empty.
+pub fn stable_from(height_ft: &[f64], ok: &[bool]) -> Option<f64> {
+    let first = ok.iter().rposition(|&o| !o).map_or(0, |i| i + 1);
+    height_ft.get(first).copied()
 }
 
 /// What moved: the trailing-edge flaps (deg) or the landing gear (%).
@@ -427,24 +426,10 @@ mod tests {
 
     #[test]
     fn the_stable_height_follows_the_last_unstable_point() {
-        let window = |n| Window {
-            range: 0..n,
-            t: secs(n),
-            height_ft: vec![1000.0, 800.0, 600.0, 400.0][..n].to_vec(),
-            ias_kt: vec![],
-            gs_kt: vec![],
-            sink_fpm: vec![],
-            roll_deg: vec![],
-            pitch_deg: vec![],
-            gs_dev_dot: vec![],
-            loc_dev_dot: vec![],
-            flap_deg: vec![],
-            gear_pct: vec![],
-        };
-        let w = window(4);
-        assert_eq!(w.stable_from(&[true; 4]), Some(1000.0));
-        assert_eq!(w.stable_from(&[true, false, true, true]), Some(600.0));
-        assert_eq!(w.stable_from(&[true, true, true, false]), None);
-        assert_eq!(window(0).stable_from(&[]), None);
+        let h = [1000.0, 800.0, 600.0, 400.0];
+        assert_eq!(stable_from(&h, &[true; 4]), Some(1000.0));
+        assert_eq!(stable_from(&h, &[true, false, true, true]), Some(600.0));
+        assert_eq!(stable_from(&h, &[true, true, true, false]), None);
+        assert_eq!(stable_from(&[], &[]), None);
     }
 }

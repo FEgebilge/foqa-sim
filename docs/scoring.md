@@ -6,7 +6,9 @@ leaderboard. The debrief and the leaderboard therefore tell the same story.
 `landing-1` (`crates/challenge/src/score.rs`) stays frozen for the
 challenges that name it.
 
-Status: design only. Nothing below is implemented yet. Thresholds marked
+Status: slices 1-4 of §7 are implemented (profile fields, analyzer
+values, rule set v2, `crates/assess` with `scoring/landing-2.yaml`); the
+debrief, challenges and UI do not use it yet. Thresholds marked
 **est** are FOQA-Sim choices that no published source covers; they are
 listed so they can be reviewed, not hidden.
 
@@ -429,14 +431,16 @@ is the light fallback, half-track 1.25 m.
 | A (25) | A1 speed at 250 ft (3 s) | +12 kt (tol +10, L1 +15) | 0.70 | 0.20 | 5.0 |
 | | A2 sink | 820 fpm (ideal 529, tol 1000) | 0.31 | 0.06 | – |
 | B (10) | B1 TCH | 62 ft (tol 65) | 0.35 | 0.07 | 0.7 |
-| C (20) | C1 long | 470 m = target +558 ft (tol +400, L1 +800 = 544 m) | 0.70 | 0.20 | 4.0 |
+| C (20) | C1 long | 470 m = target +558 ft (tol +400; L1 +800 ft = 544 m is past the TDZ end, so held at 533 m = +764 ft) | 0.72 | 0.21 | 4.2 |
 | D (15) | D1 centreline | 2.4 m (tol 1.25, L1 7.6) | 0.59 | 0.15 | 2.2 |
 | | D2 crab | 3° (tol 3°) | 0.50 | 0.10 | – |
 | E (20) | E1 peak g | 1.52 g (tol 1.6) | 0.37 | 0.07 | 1.5 |
 | | E2 sink | 260 fpm | 0.17 | 0.03 | – |
 | F (10) | F2 required decel | 0.04 g; F1 n/a by design | 0 | 0 | 0 |
 
-Score **86.7, Good**, with no FDM events. The debrief still flags two items
+Score **86.5, Good**, with no FDM events. (An earlier draft read 86.7: it
+left L1 at 544 m, past the TDZ end, against "anchors never exceed the next
+one"; the golden test in `crates/assess/tests/score.rs` follows the rule.) The debrief still flags two items
 as "outside checkride tolerance": +12 kt at 250 ft, and touchdown 558 ft
 past the target, beyond the Private ACS 400 ft window.
 
@@ -452,14 +456,16 @@ half-track 3 m.
 |---|---|---|---|---|---|
 | A (25) | A2 sink below 500 ft | 1100 fpm for 5 s at 400 ft (tol 1000; next anchor L2 1200) | 1.25 | 0.43 | 10.6 |
 | | A1 speed above 500 ft | Vref+22 for 4 s at 750 ft (D4S 1st threshold, SL1) | 1.13 | 0.39 | – |
-| | finding | `high-sink-below-1000` low (card) | 1 | 0.35 | – |
 | B (10) | B3 float 50 ft → TD | 9 s (ideal 8, tol 10) | 0.25 | 0.05 | 0.5 |
 | C (20) | C1 long | 650 m = aim +820 ft (tol +500, L1 +1000) | 0.82 | 0.26 | 5.2 |
 | D (15) | D1 centreline | 4.1 m (tol 3, L1 7.6) | 0.62 | 0.16 | 2.4 |
 | E (20) | E1 peak g | 1.48 g (tol 1.5) | 0.45 | 0.09 | 1.8 |
 | F (10) | F1 reverser delay | 2.5 s (tol 2, L1 4) | 0.63 | 0.16 | 1.6 |
 
-D4S check: one SL1 criterion, and nothing at SL2B or SL3, so the approach
+Rule set v2 raises no event for 1100 fpm below 500 ft (its first level
+there is 1200 fpm), so no card; v1's `high-sink-below-1000` low card had
+ℓ 1 and changed nothing. D4S check: one SL1 criterion, and nothing at
+SL2B or SL3, so the approach
 was not unstable and no cap applies. Score **77.9, Fair**. The deduction
 story reads: high sink below 500 ft, a fast approach at 750 ft, and a
 touchdown 820 ft past the aiming point.
@@ -482,8 +488,9 @@ results.
    (S11). Others only as sources are found.
 2. **Analyzer derived values** (`crates/analyzer`, new `approach.rs`
    beside `landing.rs`): threshold crossing (time, height, IAS, GS), float
-   time 50 ft → TD, crab and drift at contact (needs a true heading: add
-   `heading.true`, or `magvar`, to the LFL as an appended parameter),
+   time 50 ft → TD, crab and drift at contact (true heading from
+   `heading.mag` less the airport's recorded magnetic variation, so no
+   LFL change),
    window series with sustained-worst per criterion and the stable height,
    config-change events, deceleration delay, required deceleration, GS ≤
    20 kt position. Tests: synthetic tracks from `crates/testkit` for each
