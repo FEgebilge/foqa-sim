@@ -37,12 +37,12 @@ assert.strictEqual(sent.length, 0, "first click arms");
 assert.ok(a.innerHTML.indexOf("Abandon &amp; fly again") > 0);
 t = 1000;
 st.act("fly_again");
-assert.deepStrictEqual(sent[0], ["FOQA_SIM_CMD", { v: 2, cmd: "fly_again" }]);
+assert.deepStrictEqual(sent[0], ["FOQA_SIM_CMD", { v: 2, cmd: "fly_again", id: "a1" }]);
 st.act("finish");
 assert.strictEqual(sent.length, 1, "one command at a time");
 st.onAck({ cmd: "fly_again", ok: true });
 st.act("finish");
-assert.deepStrictEqual(sent[1][1], { v: 2, cmd: "finish" });
+assert.deepStrictEqual(sent[1][1], { v: 2, cmd: "finish", id: "a1" });
 // A new stage clears the wait.
 st.onAttempt(JSON.stringify(strip({ stage: "rollout", text: "Attempt 2 · Landed 142 fpm" })));
 assert.ok(a.innerHTML.indexOf("Landed 142 fpm") > 0 && a.innerHTML.indexOf("Finishing") < 0);

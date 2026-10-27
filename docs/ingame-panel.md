@@ -266,8 +266,8 @@ connection and ignores trailing NULs.
 | | `{ v: 2, cmd: "list_challenges", req }` | the app's challenge library, answered in `FOQA_SIM_CHALLENGES` |
 | | `{ v: 2, cmd: "briefing", req, key }` | one challenge's briefing and pre-flight card, answered in `FOQA_SIM_BRIEFING` |
 | | `{ v: 2, cmd: "place", key, practice?: boolean }` | create an attempt and place the aircraft, as the app's Place; `practice`: never uploaded |
-| | `{ v: 2, cmd: "fly_again" }` | abandon the current or last attempt (`replaced`) and place a new one on its challenge |
-| | `{ v: 2, cmd: "finish" }` / `{ v: 2, cmd: "abandon" }` | the open attempt, as the app's buttons |
+| | `{ v: 2, cmd: "fly_again", id }` | abandon the current or last attempt (`replaced`) and place a new one on its challenge |
+| | `{ v: 2, cmd: "finish", id }` / `{ v: 2, cmd: "abandon", id }` | the open attempt, as the app's buttons; `id` is the strip's, and another than the attempt shown now is refused |
 
 Commands are acked once in `Status.ack`; the two queries are not (see
 Flight history). The ack has `cmd`, `ok` and, on failure, `message`, e.g.

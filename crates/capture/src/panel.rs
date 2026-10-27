@@ -920,8 +920,8 @@ mod tests {
 
     #[test]
     fn attempt_commands_go_to_the_app_and_bad_ones_are_acked() {
-        match Request::parse(r#"{"v":2,"cmd":"fly_again"}"#) {
-            Ok(Request::App(AppCommand::FlyAgain)) => {}
+        match Request::parse(r#"{"v":2,"cmd":"fly_again","id":"a1"}"#) {
+            Ok(Request::App(AppCommand::FlyAgain { id })) if id == "a1" => {}
             other => panic!("{other:?}"),
         }
         let bad = Request::parse(r#"{"v":2,"cmd":"place","key":"../x"}"#).unwrap_err();

@@ -779,8 +779,13 @@ View → app (`FOQA_SIM_CMD`, acked in `Status.ack` like the others):
 | `{ v: 2, cmd: "list_challenges", req }` | answered in `FOQA_SIM_CHALLENGES` (cached list; no network call from the sim) |
 | `{ v: 2, cmd: "briefing", req, key }` | answered in `FOQA_SIM_BRIEFING` |
 | `{ v: 2, cmd: "place", key, practice?: boolean }` | create, issue (unless practice or offline) and place, as the app's Place |
-| `{ v: 2, cmd: "fly_again" }` | abandon the current or last attempt (`end` reason `replaced`, site abandon), issue a new one on the same challenge and place |
-| `{ v: 2, cmd: "finish" }` / `{ v: 2, cmd: "abandon" }` | as the app's buttons |
+| `{ v: 2, cmd: "fly_again", id }` | abandon the current or last attempt (`end` reason `replaced`, site abandon), issue a new one on the same challenge and place |
+| `{ v: 2, cmd: "finish", id }` / `{ v: 2, cmd: "abandon", id }` | as the app's buttons |
+
+`id` is the strip's attempt id; the app refuses a command whose `id` is
+not the attempt the strip shows now ("That attempt is no longer the
+current one."), so a double press (toolbar and EFB, or a strip that is
+behind) never acts on the attempt that followed.
 
 - **Toolbar panel:** the strip under the live board, with **Fly again**
   and **Finish** while an attempt is open.

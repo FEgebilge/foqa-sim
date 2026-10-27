@@ -138,9 +138,17 @@ pub enum AppCommand {
         practice: bool,
     },
     /// Abandon the current or last attempt and start its challenge again.
-    FlyAgain,
-    Finish,
-    Abandon,
+    /// Each names the attempt its strip shows (`id`); the app refuses
+    /// another, so a double press never acts on the next attempt.
+    FlyAgain {
+        id: String,
+    },
+    Finish {
+        id: String,
+    },
+    Abandon {
+        id: String,
+    },
 }
 
 impl AppCommand {
@@ -149,9 +157,9 @@ impl AppCommand {
             Self::ListChallenges { .. } => "list_challenges",
             Self::Briefing { .. } => "briefing",
             Self::Place { .. } => "place",
-            Self::FlyAgain => "fly_again",
-            Self::Finish => "finish",
-            Self::Abandon => "abandon",
+            Self::FlyAgain { .. } => "fly_again",
+            Self::Finish { .. } => "finish",
+            Self::Abandon { .. } => "abandon",
         }
     }
 
@@ -174,9 +182,9 @@ impl AppCommand {
                 key: text("key"),
                 practice: v["practice"].as_bool().unwrap_or(false),
             },
-            "fly_again" => Self::FlyAgain,
-            "finish" => Self::Finish,
-            "abandon" => Self::Abandon,
+            "fly_again" => Self::FlyAgain { id: text("id") },
+            "finish" => Self::Finish { id: text("id") },
+            "abandon" => Self::Abandon { id: text("id") },
             _ => return None,
         };
         Some(cmd.check(v))
@@ -190,7 +198,11 @@ impl AppCommand {
             Self::ListChallenges { req } => (req.as_str(), None),
             Self::Briefing { req, key } => (req.as_str(), Some(key.as_str())),
             Self::Place { key, .. } => ("", Some(key.as_str())),
-            _ => ("", None),
+            Self::FlyAgain { id } | Self::Finish { id } | Self::Abandon { id } => {
+                let ok = (1..=KEY_MAX_BYTES).contains(&id.len())
+                    && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-');
+                return if ok { Ok(self) } else { Err("no such attempt") };
+            }
         };
         if req.len() + key.map_or(0, str::len) > REQUEST_MAX_BYTES {
             return Err("request too long");
@@ -467,9 +479,26 @@ mod tests {
                 practice: false
             }))
         );
-        assert_eq!(parse(r#"{"v":2,"cmd":"fly_again"}"#), Some(Ok(FlyAgain)));
-        assert_eq!(parse(r#"{"v":2,"cmd":"finish"}"#), Some(Ok(Finish)));
-        assert_eq!(parse(r#"{"v":2,"cmd":"abandon"}"#), Some(Ok(Abandon)));
+        let id = || "3f0e7f8e-6c2b-4d55-9a57-1b1f2a8d0c11".to_owned();
+        assert_eq!(
+            parse(r#"{"v":2,"cmd":"fly_again","id":"3f0e7f8e-6c2b-4d55-9a57-1b1f2a8d0c11"}"#),
+            Some(Ok(FlyAgain { id: id() }))
+        );
+        assert_eq!(
+            parse(r#"{"v":2,"cmd":"finish","id":"3f0e7f8e-6c2b-4d55-9a57-1b1f2a8d0c11"}"#),
+            Some(Ok(Finish { id: id() }))
+        );
+        assert_eq!(
+            parse(r#"{"v":2,"cmd":"abandon","id":"3f0e7f8e-6c2b-4d55-9a57-1b1f2a8d0c11"}"#),
+            Some(Ok(Abandon { id: id() }))
+        );
+        for bad in [
+            r#"{"v":2,"cmd":"fly_again"}"#,
+            r#"{"v":2,"cmd":"finish","id":""}"#,
+            r#"{"v":2,"cmd":"abandon","id":"../x"}"#,
+        ] {
+            assert_eq!(parse(bad), Some(Err("no such attempt")), "{bad}");
+        }
         assert_eq!(parse(r#"{"v":2,"cmd":"end_flight"}"#), None, "not ours");
         assert_eq!(
             parse(r#"{"v":1,"cmd":"finish"}"#),
@@ -495,7 +524,9 @@ mod tests {
             .name()
                 == "place"
         );
-        assert!(ListChallenges { req: String::new() }.is_query() && !FlyAgain.is_query());
+        assert!(
+            ListChallenges { req: String::new() }.is_query() && !FlyAgain { id: id() }.is_query()
+        );
     }
 
     #[test]

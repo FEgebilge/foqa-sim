@@ -13,7 +13,7 @@ use capture::{AppCommand, AttemptStrip, BriefingMsg, ChallengeCard, Landed, Loca
 use challenge::{Challenge, Mode};
 use chrono::{DateTime, Utc};
 
-use crate::attempts::{State, View};
+use crate::attempts::{Record, State, View};
 use crate::commands::Shared;
 
 /// The strip is rebuilt (and an open attempt's gate looked for) this often,
@@ -73,17 +73,11 @@ impl Shared {
     }
 
     fn view_command(self: &Arc<Self>, cmd: &AppCommand) {
-        let current = || {
+        let named = |id: &str, open: bool| {
             let views = self.attempts.list();
-            current(&views)
-                .map(|v| v.record.clone())
-                .ok_or("No attempt yet: Place one first.")
-        };
-        let open = || {
-            current()
-                .ok()
-                .filter(|r| r.state.can_become(State::Abandoned))
-                .ok_or("No attempt is open.")
+            named(&views, id, open)
+                .map(|r| r.id.clone())
+                .map_err(str::to_owned)
         };
         let result = match cmd {
             AppCommand::ListChallenges { req } => return self.views.challenges(req, &self.cards()),
@@ -95,17 +89,14 @@ impl Shared {
                 .get(key)
                 .and_then(|(_, json)| self.start_attempt(key, &json, *practice))
                 .map(drop),
-            AppCommand::FlyAgain => current()
-                .map_err(str::to_owned)
-                .and_then(|r| self.fly_again(&r.id))
+            AppCommand::FlyAgain { id } => named(id, false)
+                .and_then(|id| self.fly_again(&id))
                 .map(drop),
-            AppCommand::Finish => open()
-                .map_err(str::to_owned)
-                .and_then(|r| self.finish(&r.id, "finish"))
+            AppCommand::Finish { id } => named(id, true)
+                .and_then(|id| self.finish(&id, "finish"))
                 .map(drop),
-            AppCommand::Abandon => open()
-                .map_err(str::to_owned)
-                .and_then(|r| self.abandon(&r.id, "cancelled"))
+            AppCommand::Abandon { id } => named(id, true)
+                .and_then(|id| self.abandon(&id, "cancelled"))
                 .map(drop),
         };
         self.views.ack(cmd, result);
@@ -166,6 +157,23 @@ impl Shared {
 fn current(views: &[View]) -> Option<&View> {
     let open = |v: &&View| v.record.state.can_become(State::Abandoned);
     views.iter().find(open).or(views.first())
+}
+
+/// The attempt a view's command names by `id`: it must be the one the strip
+/// shows, and still open for Finish and Abandon (`open`). Any other is
+/// refused, so a press on a strip that is behind, or on both the toolbar
+/// and the EFB, never acts on the attempt that followed.
+fn named<'a>(views: &'a [View], id: &str, open: bool) -> Result<&'a Record, &'static str> {
+    let r = &current(views)
+        .ok_or("No attempt yet: Place one first.")?
+        .record;
+    if r.id != id {
+        return Err("That attempt is no longer the current one.");
+    }
+    if open && !r.state.can_become(State::Abandoned) {
+        return Err("No attempt is open.");
+    }
+    Ok(r)
 }
 
 /// The strip of attempt `view` with its site part, and whether nothing
@@ -386,6 +394,35 @@ mod tests {
             result,
             log,
         }
+    }
+
+    #[test]
+    fn a_view_command_acts_only_on_the_attempt_its_strip_shows() {
+        let flying = view(State::Flying, vec![], None);
+        let id = flying.record.id.clone();
+        let mut newer = view(State::Flying, vec![], None);
+        newer.record.id = "a2".into();
+        assert_eq!(
+            named(&[], &id, false).unwrap_err(),
+            "No attempt yet: Place one first."
+        );
+        assert_eq!(
+            named(std::slice::from_ref(&flying), &id, true).unwrap().id,
+            id
+        );
+        // Fly again was pressed twice (toolbar and EFB): the second names the
+        // attempt the first replaced, and does nothing.
+        let after = [newer, view(State::Abandoned, vec![], None)];
+        assert_eq!(
+            named(&after, &id, false).unwrap_err(),
+            "That attempt is no longer the current one."
+        );
+        let done = [view(State::Done, vec![], None)];
+        assert!(
+            named(&done, &id, false).is_ok(),
+            "Fly again after the grade"
+        );
+        assert_eq!(named(&done, &id, true).unwrap_err(), "No attempt is open.");
     }
 
     fn site(state: &str, score: Option<f64>, rank: Option<u32>) -> SiteStrip {

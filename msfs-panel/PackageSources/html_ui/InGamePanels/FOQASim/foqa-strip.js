@@ -91,11 +91,13 @@ var FoqaStrip = (function () {
     Strip.prototype.act = function (act) {
         var s = this.current();
         if (!s || this.busy) return;
-        if (act === "finish" && s.can_finish) this.send("finish");
+        // Each names the attempt shown: the app refuses another (a second
+        // view's press, or a strip that is behind), so none acts twice.
+        if (act === "finish" && s.can_finish) this.send("finish", { id: s.id });
         else if (act === "fly_again" && s.can_fly_again) {
             // Over an open attempt it abandons it: ask once more first.
             if (s.can_finish && !this.armed()) this.confirmAt = this.now();
-            else { this.confirmAt = null; this.send("fly_again"); }
+            else { this.confirmAt = null; this.send("fly_again", { id: s.id }); }
         }
         this.render();
     };
