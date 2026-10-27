@@ -37,10 +37,11 @@ a debrief that says what happened, why it matters and what to do differently.
 
 ## Status
 
-Works end to end with MSFS 2024 on Windows: installer, automatic recording, debrief, in-sim
-panel and EFB app. It is being tested with a small group of pilots before a first public
-release. In progress: type-aware flight phases and **landing challenges** (everyone flies the
-same landing under the same conditions; attempts are graded from the recording on a server).
+Version 0.4. Works end to end with MSFS 2024 on Windows: installer, automatic recording,
+debrief, in-sim panel and EFB app, local landing challenges. It is being tested with a small
+group of pilots before a first public release. In progress: an FDR-style replay, challenges
+with the same weather for every pilot, and the first website running the open challenge
+protocol.
 
 ## What you get
 
@@ -48,11 +49,21 @@ same landing under the same conditions; attempts are graded from the recording o
 - **Debrief.** Phase timeline, charts with reference lines, a landing card for every touchdown
   (bounces grouped with their landing), runway diagram, a map synced to the charts, and events
   in plain language with what to do about them.
-- **Assessment.** Good, Fair or Poor for each flight. Each rule counts once, at its worst
-  level (high 4, medium 2, low 1 point), and the debrief shows the breakdown.
+- **Landing assessment.** A score out of 100 for every landing across six areas (approach
+  stability, threshold and flare, touchdown point, lateral control, touchdown contact,
+  rollout), each read against checkride tolerances (FAA ACS) and airline FDM thresholds (EASA
+  Data4Safety, FSF ALAR), with safety caps and the item behind every deduction
+  ([scoring.md](docs/scoring.md)). Missing data is reported as such, never as full marks.
+- **Flight phases** after the ICAO CICTT definitions, following the aircraft (a light aircraft
+  flares lower, turboprops fly a higher pattern), each with the reason it started.
+- **Landing challenges.** Import a challenge, check the pre-flight card, place the aircraft on
+  final and fly again from the sim. Optionally connect a website that runs the open
+  [challenge protocol](docs/challenge-protocol.md) to rank attempts; FOQA-Sim works fully without one.
 - **In-sim panel and EFB app.** Live approach monitor with the 1000 ft and 500 ft stabilised
-  gates, event feed, recent landings with charts, past flights, and controls to start, end,
-  discard or mark a recording.
+  gates, event feed, recent landings with charts and scores, past flights, a Challenges tab
+  with the attempt status, and controls to start, end, discard or mark a recording.
+- **What's new.** After an update the app shows the release notes once
+  ([devlog/](devlog/)).
 
 ## Install
 
