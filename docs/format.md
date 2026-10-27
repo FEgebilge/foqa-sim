@@ -167,6 +167,17 @@ designator.
   that is not UTF-8) is treated as damage: reading stops there and reports
   that packet's offset, with no error. Only I/O errors are errors.
 
+### Known sim quirk: gear extension
+
+`gear.extended` is % (0 up, 100 down), but MSFS 2024 returns
+`GEAR TOTAL PCT EXTENDED` as a 0-1 fraction whatever unit it is asked in
+(measured 2026-10-28, C172SP: 1 in "percent", 0.01 in "percent over 100";
+`GEAR CENTER POSITION` in "percent" gives 100). The wiring scales it by 100,
+so a raw capture replayed today also gives 0-100. Recordings made before
+that store 0-1: a reader that finds a `gear.extended` series whose maximum
+is at most 1 scales it by 100. Safe, since a true % series reaches 100 once
+the gear is down and an always-retracted one is 0 on either scale.
+
 ## Compact flight v1
 
 A closed, intact journal regrouped by parameter. Written next to the

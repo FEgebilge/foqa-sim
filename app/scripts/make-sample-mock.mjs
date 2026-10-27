@@ -199,9 +199,9 @@ function build(id, opts = {}) {
     ra_ft: samples.map((x) => (x.h / FT <= 2500 ? r1(x.h / FT) : null)),
     flap_deg: samples.map((x) => x.flap),
     vfe_kt: samples.map((x) => vfe(x.flap)),
-    // As MSFS sends them: gear as a fraction; a C172's fixed gear always 1, the 737's up between 150 ft and flaps 20; its autopilot and autothrottle on the downwind.
+    // Gear in % (a C172's fixed gear always 100, the 737's up between 150 ft and flaps 20); its autopilot and autothrottle on the downwind.
     // Without an aircraft identity the sim sent none of the three.
-    gear_ext: samples.map((x) => (!opts.aircraft ? null : jet && x.h / FT > 150 && x.flap < 20 ? 0 : 1)),
+    gear_ext: samples.map((x) => (!opts.aircraft ? null : jet && x.h / FT > 150 && x.flap < 20 ? 0 : 100)),
     ap_engaged: samples.map((x) => (!opts.aircraft ? null : jet && x.h / FT > 900 && x.flap === 0 ? 1 : 0)),
     at_engaged: samples.map((x) => (!opts.aircraft ? null : jet && x.h / FT > 900 && x.flap === 0 ? 1 : 0)),
     lat: pos.map((p) => r1(p.lat, 6)),

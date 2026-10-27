@@ -572,10 +572,8 @@ pub struct Series {
     /// The type profile's flap-speed limit at that flap angle.
     #[serde(serialize_with = "round::<1, _>")]
     pub vfe_kt: Vec<f64>,
-    /// Gear extension as recorded (`gear.extended`): 0 up to full. The LFL
-    /// unit is %, but MSFS sends a fraction (1 = down), so the full value
-    /// is 1 or 100 depending on the source.
-    #[serde(serialize_with = "round::<2, _>")]
+    /// Gear extension (`gear.extended`), 0 up to 100 down, %.
+    #[serde(serialize_with = "round::<1, _>")]
     pub gear_ext: Vec<f64>,
     /// Autopilot engaged: 1, else 0.
     #[serde(serialize_with = "round::<0, _>")]

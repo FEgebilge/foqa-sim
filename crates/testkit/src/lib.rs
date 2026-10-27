@@ -171,7 +171,8 @@ pub fn journal(
             ("PLANE BANK DEGREES", 0.0),
             ("PLANE HEADING DEGREES MAGNETIC", p.heading),
             ("SIM ON GROUND", f64::from(u8::from(p.ground))),
-            ("GEAR TOTAL PCT EXTENDED", p.gear),
+            // MSFS sends a 0-1 fraction whatever the unit (docs/format.md).
+            ("GEAR TOTAL PCT EXTENDED", p.gear / 100.0),
             ("AMBIENT WIND DIRECTION", p.wind.0),
             ("AMBIENT WIND VELOCITY", p.wind.1),
             ("SIMULATION RATE", p.sim_rate),

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { adjacentEvent, approachSpeedsAt, gearAt, gearScale, indexAt, instrumentsAt, trackAt, valueAt } from "../src/lib/series.ts";
+import { adjacentEvent, approachSpeedsAt, gearAt, indexAt, instrumentsAt, trackAt, valueAt } from "../src/lib/series.ts";
 import type { Debrief, FlightEvent, LandingAssessment, Series } from "../src/types.ts";
 
 const t_s = [0, 0.5, 1, 1.5];
@@ -45,14 +45,12 @@ test("track comes from positions and needs the aircraft moving", () => {
   assert.equal(trackAt(moving, 0.5), null);
 });
 
-test("the gear scale is inferred from the values: a fraction from MSFS, else percent", () => {
-  assert.equal(gearScale([1, 1, null]), 1);
-  assert.equal(gearScale([0, 50, 100]), 100);
-  const fraction = series({ gear_ext: [0, 0.5, 1, null] });
-  assert.deepEqual(gearAt(fraction, 0, 1), { state: "up" });
-  assert.deepEqual(gearAt(fraction, 0.5, 1), { state: "transit", extended: 0.5 });
-  assert.deepEqual(gearAt(fraction, 1.2, 1), { state: "down" });
-  assert.equal(gearAt(fraction, 1.5, 1), null);
+test("the gear is read in percent: up, in transit, down", () => {
+  const gear = series({ gear_ext: [0, 50, 100, null] });
+  assert.deepEqual(gearAt(gear, 0), { state: "up" });
+  assert.deepEqual(gearAt(gear, 0.5), { state: "transit", extended: 0.5 });
+  assert.deepEqual(gearAt(gear, 1.2), { state: "down" });
+  assert.equal(gearAt(gear, 1.5), null);
 });
 
 const speeds = { vref_kt: 60, vapp_kt: 65, source: "profile" as const, approximate: false, basis: "POH" };

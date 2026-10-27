@@ -378,7 +378,7 @@ interface Series {
   ra_ft: (number | null)[];       // radio height, on-ground bias removed; null above 2500 ft
   flap_deg: (number | null)[];
   vfe_kt: (number | null)[];      // profile's flap-speed limit at flap_deg; null without a profile band or with flaps up
-  gear_ext: (number | null)[];    // gear.extended as recorded, 0 = up; full is 1 from MSFS (a fraction, though the LFL unit is %), 100 elsewhere
+  gear_ext: (number | null)[];    // gear.extended, 0 = up to 100 = down (%)
   ap_engaged: (0 | 1 | null)[];   // autopilot engaged
   at_engaged: (0 | 1 | null)[];   // autothrottle engaged
   lat: (number | null)[];
@@ -386,7 +386,7 @@ interface Series {
 }
 // Values go out rounded to what the app shows: t_s and nz_g 3 decimals,
 // pitch and roll 2, lat/lon 6 (about 0.1 m), vs_fpm and the engaged flags
-// whole, gear_ext 2, the rest 1.
+// whole, the rest 1.
 
 interface Airport {
   icao: string;

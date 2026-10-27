@@ -263,7 +263,7 @@ export interface Series {
   flap_deg: SeriesValues;
   /** The profile's flap-speed limit at `flap_deg`. */
   vfe_kt: SeriesValues;
-  /** `gear.extended` as recorded, 0 = up; full is 1 from MSFS (a fraction), 100 from a source that sends percent. */
+  /** `gear.extended`, 0 = up to 100 = down (%). */
   gear_ext: SeriesValues;
   /** 1 engaged, 0 not. */
   ap_engaged: SeriesValues;

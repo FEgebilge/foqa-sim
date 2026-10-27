@@ -1,7 +1,7 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { clock, number } from "../../lib/format";
 import type { Theme } from "../../lib/palette";
-import { DERIVED, gearScale, instrumentsAt, type Instruments } from "../../lib/series";
+import { DERIVED, instrumentsAt, type Instruments } from "../../lib/series";
 import { useHover, type TimeBus } from "../../lib/time";
 import type { Debrief } from "../../types";
 
@@ -231,9 +231,8 @@ interface Props { debrief: Debrief; theme: Theme; focus: number | null; bus: Tim
 export function ReplayPfd({ debrief, theme, focus, bus }: Props) {
   const [hover, setHover] = useState<number | null>(null);
   useHover(bus, setHover);
-  const scale = useMemo(() => gearScale(debrief.series.gear_ext), [debrief.series.gear_ext]);
   const t = hover ?? focus;
-  const i = t === null ? null : instrumentsAt(debrief, t, scale);
+  const i = t === null ? null : instrumentsAt(debrief, t);
   const bug = COLOURS[theme].bug;
   const speeds = i?.speeds;
 
@@ -260,7 +259,7 @@ export function ReplayPfd({ debrief, theme, focus, bus }: Props) {
             ) : null}
             <g>
               <T x={10} y={H - 14} anchor="start" size={11}>{`FLAPS ${i.flap === null ? NO_DATA : `${number(i.flap)}°`}`}</T>
-              <T x={150} y={H - 14} anchor="start" size={11} title={DERIVED.gear}>{`GEAR ${gearText(i.gear)}`}</T>
+              <T x={150} y={H - 14} anchor="start" size={11}>{`GEAR ${gearText(i.gear)}`}</T>
               <T x={W - 10} y={H - 14} anchor="end" size={11} title={DERIVED.trk}>{`TRK ${i.trk === null ? NO_DATA : `${String(Math.round(i.trk) % 360).padStart(3, "0")}°T${DAGGER}`}`}</T>
             </g>
           </svg>

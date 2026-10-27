@@ -61,16 +61,11 @@ export function trackAt(series: Series, t: number): number | null {
 /** Up, down, or moving between them with its share extended (0-1). */
 export type Gear = { state: "up" | "down" } | { state: "transit"; extended: number };
 
-/**
- * The full-extension value of `gear_ext`: MSFS sends a fraction (1 = down) though the LFL unit is %, so a flight
- * whose values never pass 1.5 is read on a 0-1 scale, else 0-100. An inference, which the PFD says.
- */
-export const gearScale = (values: SeriesValues) => (values.some((v) => v !== null && v > 1.5) ? 100 : 1);
-
-export function gearAt(series: Series, t: number, scale: number): Gear | null {
+/** The gear at t from `gear_ext`, 0-100 %. */
+export function gearAt(series: Series, t: number): Gear | null {
   const v = valueAt(series.t_s, series.gear_ext, t, "hold");
   if (v === null) return null;
-  const extended = Math.min(1, Math.max(0, v / scale));
+  const extended = Math.min(1, Math.max(0, v / 100));
   return extended >= 0.99 ? { state: "down" } : extended <= 0.01 ? { state: "up" } : { state: "transit", extended };
 }
 
@@ -86,7 +81,6 @@ export const DERIVED = {
   vs: "Derived: inertial vertical speed, from pressure altitude blended with normal load (not recorded).",
   trk: "Derived: track over the ground from the GPS positions 2 s either side, degrees true (not recorded).",
   ra: "Radio height as recorded, with its on-ground bias removed; shown below 2500 ft only.",
-  gear: "Gear position as recorded; its 0-1 or 0-100 scale is inferred from the flight's values.",
 } as const;
 
 /** Everything the replay PFD draws at time t; `null` where the parameter has no data there. */
@@ -118,8 +112,8 @@ export interface Instruments {
 
 const flag = (v: number | null) => (v === null ? null : v >= 0.5);
 
-/** The PFD at t. `gear` is `gearScale(series.gear_ext)`, computed once per flight. */
-export function instrumentsAt(debrief: Debrief, t: number, gear = gearScale(debrief.series.gear_ext)): Instruments {
+/** The PFD at t. */
+export function instrumentsAt(debrief: Debrief, t: number): Instruments {
   const s = debrief.series;
   const at = (values: SeriesValues, how?: Interp) => valueAt(s.t_s, values, t, how);
   const ra = at(s.ra_ft);
@@ -134,7 +128,7 @@ export function instrumentsAt(debrief: Debrief, t: number, gear = gearScale(debr
     hdg: at(s.hdg_deg, "angle"),
     trk: trackAt(s, t),
     flap: at(s.flap_deg),
-    gear: gearAt(s, t, gear),
+    gear: gearAt(s, t),
     ap: flag(at(s.ap_engaged, "hold")),
     at: flag(at(s.at_engaged, "hold")),
     vfe: at(s.vfe_kt, "hold"),
