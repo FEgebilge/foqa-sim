@@ -5,23 +5,9 @@
 use std::collections::BTreeMap;
 
 use analyzer::RunwayFix;
-use serde::{Serialize, Serializer};
-
-/// `rules::Level` on the wire: its lowercase name. Ordered lowest first, so
-/// the most severe of several is their `max`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Level(pub rules::Level);
-
-impl Serialize for Level {
-    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        s.serialize_str(match self.0 {
-            rules::Level::Advisory => "advisory",
-            rules::Level::Low => "low",
-            rules::Level::Medium => "medium",
-            rules::Level::High => "high",
-        })
-    }
-}
+pub use rules::Level;
+use rules::Sourced;
+use serde::{Deserialize, Serialize};
 
 /// What the recorder is doing, as the tray and the app header show it.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -41,14 +27,14 @@ pub struct StorageUsage {
     pub folder: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Aircraft {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub icao: Option<String>,
     pub title: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FlightSummary {
     pub id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -77,6 +63,10 @@ pub struct FlightHeader {
     /// `light` or `transport`: the profile's class, else the class by weight.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub class: Option<String>,
+    /// The type profile's values that do not depend on the flight state,
+    /// by their `profile.<name>` in rules.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub profile_limits: BTreeMap<&'static str, Sourced>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub damaged_at: Option<u64>,
 }
@@ -141,9 +131,12 @@ pub struct TouchdownRunway {
     pub cross_m: f64,
     pub lda_m: f64,
     pub tdz_m: f64,
+    pub aiming_point_m: f64,
     pub in_tdz: bool,
     pub long_landing: bool,
     pub short_landing: bool,
+    /// `In TDZ`, `Long` or `Short`.
+    pub zone: &'static str,
 }
 
 impl From<&RunwayFix> for TouchdownRunway {
@@ -155,9 +148,11 @@ impl From<&RunwayFix> for TouchdownRunway {
             cross_m: f.cross_m,
             lda_m: f.lda_m,
             tdz_m: f.tdz_m,
+            aiming_point_m: f.aiming_point_m,
             in_tdz: f.in_tdz,
             long_landing: f.long_landing,
             short_landing: f.short_landing,
+            zone: f.zone(),
         }
     }
 }
@@ -183,21 +178,9 @@ pub struct Event {
     pub why_it_matters: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub advice: Option<String>,
-    #[serde(flatten)]
-    pub context: Context,
-}
-
-/// An event's surroundings at its `peak_s`, for "111 kt at flaps 12,
-/// limit 85 kt" (a flap overspeed's `value` is only the excess).
-#[derive(Debug, Clone, PartialEq, Default, Serialize)]
-pub struct Context {
+    /// The event in words, e.g. "111 kt at flaps 12°, limit 85 kt".
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub ias_kt: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub flap_deg: Option<f64>,
-    /// The type profile's flap-speed limit at `flap_deg`.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub vfe_kt: Option<f64>,
+    pub detail: Option<String>,
 }
 
 /// Parallel arrays on one time base; `NaN` (sent as `null`) where a

@@ -6,10 +6,12 @@
 
 #![forbid(unsafe_code)]
 
+mod index;
 mod wire;
 
 use std::collections::BTreeMap;
 use std::fs::{self, File};
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::io::{self, BufReader};
 use std::path::{Path, PathBuf};
 
@@ -17,19 +19,19 @@ use analyzer::{Flight, Phase, Span, Track, phases, thresholds, touchdowns};
 use fdm_core::geo::distance_m;
 use fdm_core::{Lfl, SimTime};
 use recorder::{COMPACT_EXT, Recorder, ReplaySource, SimEvent, TOUCHDOWN_WINDOW_US};
-use rules::{LoadError, ProfileError, ProfileField, ProfileSet, Rule, Selection};
+use rules::{LoadError, ProfileError, ProfileField, ProfileSet, Rule, Selection, Sourced};
 
+pub use index::{INDEX_FILE, Index};
 pub use wire::*;
 
 pub type Error = Box<dyn std::error::Error>;
 
 const CORE_RULES: &str = include_str!("../../../rules/core.yaml");
 const RAW_EXT: &str = ".raw.jsonl.gz";
-const JOURNAL_EXT: &str = ".fqj";
-const COMPACT_SUFFIX: &str = ".fqz";
+const JOURNAL_EXT: &str = "fqj";
 /// Stored flights, the compact form first: it wins where both exist, as
 /// while a journal is being compacted.
-const FLIGHT_EXTS: [&str; 2] = [COMPACT_EXT, "fqj"];
+const FLIGHT_EXTS: [&str; 2] = [COMPACT_EXT, JOURNAL_EXT];
 /// The series keeps every `BASE_STEP`th track point (2 Hz at 8 Hz): enough
 /// for a whole-flight profile, light enough for the app.
 const BASE_STEP: usize = 4;
@@ -44,54 +46,66 @@ pub fn core_rules() -> Result<Vec<Rule>, LoadError> {
 /// Reads a journal (`.fqj`), a compact flight (`.fqz`), or a raw capture after recording it through the
 /// on-board chain in memory, the way the aircraft would have.
 pub fn load(path: &Path) -> io::Result<Flight> {
-    if path.to_string_lossy().ends_with(RAW_EXT) {
-        let mut recorder = Recorder::new(&Lfl::V1, Vec::new())?;
-        recorder.run(&mut ReplaySource::open(path, recorder.acquisition())?)?;
-        return Flight::read(&recorder.into_inner()[..]);
+    if file_name(path).ends_with(RAW_EXT) {
+        return Flight::read(&record(path)?[..]);
     }
     Flight::read(BufReader::new(File::open(path)?))
 }
 
+/// The journal of a raw capture, recorded through the on-board chain.
+fn record(raw: &Path) -> io::Result<Vec<u8>> {
+    let mut recorder = Recorder::new(&Lfl::V1, Vec::new())?;
+    recorder.run(&mut ReplaySource::open(raw, recorder.acquisition())?)?;
+    Ok(recorder.into_inner())
+}
+
 /// A flight's id: its file name without `.fqj` / `.fqz` / `.raw.jsonl.gz`.
 pub fn flight_id(path: &Path) -> String {
-    let name = path
-        .file_name()
-        .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
-    [RAW_EXT, JOURNAL_EXT, COMPACT_SUFFIX]
+    let name = file_name(path);
+    suffixes()
         .iter()
-        .find_map(|ext| name.strip_suffix(ext))
+        .find_map(|ext| name.strip_suffix(ext.as_str()))
         .unwrap_or(&name)
         .to_owned()
+}
+
+fn file_name(path: &Path) -> String {
+    path.file_name()
+        .map_or_else(String::new, |n| n.to_string_lossy().into_owned())
+}
+
+/// The file name endings of a flight's files: raw capture, journal, compact.
+fn suffixes() -> [String; 3] {
+    [
+        RAW_EXT.to_owned(),
+        format!(".{JOURNAL_EXT}"),
+        format!(".{COMPACT_EXT}"),
+    ]
+}
+
+fn has_ext(path: &Path, ext: &str) -> bool {
+    path.extension().is_some_and(|e| e == ext)
+}
+
+fn files(dir: &Path) -> impl Iterator<Item = PathBuf> {
+    let entries = fs::read_dir(dir).into_iter().flatten().flatten();
+    entries.map(|e| e.path())
 }
 
 /// The stored flights in `dir` (journals and compact flights, one file per
 /// flight), in no particular order.
 pub fn flight_files(dir: &Path) -> Vec<PathBuf> {
-    let Ok(entries) = fs::read_dir(dir) else {
-        return Vec::new();
-    };
-    let paths: Vec<_> = entries.flatten().map(|e| e.path()).collect();
-    let stored = |p: &PathBuf| {
-        FLIGHT_EXTS
-            .iter()
-            .position(|x| p.extension().is_some_and(|e| e == *x))
-    };
-    paths
-        .iter()
+    files(dir)
         .filter(|p| {
-            stored(p).is_some_and(|rank| rank == 0 || !p.with_extension(COMPACT_EXT).exists())
+            has_ext(p, COMPACT_EXT)
+                || has_ext(p, JOURNAL_EXT) && !p.with_extension(COMPACT_EXT).exists()
         })
-        .cloned()
         .collect()
 }
 
 /// The uncompacted journals in `dir`.
 pub fn journals(dir: &Path) -> Vec<PathBuf> {
-    let entries = fs::read_dir(dir).into_iter().flatten().flatten();
-    let paths = entries.map(|e| e.path());
-    paths
-        .filter(|p| p.extension().is_some_and(|e| e == "fqj"))
-        .collect()
+    files(dir).filter(|p| has_ext(p, JOURNAL_EXT)).collect()
 }
 
 /// Compacts each journal (see `recorder::compact_file`), reporting on stderr.
@@ -145,7 +159,7 @@ pub fn storage_usage(dir: &Path) -> StorageUsage {
 /// many were there.
 pub fn delete_flight(dir: &Path, id: &str) -> io::Result<usize> {
     let mut deleted = 0;
-    for ext in [JOURNAL_EXT, COMPACT_SUFFIX, RAW_EXT] {
+    for ext in suffixes() {
         match fs::remove_file(dir.join(format!("{id}{ext}"))) {
             Ok(()) => deleted += 1,
             Err(e) if e.kind() == io::ErrorKind::NotFound => {}
@@ -159,13 +173,20 @@ pub fn delete_flight(dir: &Path, id: &str) -> io::Result<usize> {
 pub struct Station {
     rules: Vec<Rule>,
     profiles: ProfileSet,
+    /// Hash of the rules, the profiles and the analysis code (`build.rs`):
+    /// a summary made by another station is stale.
+    version: String,
 }
 
 impl Station {
     pub fn new(rules: Vec<Rule>) -> Result<Self, ProfileError> {
+        let profiles = ProfileSet::shipped()?;
+        let mut h = DefaultHasher::new();
+        format!("{rules:?}{profiles:?}{}", env!("SOURCE_HASH")).hash(&mut h);
         Ok(Self {
             rules,
-            profiles: ProfileSet::shipped()?,
+            profiles,
+            version: format!("{:016x}", h.finish()),
         })
     }
 
@@ -223,7 +244,7 @@ impl Analysis<'_> {
     pub fn summary(&self) -> FlightSummary {
         let t = &self.track.t;
         let events = self.events();
-        let mut event_counts: BTreeMap<_, usize> = rules::Level::ALL.map(|l| (Level(l), 0)).into();
+        let mut event_counts: BTreeMap<_, usize> = Level::ALL.map(|l| (l, 0)).into();
         for e in &events {
             *event_counts.entry(e.level).or_default() += 1;
         }
@@ -256,6 +277,7 @@ impl Analysis<'_> {
                 lfl_version: self.flight.lfl_version(),
                 profile: self.selection.to_string(),
                 class: self.selection.class.map(|c| c.to_string()),
+                profile_limits: self.profile_limits(),
                 damaged_at: self.flight.damaged_at,
             },
             phases: self
@@ -330,7 +352,7 @@ impl Analysis<'_> {
             version: e.version,
             title: e.title.clone(),
             description: rule.map_or_else(String::new, |r| r.description.trim().to_owned()),
-            level: Level(e.level),
+            level: e.level,
             start_s: secs(e.start),
             end_s: secs(e.end),
             peak_s: secs(e.peak),
@@ -340,7 +362,7 @@ impl Analysis<'_> {
             unit: e.unit.map(|u| u.symbol()).filter(|s| !s.is_empty()),
             why_it_matters: rule.and_then(|r| text(r.why_it_matters.as_deref())),
             advice: rule.and_then(|r| text(r.advice.as_deref())),
-            context: self.context(e.peak),
+            detail: e.detail.clone(),
         }
     }
 
@@ -352,7 +374,7 @@ impl Analysis<'_> {
             version: 1,
             title: "Pilot report".into(),
             description: note.trim().to_owned(),
-            level: Level(rules::Level::Advisory),
+            level: Level::Advisory,
             start_s: secs(t),
             end_s: secs(t),
             peak_s: secs(t),
@@ -362,25 +384,27 @@ impl Analysis<'_> {
             unit: None,
             why_it_matters: None,
             advice: None,
-            context: self.context(t),
-        }
-    }
-
-    /// IAS, flap angle and the profile's VFE at `t`.
-    fn context(&self, t: SimTime) -> Context {
-        let flap_deg = self.flight.at("flap.te_angle", t);
-        Context {
-            ias_kt: self.flight.at("ias", t),
-            vfe_kt: self.vfe(flap_deg),
-            flap_deg,
+            detail: None,
         }
     }
 
     /// The profile's flap-speed limit at `flap_deg`, as the flap-overspeed
     /// rule reads it.
-    fn vfe(&self, flap_deg: Option<f64>) -> Option<f64> {
+    fn vfe(&self, flap_deg: f64) -> Option<f64> {
         let profile = self.selection.profile?;
-        profile.value(ProfileField::Vfe, || flap_deg.filter(|a| a.is_finite()))
+        profile.value(ProfileField::Vfe, || {
+            Some(flap_deg).filter(|a| a.is_finite())
+        })
+    }
+
+    /// The profile's values that do not depend on the flight state (all
+    /// but VFE, which depends on the flaps).
+    fn profile_limits(&self) -> BTreeMap<&'static str, Sourced> {
+        let sourced = |f: ProfileField| {
+            let value = self.selection.profile?.sourced(f, || None)?;
+            Some((f.name(), value.clone()))
+        };
+        ProfileField::ALL.into_iter().filter_map(sourced).collect()
     }
 
     /// The departure aerodrome: of the snapshots recorded before the first
@@ -437,7 +461,7 @@ impl Analysis<'_> {
         // The profile's flap-speed limit at each point; NaN without a profile band or with the flaps up.
         let vfe_kt = flap_deg
             .iter()
-            .map(|&a| self.vfe(Some(a)).unwrap_or(f64::NAN))
+            .map(|&a| self.vfe(a).unwrap_or(f64::NAN))
             .collect();
         Series {
             t_s: points.iter().map(|&i| secs(track.t[i])).collect(),
@@ -515,7 +539,7 @@ mod tests {
 
     use super::*;
 
-    const C172: &str = concat!(
+    pub(crate) const C172: &str = concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../fixtures/c172-pattern.raw.jsonl.gz"
     );
@@ -544,13 +568,16 @@ mod tests {
         let d = c172().debrief();
         assert_eq!(d.flight.summary.id, "c172-pattern");
         assert_eq!(d.flight.summary.landings, 1);
-        assert_eq!(
-            d.flight.summary.worst_level,
-            Some(Level(rules::Level::High))
-        );
+        assert_eq!(d.flight.summary.worst_level, Some(Level::High));
         assert_eq!(d.events.len(), 6);
         assert!(d.events.iter().all(|e| !e.description.is_empty()));
         assert!(d.events.iter().all(|e| e.advice.is_some()));
+        // Every measured value is said in words.
+        assert!(
+            d.events
+                .iter()
+                .all(|e| e.value.is_none() || e.detail.is_some())
+        );
         assert!(
             d.events
                 .iter()
@@ -634,19 +661,15 @@ mod tests {
             (report.title.as_str(), report.description.as_str()),
             ("Pilot report", "long final")
         );
-        assert_eq!(
-            (report.level, report.start_s),
-            (Level(rules::Level::Advisory), 100.0)
-        );
-        assert!(report.context.ias_kt.is_some());
+        assert_eq!((report.level, report.start_s), (Level::Advisory, 100.0));
         let counts = &a.summary().event_counts;
-        assert_eq!(counts[&Level(rules::Level::Advisory)], 1);
+        assert_eq!(counts[&Level::Advisory], 1);
     }
 
     #[test]
     fn deleting_a_flight_takes_its_files_only() {
-        let dir = std::env::temp_dir().join(format!("foqa-delete-{}", std::process::id()));
-        fs::create_dir_all(&dir).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
         let names = [
             "flight-1.fqj",
             "flight-1.raw.jsonl.gz",
@@ -656,10 +679,9 @@ mod tests {
         for name in names {
             fs::write(dir.join(name), b"x").unwrap();
         }
-        assert_eq!(delete_flight(&dir, "flight-1").unwrap(), 2);
+        assert_eq!(delete_flight(dir, "flight-1").unwrap(), 2);
         let left: Vec<_> = names.iter().filter(|n| dir.join(n).exists()).collect();
         assert_eq!(left, [&"flight-10.fqz", &"flight-1.txt"]);
-        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

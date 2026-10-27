@@ -12,6 +12,8 @@ The raw capture is optional (`foqa-rec --raw`, `FOQA_RAW=1` for the app).
 The recorder compacts each journal when its flight closes, and the journals
 of earlier runs at start-up; `fdm compact` does it by hand. Readers accept
 both journal and compact flight.
+The ground station also keeps a [flight index](#flight-index), a cache of
+the flight list.
 
 All integers and floats are little-endian.
 
@@ -76,7 +78,7 @@ Appended one after another until the end of the file:
 | text | UTF-8, rest of payload | Flight file for code `4`, airport snapshot JSON for code `5`, aircraft identity JSON for code `6`, the pilot's note for code `7` (may be empty), else empty |
 
 A **pilot report** (code `7`) marks a moment the pilot chose in the in-sim
-panel (`mark`, [ingame-panel-v2.md](ingame-panel-v2.md)), stamped like any
+panel (`mark`, [ingame-panel.md](ingame-panel.md)), stamped like any
 event with the last frame's time. Readers that predate it skip it as an
 unknown code. The debrief lists it as an advisory event
 ([debrief-api.md](debrief-api.md)).
@@ -186,3 +188,30 @@ event codes are skipped, as in the journal.
 
 On the 11-minute flight used to choose the format, the journal was
 3.80 MB and the compact flight 0.32 MB (8.5 %).
+
+## Flight index
+
+`index.json` in the flights folder caches the app's flight list
+(`FlightSummary`, [debrief-api.md](debrief-api.md)) so a start does not
+analyse every flight. It is a cache, not a record: a missing, unreadable or
+stale file is rebuilt from the flights, and it can be deleted at any time.
+
+```json
+{
+  "station": "9f3c0e2a41b7d855",
+  "flights": {
+    "flight-1793043552.fqz": { "len": 368042, "modified_ns": 1793050212000000000, "summary": { ... } }
+  }
+}
+```
+
+- `station`: hash of the rule set, the type profiles and the build (the
+  running executable's size and modification time). Any change drops every
+  entry, so new rules or code regrade every flight.
+- `flights`: by file name, compact flights only (a journal may still be
+  recording). An entry is used while the file's `len` (bytes) and
+  `modified_ns` (modification time, ns since the Unix epoch) are unchanged;
+  `summary` is `null` for a flight with nothing to analyse. Entries of
+  deleted flights are dropped.
+
+It is written whole to `index.json.part`, then renamed over the old file.

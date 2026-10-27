@@ -4,6 +4,7 @@
 //! `fdm debrief <flight> [--json]`              the app's debrief, as JSON
 //! `fdm export <flight> [out-dir]`              long-format Parquet (+ events)
 //! `fdm compact <journal.fqj|folder>`           journals to compact flights
+//! `fdm list <folder>`                          the app's flight list, as JSON
 //!
 //! `<flight>` is a journal (`.fqj`), a compact flight (`.fqz`) or a raw
 //! capture (`.raw.jsonl.gz`), which is first recorded through the on-board
@@ -17,7 +18,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use analyzer::{RunwayFix, export};
-use debrief::{Analysis, Station, flight_id};
+use debrief::{Analysis, Index, Station, flight_id};
 use fdm_core::SimTime;
 use rules::Event;
 
@@ -25,7 +26,8 @@ const USAGE: &str =
     "usage: fdm analyze <flight.fqj|flight.fqz|capture.raw.jsonl.gz> [--rules file.yaml]
        fdm debrief <flight> [--json]
        fdm export <flight> [out-dir]
-       fdm compact <journal.fqj|folder>";
+       fdm compact <journal.fqj|folder>
+       fdm list <folder>";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -36,6 +38,7 @@ fn main() -> ExitCode {
         ["export", path] => export(Path::new(path), Path::new(".")),
         ["export", path, out] => export(Path::new(path), Path::new(out)),
         ["compact", path] => compact(Path::new(path)),
+        ["list", dir] => list(Path::new(dir)),
         _ => {
             eprintln!("{USAGE}");
             return ExitCode::from(2);
@@ -122,20 +125,16 @@ fn analyze(path: &Path, rules_path: Option<&Path>) -> Result<(), Box<dyn Error>>
     Ok(())
 }
 
-/// `LTBJ 16L  +412 m from threshold, 3 m R, in TDZ`
+/// `LTBJ 16L  +412 m from threshold, 3 m R, In TDZ`
 fn runway_text(fix: &RunwayFix) -> String {
-    let zone = match (fix.short_landing, fix.long_landing) {
-        (true, _) => "short of threshold",
-        (_, true) => "long",
-        _ => "in TDZ",
-    };
     format!(
-        "{} {}  {:+.0} m from threshold, {:.0} m {}, {zone}",
+        "{} {}  {:+.0} m from threshold, {:.0} m {}, {}",
         fix.icao,
         fix.runway,
         fix.along_m,
         fix.cross_m.abs(),
         if fix.cross_m < 0.0 { "L" } else { "R" },
+        fix.zone(),
     )
 }
 
@@ -194,4 +193,11 @@ fn compact(path: &Path) -> Result<(), Box<dyn Error>> {
         0 => Ok(()),
         n => Err(format!("{n} journal(s) not compacted").into()),
     }
+}
+
+/// The summaries through the folder's index, which it brings up to date.
+fn list(dir: &Path) -> Result<(), Box<dyn Error>> {
+    let summaries = Index::open(dir).summaries(&Station::core()?);
+    println!("{}", serde_json::to_string_pretty(&summaries)?);
+    Ok(())
 }
