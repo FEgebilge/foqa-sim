@@ -87,7 +87,8 @@
       "threshold": 1500.0,
       "unit": "fpm",
       "why_it_matters": "A sustained high descent rate close to the ground leaves little room to arrest it and is a classic precursor of hard landings and controlled flight into terrain.",
-      "advice": "Stay on a stable path and keep the descent under 1000 fpm below 1000 ft; if it needs more, the approach is too high: go around and set up again."
+      "advice": "Stay on a stable path and keep the descent under 1000 fpm below 1000 ft; if it needs more, the approach is too high: go around and set up again.",
+      "detail": "2990 fpm sink, limit 1500 fpm"
     },
     {
       "rule": "unstable-sink-500",
@@ -103,7 +104,8 @@
       "threshold": 1500.0,
       "unit": "fpm",
       "why_it_matters": "A steep, fast descent at 500 ft leaves little height to arrest the sink, a common precursor of hard and short landings.",
-      "advice": "Fly a stable path of about 3 degrees (roughly 500-700 fpm in a light aircraft, 700-800 fpm in a jet). More than 1000 fpm at the gate: go around."
+      "advice": "Fly a stable path of about 3 degrees (roughly 500-700 fpm in a light aircraft, 700-800 fpm in a jet). More than 1000 fpm at the gate: go around.",
+      "detail": "2062 fpm sink, limit 1500 fpm"
     },
     {
       "rule": "unstable-bank-500",
@@ -119,7 +121,8 @@
       "threshold": 15.0,
       "unit": "deg",
       "why_it_matters": "Still turning at 500 ft means the aircraft is not lined up with the runway, and bank raises the stall speed close to the ground.",
-      "advice": "Roll out on final above 500 ft: extend the downwind or widen the base turn so the final is straight and wings-level. Not aligned at the gate: go around."
+      "advice": "Roll out on final above 500 ft: extend the downwind or widen the base turn so the final is straight and wings-level. Not aligned at the gate: go around.",
+      "detail": "15.4° bank, limit 15°"
     },
     {
       "rule": "bank-below-500",
@@ -135,7 +138,8 @@
       "threshold": 20.0,
       "unit": "deg",
       "why_it_matters": "Steep bank close to the ground raises the stall speed (about 7% at 20 deg, 41% at 45 deg) and risks a wingtip strike; a stall in a low turn is rarely recoverable.",
-      "advice": "Plan the pattern so the turn to final is complete with shallow bank (15 deg or less) well above 500 ft. Overshooting final: go around, do not tighten the turn."
+      "advice": "Plan the pattern so the turn to final is complete with shallow bank (15 deg or less) well above 500 ft. Overshooting final: go around, do not tighten the turn.",
+      "detail": "27° bank, limit 20°"
     },
     {
       "rule": "high-sink-below-1000",
@@ -151,7 +155,8 @@
       "threshold": 1200.0,
       "unit": "fpm",
       "why_it_matters": "A sustained high descent rate close to the ground leaves little room to arrest it and is a classic precursor of hard landings and controlled flight into terrain.",
-      "advice": "Stay on a stable path and keep the descent under 1000 fpm below 1000 ft; if it needs more, the approach is too high: go around and set up again."
+      "advice": "Stay on a stable path and keep the descent under 1000 fpm below 1000 ft; if it needs more, the approach is too high: go around and set up again.",
+      "detail": "1477 fpm sink, limit 1200 fpm"
     },
     {
       "rule": "high-sink-below-1000",
@@ -167,7 +172,8 @@
       "threshold": 1000.0,
       "unit": "fpm",
       "why_it_matters": "A sustained high descent rate close to the ground leaves little room to arrest it and is a classic precursor of hard landings and controlled flight into terrain.",
-      "advice": "Stay on a stable path and keep the descent under 1000 fpm below 1000 ft; if it needs more, the approach is too high: go around and set up again."
+      "advice": "Stay on a stable path and keep the descent under 1000 fpm below 1000 ft; if it needs more, the approach is too high: go around and set up again.",
+      "detail": "1194 fpm sink, limit 1000 fpm"
     }
   ],
   "series": {

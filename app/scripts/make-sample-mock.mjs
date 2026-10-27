@@ -1,10 +1,27 @@
-// Writes a synthetic sample flight list and debriefs to public/mock/sample-*.json, following docs/debrief-api.md.
-// Only for developing the UI in a browser before real data exists; the API layer prefers flights.json / debrief-<id>.json.
+// Writes a synthetic sample flight list and debriefs to public/mock/sample-*.json in the shape `fdm debrief --json` writes
+// (docs/debrief-api.md); event texts and details come from rules/core.yaml. Only for developing the UI in a browser before
+// real data exists; the API layer prefers flights.json / debrief-<id>.json.
 // A C172 flies two left-hand circuits on LTFA runway 35: a bounced touch-and-go, then a long full-stop landing.
-import { mkdirSync, writeFileSync } from "node:fs"
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
 const OUT = join(import.meta.dirname, "../public/mock")
+/** title, description, why_it_matters, advice and detail of each rule, by name. */
+const RULES = Object.fromEntries(readFileSync(join(import.meta.dirname, "../../rules/core.yaml"), "utf8").replace(/\r/g, "").split(/^---$/m).map((doc) => {
+  const field = (key) => doc.match(new RegExp(`^${key}: >\\n((?:  .*\\n?)+)`, "m"))?.[1].trim().split(/\s*\n\s*/).join(" ")
+    ?? doc.match(new RegExp(`^${key}: "?(.*?)"?$`, "m"))?.[1]
+  return [field("rule"), Object.fromEntries(["title", "description", "why_it_matters", "advice", "detail"].map((k) => [k, field(k)]))]
+}))
+const UNIT = { kt: " kt", fpm: " fpm", ft: " ft", g: " g", deg: "°" }
+/** A number as the rules engine shows it (crates/rules/src/rule.rs `show`): two decimals in g, one under 10 when not whole. */
+const digits = (x, unit) => (unit === "g" ? 2 : Math.abs(x) < 10 && Math.round(x * 10) % 10 ? 1 : 0)
+const show = (x, unit, extra = 0) => (x + 0).toFixed(digits(x, unit) + extra) + UNIT[unit]
+/** The rule's `detail` with {value}, {threshold} and the named [value, unit] pairs filled in; a value that would read as its threshold gets more decimals. */
+function detail(rule, value, threshold, unit, vars = {}) {
+  const template = RULES[rule].detail ?? (value === undefined ? undefined : "{value}, limit {threshold}")
+  const extra = value === undefined ? 0 : [0, 1].find((e) => show(value, unit, e) !== show(threshold, unit)) ?? 2
+  return template?.replace(/\{([^}]+)\}/g, (_, name) => (name === "value" ? show(value, unit, extra) : name === "threshold" ? show(threshold, unit) : show(...vars[name])))
+}
 const KT = 0.514444, FT = 0.3048, G = 9.80665, DEG = Math.PI / 180
 const THR35 = { lat: 38.4985, lon: 27.0128 }, HDG = 350, LDA = 2950, ELEV_FT = 15
 const TDZ = Math.min(3000 * FT, LDA / 3)
@@ -135,6 +152,8 @@ function build(id, opts = {}) {
   const cut = opts.damagedAt ? keep.findIndex((x) => x.t > opts.cutAt) : -1
   const samples = cut > 0 ? keep.slice(0, cut) : keep
   const r1 = (v, d = 1) => Math.round(v * 10 ** d) / 10 ** d
+  // profiles/C172.yaml flap bands; other types here have none.
+  const vfe = (flap) => (opts.aircraft?.icao === "C172" && flap > 0 ? (flap <= 10 ? 110 : 85) : null)
   const pos = samples.map((x) => toLatLon(x.a, x.r))
   const series = {
     t_s: samples.map((x) => r1(x.t, 3)),
@@ -147,6 +166,7 @@ function build(id, opts = {}) {
     pitch_deg: samples.map((x) => r1(x.pitch)),
     roll_deg: samples.map((x) => r1(x.roll)),
     flap_deg: samples.map((x) => x.flap),
+    vfe_kt: samples.map((x) => vfe(x.flap)),
     lat: pos.map((p) => r1(p.lat, 6)),
     lon: pos.map((p) => r1(p.lon, 6)),
   }
@@ -170,47 +190,43 @@ function build(id, opts = {}) {
       peak_g: peaks[k], pitch_deg: r1(before.pitch), roll_deg: r1(before.roll), ias_kt: r1(x.ias),
       runway: withRunway ? (() => {
         const cross = k === 0 ? -2.8 : opts.secondCross ?? 9.5
-        return { icao: "LTFA", runway: "35", along_m: Math.round(x.a), cross_m: cross, lda_m: LDA, tdz_m: Math.round(TDZ), in_tdz: x.a >= 0 && x.a <= TDZ, long_landing: x.a > TDZ, short_landing: x.a < 0 }
+        return { icao: "LTFA", runway: "35", along_m: Math.round(x.a), cross_m: cross, lda_m: LDA, tdz_m: Math.round(TDZ), aiming_point_m: 400, in_tdz: x.a >= 0 && x.a <= TDZ, long_landing: x.a > TDZ, short_landing: x.a < 0, zone: x.a < 0 ? "Short" : x.a > TDZ ? "Long" : "In TDZ" }
       })() : undefined,
     }
   })
 
   const events = []
-  const add = (e) => events.push({ version: 1, ...e })
-  const span = (pred) => { const out = []; let cur = null; for (const x of samples) { if (pred(x)) { cur ??= { start: x.t, xs: [] }; cur.end = x.t; cur.xs.push(x) } else if (cur) { out.push(cur); cur = null } } if (cur) out.push(cur); return out }
-  const ruleText = {
-    "bank-below-500": ["Excessive bank below 500 ft", "Initial tier from the FOQA rule research: more than 15 deg below 500 ft. Higher levels are a FOQA-Sim estimate."],
-    "flap-overspeed": ["Flap overspeed", "IAS above the VFE for the flap angle, which comes from the aircraft's type profile (profiles/<ICAO>.yaml, manufacturer's airspeed limitations). Silent without a profile. Levels above VFE are a FOQA-Sim estimate."],
-    "hard-landing-light": ["Hard landing (light aircraft)", "Peak normal load at touchdown, light aircraft (normal-category limit load 3.8 g). Levels are a FOQA-Sim estimate."],
-    "bounced-landing": ["Bounced landing", "More than one main-gear air-to-ground transition (EASA EOFDM RE30)."],
-    "long-landing": ["Long landing", "Touchdown beyond the touchdown zone, whose length is min(3000 ft, LDA/3) of the landing runway (sources to be confirmed: FAA P/CG 3000 ft, one-third rule). Needs the airport data recorded in flight."],
-    "off-centreline-touchdown": ["Touchdown off the runway centreline", "Distance of the touchdown from the runway centreline. Levels are a FOQA-Sim estimate. Needs the airport data recorded in flight."],
+  // Thresholds as in rules/core.yaml; `vars` fills the detail's other placeholders.
+  const add = ({ rule, level, start, end = start, peak = start, measure, value, levels, unit, vars }) => {
+    level ??= ["high", "medium", "low"].find((l) => value > levels[l])
+    const threshold = levels?.[level], { title, description, why_it_matters, advice } = RULES[rule]
+    // JSON key order follows `fdm debrief --json`.
+    events.push({ rule, version: 1, title, description, level, start_s: r1(start, 3), end_s: r1(end, 3), peak_s: r1(peak, 3), measure,
+      value, threshold, unit, why_it_matters, advice, detail: detail(rule, value, threshold, unit, vars) })
   }
-  const text = (rule) => ({ rule, title: ruleText[rule][0], description: ruleText[rule][1] })
+  const span = (pred) => { const out = []; let cur = null; for (const x of samples) { if (pred(x)) { cur ??= { start: x.t, xs: [] }; cur.end = x.t; cur.xs.push(x) } else if (cur) { out.push(cur); cur = null } } if (cur) out.push(cur); return out }
+  const peakOf = (xs, f) => xs.reduce((a, b) => (f(b) > f(a) ? b : a))
   for (const b of span((x) => x.h < 500 * FT && x.h > 0.05 && Math.abs(x.roll) > 15)) {
     if (b.end - b.start < 2) continue
-    const peak = Math.max(...b.xs.map((x) => Math.abs(x.roll)))
-    const level = peak > 30 ? "high" : peak > 20 ? "medium" : "low"
-    add({ ...text("bank-below-500"), level, start_s: r1(b.start, 3), end_s: r1(b.end, 3), measure: "abs(roll)", value: r1(peak), threshold: { low: 15, medium: 20, high: 30 }[level], unit: "deg" })
+    const p = peakOf(b.xs, (x) => Math.abs(x.roll))
+    add({ rule: "bank-below-500", start: b.start, end: b.end, peak: p.t, measure: "abs(roll)", value: r1(Math.abs(p.roll)), levels: { low: 15, medium: 20, high: 30 }, unit: "deg" })
   }
-  for (const b of span((x) => x.flap >= 20 && x.ias > 85 && x.h > 0.05)) {
+  for (const b of span((x) => vfe(x.flap) !== null && x.ias > vfe(x.flap) && x.h > 0.05)) {
     if (b.end - b.start < 2) continue
-    const excess = Math.max(...b.xs.map((x) => x.ias - 85))
-    const level = excess > 10 ? "high" : excess > 5 ? "medium" : "low"
-    add({ ...text("flap-overspeed"), level, start_s: r1(b.start, 3), end_s: r1(b.end, 3), measure: "ias - profile.vfe", value: r1(excess), threshold: { low: 0, medium: 5, high: 10 }[level], unit: "kt" })
+    const p = peakOf(b.xs, (x) => x.ias - vfe(x.flap))
+    add({ rule: "flap-overspeed", start: b.start, end: b.end, peak: p.t, measure: "ias - profile.vfe", value: r1(p.ias - vfe(p.flap)), levels: { low: 0, medium: 5, high: 10 }, unit: "kt",
+      vars: { ias: [p.ias, "kt"], "flap.te_angle": [p.flap, "deg"], "profile.vfe": [vfe(p.flap), "kt"] } })
   }
   for (const td of touchdowns) {
-    const at = { start_s: td.t_s, end_s: td.t_s }
-    if (td.peak_g > 1.8) add({ ...text("hard-landing-light"), ...at, level: td.peak_g > 2.6 ? "high" : td.peak_g > 2.2 ? "medium" : "low", measure: "td.peak_g", value: td.peak_g, threshold: 1.8, unit: "g" })
-    if (td.bounce) add({ ...text("bounced-landing"), ...at, level: "medium", measure: "td.bounce" })
-    if (td.runway?.long_landing) add({ ...text("long-landing"), ...at, level: "medium", measure: "td.long_landing" })
-    const crossFt = td.runway ? Math.abs(td.runway.cross_m) / FT : 0
-    if (crossFt > 25) add({ ...text("off-centreline-touchdown"), ...at, level: crossFt > 60 ? "high" : crossFt > 40 ? "medium" : "low", measure: "abs(td.cross)", value: r1(crossFt), threshold: crossFt > 60 ? 60 : crossFt > 40 ? 40 : 25, unit: "ft" })
+    const at = { start: td.t_s }
+    if (td.peak_g > 1.8) add({ rule: "hard-landing-light", ...at, measure: "td.peak_g", value: td.peak_g, levels: { low: 1.8, medium: 2.2, high: 2.6 }, unit: "g" })
+    if (td.bounce) add({ rule: "bounced-landing", ...at, level: "medium", measure: "td.bounce" })
+    if (td.runway?.long_landing) add({ rule: "long-landing", ...at, level: "medium", measure: "td.long_landing" })
+    const crossFt = td.runway ? r1(Math.abs(td.runway.cross_m) / FT) : 0
+    if (crossFt > 25) add({ rule: "off-centreline-touchdown", ...at, measure: "abs(td.cross)", value: crossFt, levels: { low: 25, medium: 40, high: 60 }, unit: "ft" })
   }
   const rank = { high: 0, medium: 1, low: 2, advisory: 3 }
-  events.sort((a, b) => a.start_s - b.start_s || rank[a.level] - rank[b.level])
-  // JSON key order follows the contract.
-  const ordered = events.map(({ rule, version, title, description, level, start_s, end_s, measure, value, threshold, unit }) => ({ rule, version, title, description, level, start_s, end_s, measure, value, threshold, unit }))
+  const ordered = events.sort((a, b) => a.start_s - b.start_s || rank[a.level] - rank[b.level])
 
   const counts = { advisory: 0, low: 0, medium: 0, high: 0 }
   ordered.forEach((e) => counts[e.level]++)
@@ -222,7 +238,7 @@ function build(id, opts = {}) {
   }
   const thr17 = toLatLon(LDA, 0)
   const debrief = {
-    flight: { ...summary, lfl_version: 1, profile: opts.profile, damaged_at: opts.damagedAt },
+    flight: { ...summary, lfl_version: 1, profile: opts.profile, class: opts.class, damaged_at: opts.damagedAt },
     phases, touchdowns, events: ordered, series,
     airports: withRunway ? [{ icao: "LTFA", runways: [{ width_m: 45, ends: [
       { runway: "35", lat: THR35.lat, lon: THR35.lon, heading_deg: HDG, lda_m: LDA, tdz_m: Math.round(TDZ) },
@@ -232,13 +248,13 @@ function build(id, opts = {}) {
   return { summary, debrief }
 }
 
-const c172 = { icao: "C172", title: "Cessna Skyhawk G1000 Asobo" }
+const c172 = { aircraft: { icao: "C172", title: "Cessna Skyhawk G1000 Asobo" }, profile: "C172 profile", class: "light" }
 const flights = [
-  build("flight-1793027213", { started: "2026-10-26T14:26:53Z", aircraft: c172, profile: "C172 profile" }),
-  build("flight-1792941000", { started: "2026-10-25T14:30:00Z", aircraft: c172, profile: "C172 profile", bounce: false, overspeed: false, secondAlong: 420, secondCross: 1.2, radius: 1100 }),
-  build("flight-1792850400", { started: "2026-10-24T13:20:00Z", aircraft: { icao: "B738", title: "Boeing 737-800 Asobo" }, profile: "B738 profile", noRunway: true, bounce: false }),
-  build("flight-1792764000", { started: "2026-10-23T13:20:00Z", aircraft: c172, profile: "C172 profile", damagedAt: 1048576, cutAt: 520 }),
-  build("flight-1792677600", { started: "2026-10-22T13:20:00Z", profile: "light class default (no aircraft identity)", overspeed: false }),
+  build("flight-1793027213", { started: "2026-10-26T14:26:53Z", ...c172 }),
+  build("flight-1792941000", { started: "2026-10-25T14:30:00Z", ...c172, bounce: false, overspeed: false, secondAlong: 420, secondCross: 1.2, radius: 1100 }),
+  build("flight-1792850400", { started: "2026-10-24T13:20:00Z", aircraft: { icao: "B738", title: "Boeing 737-800 Asobo" }, profile: "B738 profile", class: "transport", noRunway: true, bounce: false }),
+  build("flight-1792764000", { started: "2026-10-23T13:20:00Z", ...c172, damagedAt: 1048576, cutAt: 520 }),
+  build("flight-1792677600", { started: "2026-10-22T13:20:00Z", profile: "light class default (no aircraft identity)", class: "light", overspeed: false }),
 ]
 mkdirSync(OUT, { recursive: true })
 writeFileSync(join(OUT, "sample-flights.json"), JSON.stringify(flights.map((f) => f.summary), null, 2))

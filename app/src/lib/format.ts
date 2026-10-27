@@ -1,7 +1,15 @@
 import type { Aircraft, FlightEvent, Level } from "../types";
 
+/** Most severe first. */
 export const LEVELS: Level[] = ["high", "medium", "low", "advisory"];
 export const LEVEL_LABEL: Record<Level, string> = { high: "High", medium: "Medium", low: "Low", advisory: "Advisory" };
+/** What each level means, for the legend. */
+export const LEVEL_MEANING: Record<Level, string> = {
+  high: "A limit clearly exceeded. In an airline this is reviewed with the crew and may need a maintenance check.",
+  medium: "A significant deviation from the standard. Worth debriefing.",
+  low: "A minor deviation, just past the first threshold.",
+  advisory: "Recorded for context, not a fault.",
+};
 /** Higher is more severe; for sorting. */
 export const levelRank = (level?: Level) => (level ? 4 - LEVELS.indexOf(level) : 0);
 
@@ -49,4 +57,5 @@ export function why(event: FlightEvent) {
   return { expression: event.measure, comparison: `= ${measured(event.value, event.unit, digits)} ${sign} ${measured(event.threshold, event.unit)}` };
 }
 
-export const M_TO_FT = 3.28084;
+/** Metres per foot, exact. */
+export const M_PER_FT = 0.3048;

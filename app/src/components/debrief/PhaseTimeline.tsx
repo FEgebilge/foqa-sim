@@ -1,6 +1,7 @@
 import { useCallback, useRef, type MouseEvent, type ReactNode } from "react";
 import { Tooltip } from "@ui/components/tooltip/tooltip";
 import { clock, LEVEL_LABEL, phaseName } from "../../lib/format";
+import { levelVar } from "../../lib/palette";
 import { tickStep, useElementWidth, useHover, type TimeBus, type TimeRange } from "../../lib/time";
 import type { FlightEvent, PhaseSpan, Touchdown } from "../../types";
 
@@ -75,7 +76,7 @@ export function PhaseTimeline({ phases, events, touchdowns, range, focus, view, 
                 style={{ left: pct(event.start_s), zIndex: isSelected ? 2 : 1 }}
               >
                 <svg width={isSelected ? 14 : 11} height={isSelected ? 14 : 11} viewBox="0 0 10 10" aria-hidden="true">
-                  <path d="M5 10 L0 1 L10 1 Z" fill={`var(--level-${event.level})`} stroke={isSelected ? "var(--foreground)" : "var(--surface)"} strokeWidth={1} />
+                  <path d="M5 10 L0 1 L10 1 Z" fill={levelVar(event.level)} stroke={isSelected ? "var(--foreground)" : "var(--surface)"} strokeWidth={1} />
                 </svg>
               </button>
             </Tooltip>
@@ -104,7 +105,7 @@ export function PhaseTimeline({ phases, events, touchdowns, range, focus, view, 
         })}
         {view ? <div className="pointer-events-none absolute inset-y-0 border-x-2 border-[var(--foreground)] bg-[color-mix(in_oklab,var(--foreground)_10%,transparent)]" style={{ left: pct(view[0]), width: share(view[1] - view[0]) }} /> : null}
         {selectedEvent ? (
-          <div className="pointer-events-none absolute inset-y-0 min-w-[3px]" style={{ left: pct(selectedEvent.start_s), width: share(selectedEvent.end_s - selectedEvent.start_s), background: `var(--level-${selectedEvent.level})`, opacity: 0.85 }} />
+          <div className="pointer-events-none absolute inset-y-0 min-w-[3px]" style={{ left: pct(selectedEvent.start_s), width: share(selectedEvent.end_s - selectedEvent.start_s), background: levelVar(selectedEvent.level), opacity: 0.85 }} />
         ) : null}
         {focus !== null ? <div className="pointer-events-none absolute inset-y-0 w-0.5 -translate-x-1/2 bg-[var(--foreground)]" style={{ left: pct(focus) }} /> : null}
         <div ref={hoverRef} className="pointer-events-none absolute inset-y-0 hidden w-px bg-[var(--foreground)] opacity-60" />

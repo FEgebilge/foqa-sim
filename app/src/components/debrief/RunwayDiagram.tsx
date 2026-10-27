@@ -1,5 +1,4 @@
-import { M_TO_FT, number } from "../../lib/format";
-import { aimingPoint } from "../../lib/limits";
+import { M_PER_FT, number } from "../../lib/format";
 import type { RunwayFix } from "../../types";
 
 const W = 360, X0 = 30, X1 = W - 6;
@@ -15,9 +14,8 @@ export function RunwayDiagram({ fix, widthM }: { fix: RunwayFix; widthM: number 
   const length = Math.max(fix.lda_m, fix.along_m + 50);
   const x = (along: number) => X0 + (Math.max(-0.05 * length, along) / length) * (X1 - X0);
   const half = widthM / 2;
-  const ok = fix.in_tdz && !fix.long_landing && !fix.short_landing;
-  const mark = ok ? "var(--success)" : fix.short_landing ? "var(--level-high)" : "var(--level-medium)";
-  const ap = aimingPoint(fix.lda_m), tdz = Math.min(fix.tdz_m, fix.lda_m), remaining = fix.lda_m - fix.along_m;
+  const mark = fix.in_tdz ? "var(--success)" : fix.short_landing ? "var(--level-high)" : "var(--level-medium)";
+  const ap = fix.aiming_point_m, tdz = Math.min(fix.tdz_m, fix.lda_m), remaining = fix.lda_m - fix.along_m;
   const tx = x(fix.along_m), ty = MID + (Math.max(-1.4 * half, Math.min(1.4 * half, fix.cross_m)) / half) * HALF;
   const side = fix.cross_m === 0 ? "on the centreline" : `${number(Math.abs(fix.cross_m), 1)} m ${fix.cross_m > 0 ? "right" : "left"} of the centreline`;
   const apLen = Math.max(3, x(ap + 45) - x(ap));
@@ -55,7 +53,7 @@ export function RunwayDiagram({ fix, widthM }: { fix: RunwayFix; widthM: number 
         <text x={sx(-half) - 4} y={15} textAnchor="end" className="readout" fontSize={9.5} fill="var(--text-muted)">L</text>
         <text x={sx(half) + 4} y={15} className="readout" fontSize={9.5} fill="var(--text-muted)">R</text>
         <text x={W / 2} y={STRIP_H - 1} textAnchor="middle" className="readout" fontSize={9.5} fill="var(--text-secondary)">
-          {side} · {number(Math.abs(fix.cross_m) * M_TO_FT)} ft · runway {number(widthM)} m wide
+          {side} · {number(Math.abs(fix.cross_m) / M_PER_FT)} ft · runway {number(widthM)} m wide
         </text>
       </svg>
       <figcaption className="text-[10.5px] text-fg-3">Top view: length to scale, width exaggerated. Strip: across the runway, to scale.</figcaption>

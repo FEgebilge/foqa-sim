@@ -4,6 +4,7 @@ import { Button } from "@ui/components/button/button";
 import { EmptyState } from "@ui/components/empty-state/empty-state";
 import { verdict } from "../../lib/explain";
 import { clock, number, phaseName } from "../../lib/format";
+import { levelVar } from "../../lib/palette";
 import { openFlights } from "../../lib/route";
 import { useTheme } from "../../lib/context";
 import { indexAt, TimeBus, useHover, type TimeRange } from "../../lib/time";
@@ -158,7 +159,7 @@ function DebriefView({ debrief, refreshing, onRefresh, onOpenFolder }: { debrief
           <aside aria-labelledby="events-title" className="flex min-h-0 flex-col gap-2 lg:[grid-area:rail] xl:overflow-y-auto xl:pr-1">
             <h2 id="events-title" className="eyebrow">Findings <span className="readout">{events.length}</span></h2>
             <LevelLegend />
-            <EventList events={events} phases={phases} series={series} selected={selected} onSelect={selectEvent} />
+            <EventList events={events} phases={phases} selected={selected} onSelect={selectEvent} />
           </aside>
 
           <div className="flex min-h-0 min-w-0 flex-col gap-4 max-lg:order-2 lg:[grid-area:charts] xl:overflow-y-auto xl:pr-1">
@@ -207,7 +208,7 @@ function DebriefView({ debrief, refreshing, onRefresh, onOpenFolder }: { debrief
 /** One plain-language sentence on top: the worst level, the key issue, where the aircraft landed. */
 function Verdict({ debrief }: { debrief: Debrief }) {
   const level = debrief.flight.worst_level;
-  const color = level ? `var(--level-${level})` : "var(--success)";
+  const color = level ? levelVar(level) : "var(--success)";
   return (
     <p className="flex items-start gap-3 rounded-[var(--radius-panel)] border px-4 py-2.5 text-sm" style={{ borderColor: `color-mix(in oklab, ${color} 40%, var(--border))`, background: `color-mix(in oklab, ${color} 8%, var(--surface))` }}>
       <span className="mt-1.5 size-2.5 shrink-0 rounded-[2px]" style={{ background: color }} aria-hidden="true" />

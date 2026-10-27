@@ -3,7 +3,7 @@ import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 import { Tooltip } from "@ui/components/tooltip/tooltip";
 import { clock, number } from "../../lib/format";
-import { aircraftClass, APPROACH_GATES, gLine, SINK_LIMIT, type AircraftClass, type RefLine } from "../../lib/limits";
+import { APPROACH_GATES, hardLanding, SINK_LIMIT, type Mark } from "../../lib/references";
 import { alpha, cssVar, levelColor, phaseColor, type Theme } from "../../lib/palette";
 import { indexAt, useHover, type TimeBus, type TimeRange } from "../../lib/time";
 import type { Debrief, FlightEvent, Series } from "../../types";
@@ -20,17 +20,17 @@ interface Spec {
   /** A reference series drawn as a step line in the reference colour, for limits that change along the flight. */
   limit?: { key: Key; label: string; source: string };
   /** Reference lines; the y axis stretches to show them unless it is centred. */
-  refs?: (cls: AircraftClass | null) => RefLine[];
+  refs?: (flight: Debrief["flight"]) => Mark[];
 }
 
-const ONE_G: RefLine = { y: 1, label: "1 g: level flight" };
+const ONE_G: Mark = { at: 1, label: "1 g: level flight" };
 // Flaps sit under speed, so flap changes read against the speed they were made at.
 const SPECS: Spec[] = [
   { id: "alt", title: "Height above airport", unit: "ft", height: 150, digits: 0, refs: () => APPROACH_GATES, lines: [{ key: "aal_ft", label: "Above airport" }, { key: "alt_ft", label: "Pressure altitude", dash: true }] },
   { id: "speed", title: "Speed", unit: "kt", height: 130, digits: 0, limit: { key: "vfe_kt", label: "Flap limit (VFE)", source: "aircraft profile" }, lines: [{ key: "ias_kt", label: "Indicated airspeed" }, { key: "gs_kt", label: "Ground speed", dash: true }] },
   { id: "flap", title: "Flaps", unit: "°", height: 80, digits: 0, step: true, lines: [{ key: "flap_deg", label: "Flap angle" }] },
   { id: "vs", title: "Vertical speed", unit: "fpm", height: 120, digits: 0, zero: true, refs: () => [SINK_LIMIT], lines: [{ key: "vs_fpm", label: "Climb + / descent −" }] },
-  { id: "g", title: "Normal load", unit: "g", height: 120, digits: 2, centre: 1, refs: (cls) => [ONE_G, ...[gLine(cls)].filter((r) => r !== null)], lines: [{ key: "nz_g", label: "Load factor" }] },
+  { id: "g", title: "Normal load", unit: "g", height: 120, digits: 2, centre: 1, refs: (flight) => [ONE_G, ...[hardLanding(flight)].filter((r) => r !== null)], lines: [{ key: "nz_g", label: "Load factor" }] },
   { id: "att", title: "Attitude", unit: "°", height: 130, digits: 1, zero: true, lines: [{ key: "pitch_deg", label: "Pitch, nose up +" }, { key: "roll_deg", label: "Roll, right +", dash: true }] },
 ];
 
@@ -64,7 +64,7 @@ interface Props {
  * The cursor is synced across charts, the map and the timeline; drag across a chart to zoom all of them.
  */
 export default function Charts({ debrief, theme, view, focus, selected, bus, onView, onFocus }: Props) {
-  const refs = useMemo(() => { const cls = aircraftClass(debrief.flight); return SPECS.map((spec) => spec.refs?.(cls) ?? []); }, [debrief.flight]);
+  const refs = useMemo(() => SPECS.map((spec) => spec.refs?.(debrief.flight) ?? []), [debrief.flight]);
   const fullRange = useMemo<TimeRange>(() => [debrief.series.t_s[0] ?? 0, debrief.series.t_s.at(-1) ?? 1], [debrief.series.t_s]);
   const shared = useRef<Shared>({
     overlay: { theme, phases: debrief.phases, touchdowns: [], selected, focus },
@@ -102,7 +102,7 @@ export default function Charts({ debrief, theme, view, focus, selected, bus, onV
 
 interface ChartProps {
   spec: Spec;
-  refs: RefLine[];
+  refs: Mark[];
   last: boolean;
   debrief: Debrief;
   theme: Theme;
@@ -166,12 +166,12 @@ function Chart({ spec, refs, last, debrief, theme, bus, shared }: ChartProps) {
           ctx.font = `${10 * devicePixelRatio}px ${cssVar("--font-display") || "monospace"}`;
           ctx.textAlign = "right"; ctx.textBaseline = "bottom";
           for (const ref of refs) {
-            const py = Math.round(u.valToPos(ref.y, "y", true));
+            const py = Math.round(u.valToPos(ref.at, "y", true));
             if (py < bbox.top || py > bbox.top + bbox.height) continue;
             ctx.strokeStyle = refColor; ctx.lineWidth = devicePixelRatio; ctx.setLineDash([2 * devicePixelRatio, 3 * devicePixelRatio]);
             ctx.beginPath(); ctx.moveTo(bbox.left, py); ctx.lineTo(bbox.left + bbox.width, py); ctx.stroke();
             ctx.fillStyle = refColor;
-            ctx.fillText(`${number(ref.y, Number.isInteger(ref.y) ? 0 : 2)} ${spec.unit}`, bbox.left + bbox.width - 4 * devicePixelRatio, py - 2 * devicePixelRatio);
+            ctx.fillText(`${number(ref.at, Number.isInteger(ref.at) ? 0 : 2)} ${spec.unit}`, bbox.left + bbox.width - 4 * devicePixelRatio, py - 2 * devicePixelRatio);
           }
           ctx.restore();
           const { touchdowns, focus } = shared.current.overlay;
@@ -236,7 +236,7 @@ function Chart({ spec, refs, last, debrief, theme, bus, shared }: ChartProps) {
         }],
       },
     };
-    const refYs = spec.centre === undefined ? refs.map((r) => r.y) : [];
+    const refYs = spec.centre === undefined ? refs.map((r) => r.at) : [];
     options.scales!.y = { range: (_, min, max) => {
       if (spec.centre !== undefined) { const c = spec.centre, span = Math.max(c - min, max - c, 0.25) * 1.1; return [c - span, c + span]; }
       return uPlot.rangeNum(Math.min(min, ...refYs, spec.zero ? -1 : Infinity), Math.max(max, ...refYs, spec.zero ? 1 : -Infinity), 0.1, true);

@@ -1,7 +1,6 @@
 // One source for the colours that canvas (uPlot) and WebGL (MapLibre) draw, which cannot read CSS variables.
 // applyPalette() mirrors them onto :root as --phase-* and --level-* for the CSS side.
 import type { Level } from "../types";
-import type { Grade } from "./limits";
 
 export type Theme = "light" | "dark";
 
@@ -27,14 +26,8 @@ const LEVELS: Record<Level, [light: string, dark: string]> = {
 const pick = ([light, dark]: [string, string], theme: Theme) => (theme === "dark" ? dark : light);
 export const phaseColor = (phase: string, theme: Theme) => pick(PHASES[phase] ?? UNKNOWN_PHASE, theme);
 export const levelColor = (level: Level, theme: Theme) => pick(LEVELS[level], theme);
-
-/** CSS colour of a landing grade (lib/limits.ts); "ok" is a muted green so only "good" reads as a clear pass. */
-export const GRADE_COLOR: Record<Grade, string> = {
-  good: "var(--success)",
-  ok: "color-mix(in oklab, var(--success) 45%, var(--text-muted))",
-  firm: "var(--level-medium)",
-  review: "var(--level-high)",
-};
+/** A level's colour for CSS, as applyPalette() sets it on :root. */
+export const levelVar = (level: Level) => `var(--level-${level})`;
 
 /** Hex colour with alpha, for fills. */
 export const alpha = (hex: string, a: number) => `${hex}${Math.round(a * 255).toString(16).padStart(2, "0")}`;

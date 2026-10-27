@@ -95,9 +95,11 @@
         "cross_m": -5.205367805187599,
         "lda_m": 2987.692626953125,
         "tdz_m": 914.4,
+        "aiming_point_m": 400.0,
         "in_tdz": true,
         "long_landing": false,
-        "short_landing": false
+        "short_landing": false,
+        "zone": "In TDZ"
       }
     }
   ],
@@ -116,7 +118,8 @@
       "threshold": 10.0,
       "unit": "kt",
       "why_it_matters": "Exceeding VFE stresses the flap structure and its attachments beyond what they were certified for; it can damage the flaps and requires a maintenance inspection.",
-      "advice": "Reduce speed below VFE (the top of the white arc) before extending the flaps, and retract them before accelerating beyond it."
+      "advice": "Reduce speed below VFE (the top of the white arc) before extending the flaps, and retract them before accelerating beyond it.",
+      "detail": "111 kt at flaps 12°, limit 85 kt"
     },
     {
       "rule": "high-sink-below-1000",
@@ -132,7 +135,8 @@
       "threshold": 1500.0,
       "unit": "fpm",
       "why_it_matters": "A sustained high descent rate close to the ground leaves little room to arrest it and is a classic precursor of hard landings and controlled flight into terrain.",
-      "advice": "Stay on a stable path and keep the descent under 1000 fpm below 1000 ft; if it needs more, the approach is too high: go around and set up again."
+      "advice": "Stay on a stable path and keep the descent under 1000 fpm below 1000 ft; if it needs more, the approach is too high: go around and set up again.",
+      "detail": "2490 fpm sink, limit 1500 fpm"
     },
     {
       "rule": "unstable-sink-500",
@@ -148,7 +152,8 @@
       "threshold": 1500.0,
       "unit": "fpm",
       "why_it_matters": "A steep, fast descent at 500 ft leaves little height to arrest the sink, a common precursor of hard and short landings.",
-      "advice": "Fly a stable path of about 3 degrees (roughly 500-700 fpm in a light aircraft, 700-800 fpm in a jet). More than 1000 fpm at the gate: go around."
+      "advice": "Fly a stable path of about 3 degrees (roughly 500-700 fpm in a light aircraft, 700-800 fpm in a jet). More than 1000 fpm at the gate: go around.",
+      "detail": "1568 fpm sink, limit 1500 fpm"
     }
   ],
   "series": {
