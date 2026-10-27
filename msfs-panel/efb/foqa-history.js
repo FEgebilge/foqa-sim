@@ -286,16 +286,16 @@ var FoqaHistory = (function () {
         return '<span class="score">' + f.score.toFixed(1) + '<span class="of">/100</span></span>';
     }
 
-    // The grading landing's six domains as mini-bars (track as long as the weight, the points lost shaded in the level's
-    // colour) and the largest deduction in one line.
+    // The grading landing's six domains as mini-bars (track as long as the weight, the share of it lost shaded in the
+    // level's colour, labelled with the points lost) and the largest deduction in one line.
     var DOMAIN_SHORT = ["Approach", "Flare", "Point", "Lateral", "Contact", "Rollout"];
     var BAR_LEVEL = ["none", "low", "medium", "high"];
     function barsHtml(f) {
         if (!f.bars || !f.bars.length) return "";
         var html = '<div class="mbars">' + f.bars.map(function (b, i) {
-            var weight = b[0], lost = b[1], level = BAR_LEVEL[Math.min(3, b[2])] || "none";
+            var weight = b[0], lost = b[1], level = BAR_LEVEL[Math.min(3, b[2])] || "none", share = b[3] || 0;
             var track = '<div class="mtrack' + (lost === null ? " na" : "") + '" style="width:' + (weight / 25 * 100).toFixed(0) + '%">' +
-                (lost ? '<div class="mlost lvl-' + level + '" style="width:' + Math.min(100, lost / weight * 100).toFixed(0) + '%"></div>' : "") + "</div>";
+                (share ? '<div class="mlost lvl-' + level + '" style="width:' + (Math.min(1, share) * 100).toFixed(0) + '%"></div>' : "") + "</div>";
             return '<div class="mbar"><div class="mname">' + DOMAIN_SHORT[i] + '<span class="mpts">' +
                 (lost === null ? "n/a" : lost ? "−" + lost.toFixed(1) : "0") + "</span></div>" + track + "</div>";
         }).join("") + "</div>";
@@ -433,5 +433,7 @@ var FoqaHistory = (function () {
         return h;
     }
 
-    return { MSG: MSG, attach: attach };
+    var api = { MSG: MSG, attach: attach, barsHtml: barsHtml };
+    if (typeof module !== "undefined" && module.exports) module.exports = api;
+    return api;
 })();

@@ -53,7 +53,7 @@ Source in `msfs-panel/`:
 | `PackageSources/InGamePanels/InGamePanel_FOQASim.xml` | Panel definition, compiled to `InGamePanel_FOQASim.spb`: id `PANEL_FOQA_SIM`, name "FOQA-Sim", toolbar icon `ICON_TOOLBAR_FOQA_SIM` |
 | `PackageSources/html_ui/InGamePanels/FOQASim/` | `FOQASim.html` and `FOQASim.js` (sim glue: `ingame-ui` frame, Comm Bus listener), `foqa-board.js` (rendering, no sim APIs), `FOQASim.css` |
 | `PackageSources/html_ui/icons/toolbar/ICON_TOOLBAR_FOQA_SIM.svg` | Toolbar button |
-| `efb/` | EFB app: `FoqaSimApp.js` (EFB glue, Live and Flights tabs), `foqa-history.js` (Flights), `foqa-weather.js` (weather setter, `node efb/test/foqa-weather.test.js`), `build.ps1` |
+| `efb/` | EFB app: `FoqaSimApp.js` (EFB glue, Live and Flights tabs), `foqa-history.js` (Flights, `node efb/test/foqa-history.test.js`), `foqa-weather.js` (weather setter, `node efb/test/foqa-weather.test.js`), `build.ps1` |
 | `dev/index.html`, `dev/efb.html` | The board and the EFB app in a browser with a stubbed Comm Bus |
 
 `foqa-board.js` is plain ES2015 with no sim dependency, so the EFB app
@@ -325,7 +325,8 @@ it shows an error and **Try again**, which asks again with a new `req`.
 
 The debrief view opens with the flight's landing-2 score and grade
 ([scoring.md](scoring.md)), six domain mini-bars of the grading landing
-(track as long as the weight, the points lost in the level's colour) and
+(track as long as the weight, the share of it lost in the level's colour,
+labelled with the points lost) and
 its largest deduction in one line; "How this was graded" still lists the
 points method's parts. A flight without a scored landing shows its points.
 
@@ -366,8 +367,10 @@ interface CompactDebrief {
     confidence?: "full" | "partial";
     // The grading landing's six domains in order (stability, energy, point,
     // lateral, contact, rollout) as mini-bars: [weight, points lost or null
-    // when n/a, level 0-3]; absent without a scored landing.
-    bars?: [number, number | null, number][];
+    // when n/a, level 0-3, share of the weight lost 0-1 (0 when n/a)];
+    // absent without a scored landing. The bar draws the share: the points
+    // are rescaled when a domain is n/a.
+    bars?: [number, number | null, number, number][];
     top?: string;            // its largest deduction in one line, e.g. "Approach stability −17.3: Descent rate 1562 fpm"
     points: number; findings: number;   // the points method's, for one release
 

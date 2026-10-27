@@ -339,7 +339,7 @@ struct CompactFlight {
     #[serde(skip_serializing_if = "Option::is_none")]
     confidence: Option<Confidence>,
     /// The grading landing's six domains in order: `[weight, points lost
-    /// or null when n/a, level]`.
+    /// or null when n/a, level, share of the weight lost]`.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     bars: Vec<Bar>,
     /// The deduction that cost the most, in one line.
@@ -417,8 +417,10 @@ impl From<Event> for CompactEvent {
     }
 }
 
-/// A domain mini-bar: weight, points lost (`None`: n/a), level.
-type Bar = (f64, Option<f64>, u8);
+/// A domain mini-bar: weight, points lost (`None`: n/a), level, and the
+/// share of the weight lost (0 to 1; 0 when n/a), which the bar draws:
+/// the points are rescaled when a domain is n/a, the share is not.
+type Bar = (f64, Option<f64>, u8, f64);
 
 /// The grading landing's domains as mini-bars and its largest deduction in
 /// words: "Approach stability −17.3: Descent rate 1562 fpm".
@@ -429,7 +431,14 @@ fn bars(d: &AssessmentDetail, events: &[Event]) -> (Vec<Bar>, Option<String>) {
     let bars = landing
         .domains
         .iter()
-        .map(|x| (x.weight, x.loss.map(|_| x.points), x.level))
+        .map(|x| {
+            (
+                x.weight,
+                x.loss.map(|_| x.points),
+                x.level,
+                x.loss.unwrap_or(0.0),
+            )
+        })
         .collect();
     let top = landing
         .domains
@@ -667,13 +676,23 @@ mod tests {
         });
         let station = Station::core().unwrap();
         let debrief = station.analyse("f".into(), flight).unwrap().debrief();
+        // A bar draws the share of the weight lost, not the points, which an
+        // n/a domain inflates (its weight is shared out).
+        let mut detail = debrief.flight.assessment_detail.clone();
+        let graded = detail.graded_by.unwrap();
+        let domains = &mut detail.landings[graded].domains;
+        (domains[0].loss, domains[0].points) = (Some(0.5), 14.7);
+        domains[5].loss = None;
+        let (mini, _) = bars(&detail, &debrief.events);
+        assert_eq!((mini[0].1, mini[0].3), (Some(14.7), 0.5));
+        assert_eq!((mini[5].1, mini[5].3), (None, 0.0));
         let doc = serde_json::to_string(&CompactDebrief::from(debrief)).unwrap();
         let f = &serde_json::from_str::<Value>(&doc).unwrap()["flight"];
         assert_eq!(f["method"], "landing-2");
         assert!(f["score"].as_f64().is_some_and(|s| s > 0.0 && s <= 100.0));
         let bars = f["bars"].as_array().unwrap();
         assert_eq!(bars.len(), 6);
-        assert_eq!(bars[0], json!([25.0, 0.0, 0]));
+        assert_eq!(bars[0], json!([25.0, 0.0, 0, 0.0]));
         let top = f["top"].as_str().unwrap();
         assert!(
             top.starts_with("Touchdown contact \u{2212}7.0: Peak normal load"),
