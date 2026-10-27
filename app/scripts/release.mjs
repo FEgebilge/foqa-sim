@@ -29,11 +29,13 @@ if (noted !== version) {
 const conf = `${root}app/src-tauri/tauri.conf.json`;
 const current = JSON.parse(readFileSync(conf, "utf8")).version;
 const parts = (v) => v.match(semver).slice(1).map(Number);
-const newer = parts(version).reduce((cmp, n, i) => cmp || Math.sign(n - parts(current)[i]), 0) > 0;
-if (!newer) {
-  console.error(`${version} is not newer than ${current}`);
+const order = parts(version).reduce((cmp, n, i) => cmp || Math.sign(n - parts(current)[i]), 0);
+if (order < 0) {
+  console.error(`${version} is older than ${current}`);
   process.exit(1);
 }
+// Equal: a release whose build failed after the bump; build it again.
+const bumping = order > 0;
 
 // The app's own version, not a dependency's: each file's first, unless the
 // pattern is global.
@@ -43,12 +45,14 @@ const bump = (file, pattern) => {
   if (!pattern.test(text)) throw new Error(`no version in ${file}`);
   writeFileSync(path, text.replace(pattern, (m) => m.replace(current, version)));
 };
-bump("app/src-tauri/tauri.conf.json", /"version": "[^"]+"/);
-bump("app/package.json", /"version": "[^"]+"/);
-// package-lock.json names it twice, each after the app's name: the
-// lockfile's and its root package's.
-bump("app/package-lock.json", /"name": "foqa-sim-app",\s*"version": "[^"]+"/g);
-bump("Cargo.toml", /\[workspace\.package\]\s*version = "[^"]+"/);
+if (bumping) {
+  bump("app/src-tauri/tauri.conf.json", /"version": "[^"]+"/);
+  bump("app/package.json", /"version": "[^"]+"/);
+  // package-lock.json names it twice, each after the app's name: the
+  // lockfile's and its root package's.
+  bump("app/package-lock.json", /"name": "foqa-sim-app",\s*"version": "[^"]+"/g);
+  bump("Cargo.toml", /\[workspace\.package\]\s*version = "[^"]+"/);
+}
 
 const run = (cmd, cwd) => execSync(cmd, { cwd: `${root}${cwd}`, stdio: "inherit" });
 run("cargo update --workspace", "");
