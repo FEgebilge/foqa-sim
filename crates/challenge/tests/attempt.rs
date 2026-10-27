@@ -57,6 +57,7 @@ fn a_clean_attempt_counts_and_scores() {
             "continuity"
         ]
     );
+    assert!(a.assessment.is_none(), "landing-1 carries no assessment");
     let score = a.score.unwrap();
     let sink = score.parts.iter().find(|p| p.name == "sink_rate").unwrap();
     assert!((sink.score - 0.83).abs() < 0.05, "{sink:?}");

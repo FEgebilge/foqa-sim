@@ -709,6 +709,7 @@ pub(crate) mod tests {
                     unit: "fpm",
                 }],
             }),
+            assessment: None,
         }
     }
 

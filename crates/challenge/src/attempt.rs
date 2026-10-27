@@ -3,7 +3,7 @@
 //! recording itself and never trust a client's number.
 
 use analyzer::{Phase, locate, wind_components};
-use debrief::Analysis;
+use debrief::{Analysis, CapNote, Confidence, Grade};
 use fdm_core::SimTime;
 use fdm_core::geo::distance_m;
 use recorder::{AttemptPhase, SimEvent};
@@ -41,6 +41,21 @@ pub struct Attempt {
     pub touchdown_s: Option<f64>,
     /// `None` without a landing on the challenge's runway past its gate.
     pub score: Option<Score>,
+    /// A landing-2 attempt's grade, confidence and caps (docs/scoring.md),
+    /// as the debrief wire has them; absent for landing-1.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub assessment: Option<Assessment>,
+}
+
+/// The assessment of a ranked landing-2 attempt: `score` is `score.total`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Assessment {
+    /// `landing-2`.
+    pub method: String,
+    pub score: f64,
+    pub grade: Grade,
+    pub confidence: Confidence,
+    pub caps: Vec<CapNote>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -78,6 +93,7 @@ struct Graded {
     touchdown: SimTime,
     /// `None` when landing-2 lacks the data any score needs.
     score: Option<Score>,
+    assessment: Option<Assessment>,
 }
 
 /// Which begin marker an attempt is graded after.
@@ -130,7 +146,8 @@ pub fn evaluate_after(challenge: &Challenge, a: &Analysis, begin: Begin) -> Atte
         checks,
         gate_s: graded.as_ref().map(|g| g.gate.as_secs_f64()),
         touchdown_s: graded.as_ref().map(|g| g.touchdown.as_secs_f64()),
-        score: graded.and_then(|g| g.score),
+        score: graded.as_ref().and_then(|g| g.score.clone()),
+        assessment: graded.and_then(|g| g.assessment),
     }
 }
 
@@ -339,26 +356,30 @@ fn landing(
         ));
     }
 
-    let score = match c.scoring.version.as_str() {
-        SCORING => Some(landing_1(&Landing {
-            class: a.selection.class.unwrap_or(Aircraft::Transport),
-            td,
-            fix,
-            bounced: a.touchdowns.get(k + 1).is_some_and(|t| t.bounce),
-            worst: a
-                .events
-                .iter()
-                .filter(|e| (from..td.t).contains(&e.start))
-                .map(|e| e.level)
-                .max(),
-            rollout_cross_m: rollout.map(|xs| xs.into_iter().fold(0.0, f64::max)),
-        })),
-        _ => landing_2(a, k, gate_i, checks),
+    let (score, assessment) = match c.scoring.version.as_str() {
+        SCORING => (
+            Some(landing_1(&Landing {
+                class: a.selection.class.unwrap_or(Aircraft::Transport),
+                td,
+                fix,
+                bounced: a.touchdowns.get(k + 1).is_some_and(|t| t.bounce),
+                worst: a
+                    .events
+                    .iter()
+                    .filter(|e| (from..td.t).contains(&e.start))
+                    .map(|e| e.level)
+                    .max(),
+                rollout_cross_m: rollout.map(|xs| xs.into_iter().fold(0.0, f64::max)),
+            })),
+            None,
+        ),
+        _ => landing_2(a, k, gate_i, checks).unzip(),
     };
     Some(Graded {
         gate: from,
         touchdown: td.t,
         score,
+        assessment,
     })
 }
 
@@ -369,7 +390,12 @@ fn landing(
 /// `data` check (ranking needs every expected value). The parts are the
 /// domains, their weights shared out where one is n/a; a safety cap holds
 /// `total` below their sum.
-fn landing_2(a: &Analysis, k: usize, gate_i: usize, checks: &mut Vec<Check>) -> Option<Score> {
+fn landing_2(
+    a: &Analysis,
+    k: usize,
+    gate_i: usize,
+    checks: &mut Vec<Check>,
+) -> Option<(Score, Assessment)> {
     let track = &a.track;
     let (gate, td) = (track.t[gate_i], a.touchdowns[k].t);
     let around = a
@@ -432,11 +458,19 @@ fn landing_2(a: &Analysis, k: usize, gate_i: usize, checks: &mut Vec<Check>) -> 
             })
         })
         .collect();
-    Some(Score {
+    let assessment = Assessment {
+        method: s.method.clone(),
+        score: s.score,
+        grade: s.grade.into(),
+        confidence: s.confidence.into(),
+        caps: s.caps.iter().map(|c| CapNote::of(c, None)).collect(),
+    };
+    let score = Score {
         version: LANDING_2,
         total: s.score,
         parts,
-    })
+    };
+    Some((score, assessment))
 }
 
 fn domain_name(d: Domain) -> &'static str {

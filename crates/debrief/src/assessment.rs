@@ -315,7 +315,8 @@ pub fn domain_title(d: Domain) -> &'static str {
 }
 
 impl CapNote {
-    fn of(c: &assess::Cap, landing: Option<usize>) -> Self {
+    /// `c` as the wire shows it; `landing` is its place in `landings`.
+    pub fn of(c: &assess::Cap, landing: Option<usize>) -> Self {
         let kind = match c.kind {
             CapKind::Material => "material",
             CapKind::Unstable => "unstable",

@@ -832,6 +832,15 @@ Each slice keeps the app fully usable with no site configured.
 - **`fdm challenge`** grades only a touchdown after the latest `begin`
   marker and reports `marker` (`ref`, `begin_s`, `end_s`) and `aircraft`
   (`icao`, `class`) in the `Attempt`.
+- **`Attempt.assessment` (additive, 2026-10-28):** a `landing-2` attempt
+  carries `assessment: { method, score, grade, confidence, caps }` from
+  `crates/assess`, with the debrief wire's types (`Grade`: `good`, `fair`,
+  `poor`; `Confidence`: `full`, `partial`; `caps`: `CapNote`
+  `{ kind, score, reason, source }`, `kind` one of `material`, `unstable`,
+  `inspection`, `undershoot`, `excursion`). `score` equals `score.total`
+  and `caps[].score` is the limit the cap sets. Absent for `landing-1`
+  and for an attempt without a score. A site no longer derives grade,
+  confidence or caps from `score.parts`.
 - **Decode cap:** `fdm challenge` and `fdm slice` refuse a compact
   flight whose body decompresses past 32 MiB
   (`recorder::CHALLENGE_MAX_BODY`); the app's own flights keep 256 MiB.

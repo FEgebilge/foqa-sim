@@ -115,6 +115,26 @@
             "unit": ""
           }
         ]
+      },
+      "assessment": {
+        "method": "landing-2",
+        "score": 59.0,
+        "grade": "poor",
+        "confidence": "full",
+        "caps": [
+          {
+            "kind": "material",
+            "score": 84.9,
+            "reason": "level 2 or more: A1 above, A1 below, B2, unstable-speed-light",
+            "source": "A material FDM event (level 2 or more); docs/scoring.md 4"
+          },
+          {
+            "kind": "unstable",
+            "score": 59.0,
+            "reason": "A1 at level 3 below 300 ft, landing continued",
+            "source": "S1 Data4Safety unstable approach, S5 FSF ALAR: go around"
+          }
+        ]
       }
     },
     "verified": false,
