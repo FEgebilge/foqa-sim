@@ -2,14 +2,14 @@
 //! Everything comes from the flight, so the server can grade the uploaded
 //! recording itself and never trust a client's number.
 
-use analyzer::{locate, wind_components};
+use analyzer::{Phase, locate, wind_components};
 use debrief::Analysis;
 use fdm_core::SimTime;
 use fdm_core::geo::distance_m;
-use rules::Aircraft;
+use rules::{Aircraft, Domain};
 use serde::Serialize;
 
-use crate::score::{Landing, Score, landing_1};
+use crate::score::{LANDING_2, Landing, Part, SCORING, Score, landing_1};
 use crate::{Challenge, M_PER_NM};
 
 /// The rollout ends below this groundspeed.
@@ -52,7 +52,8 @@ fn check(name: &'static str, ok: bool, detail: String) -> Check {
 struct Graded {
     gate: SimTime,
     touchdown: SimTime,
-    score: Score,
+    /// `None` when landing-2 lacks the data any score needs.
+    score: Option<Score>,
 }
 
 /// Grades the analysed flight as an attempt at `challenge`.
@@ -66,7 +67,7 @@ pub fn evaluate(challenge: &Challenge, a: &Analysis) -> Attempt {
         checks,
         gate_s: graded.as_ref().map(|g| g.gate.as_secs_f64()),
         touchdown_s: graded.as_ref().map(|g| g.touchdown.as_secs_f64()),
-        score: graded.map(|g| g.score),
+        score: graded.and_then(|g| g.score),
     }
 }
 
@@ -242,24 +243,116 @@ fn landing(c: &Challenge, a: &Analysis, checks: &mut Vec<Check>) -> Option<Grade
         ));
     }
 
-    let score = landing_1(&Landing {
-        class: a.selection.class.unwrap_or(Aircraft::Transport),
-        td,
-        fix,
-        bounced: a.touchdowns.get(k + 1).is_some_and(|t| t.bounce),
-        worst: a
-            .events
-            .iter()
-            .filter(|e| (from..td.t).contains(&e.start))
-            .map(|e| e.level)
-            .max(),
-        rollout_cross_m: rollout.map(|xs| xs.into_iter().fold(0.0, f64::max)),
-    });
+    let score = match c.scoring.version.as_str() {
+        SCORING => Some(landing_1(&Landing {
+            class: a.selection.class.unwrap_or(Aircraft::Transport),
+            td,
+            fix,
+            bounced: a.touchdowns.get(k + 1).is_some_and(|t| t.bounce),
+            worst: a
+                .events
+                .iter()
+                .filter(|e| (from..td.t).contains(&e.start))
+                .map(|e| e.level)
+                .max(),
+            rollout_cross_m: rollout.map(|xs| xs.into_iter().fold(0.0, f64::max)),
+        })),
+        _ => landing_2(a, k, gate_i, checks),
+    };
     Some(Graded {
         gate: from,
         touchdown: td.t,
         score,
     })
+}
+
+/// The landing-2 score of touchdown `k` (docs/scoring.md), the shared
+/// assessment as a ranked attempt flown from the gate: no selected-speed
+/// fallback, the window starting at the gate where it is lower. Adds the
+/// `go_around` check (an attempt that went around is not ranked) and the
+/// `data` check (ranking needs every expected value). The parts are the
+/// domains, their weights shared out where one is n/a; a safety cap holds
+/// `total` below their sum.
+fn landing_2(a: &Analysis, k: usize, gate_i: usize, checks: &mut Vec<Check>) -> Option<Score> {
+    let track = &a.track;
+    let (gate, td) = (track.t[gate_i], a.touchdowns[k].t);
+    let around = a
+        .phases
+        .iter()
+        .find(|s| s.phase == Phase::GoAround && (gate..td).contains(&s.start));
+    checks.push(match around {
+        None => check("go_around", true, "no go-around".into()),
+        Some(s) => check(
+            "go_around",
+            false,
+            format!(
+                "went around at {:.0} s: not ranked, fly again",
+                s.start.as_secs_f64()
+            ),
+        ),
+    });
+    let method = a.method();
+    let landing = assess::Landing {
+        flight: &a.flight,
+        track,
+        selection: &a.selection,
+        touchdowns: &a.touchdowns,
+        index: k,
+        events: &a.events,
+        rules: a.rules(),
+        ranked: true,
+        gate_ft: Some(track.aal_ft[gate_i]).filter(|h| h.is_finite()),
+        target_m: None,
+    };
+    let m = match method.measures(&landing) {
+        Ok((m, _, _)) => m,
+        Err(missing) => {
+            let detail = format!("missing {}", missing.join(", "));
+            checks.push(check("data", false, detail));
+            return None;
+        }
+    };
+    let s = method.score(&m);
+    checks.push(match &s.partial[..] {
+        [] => check("data", true, "every value recorded".into()),
+        partial => check("data", false, format!("partial: {}", partial.join("; "))),
+    });
+    let available: f64 = s
+        .domains
+        .iter()
+        .filter(|d| d.loss.is_some())
+        .map(|d| d.weight)
+        .sum();
+    let parts = s
+        .domains
+        .iter()
+        .filter_map(|d| {
+            Some(Part {
+                name: domain_name(d.domain),
+                weight: d.weight * 100.0 / available,
+                score: 1.0 - d.loss?,
+                value: None,
+                unit: "",
+            })
+        })
+        .collect();
+    Some(Score {
+        version: LANDING_2,
+        total: s.score,
+        parts,
+    })
+}
+
+fn domain_name(d: Domain) -> &'static str {
+    match d {
+        Domain::Stability => "stability",
+        Domain::Energy => "energy",
+        Domain::Point => "point",
+        Domain::Lateral => "lateral",
+        Domain::Contact => "contact",
+        Domain::Rollout => "rollout",
+        Domain::Other => "other",
+    }
 }
 
 fn check_flag(checks: &mut Vec<Check>, name: &'static str, on: bool) {

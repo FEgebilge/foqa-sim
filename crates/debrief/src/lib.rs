@@ -254,6 +254,16 @@ pub struct Analysis<'a> {
 }
 
 impl Analysis<'_> {
+    /// The rules the events come from.
+    pub fn rules(&self) -> &[Rule] {
+        self.rules
+    }
+
+    /// The landing assessment method.
+    pub fn method(&self) -> &Method {
+        self.method
+    }
+
     pub fn summary(&self) -> FlightSummary {
         let events = self.events();
         self.summary_of(&events, &self.assessment(&events))

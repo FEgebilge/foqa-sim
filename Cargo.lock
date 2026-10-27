@@ -624,6 +624,7 @@ name = "challenge"
 version = "0.2.0"
 dependencies = [
  "analyzer",
+ "assess",
  "debrief",
  "fdm-core",
  "recorder",
