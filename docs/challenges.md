@@ -65,6 +65,21 @@ with the challenge before the attempt starts. Gusts stay off for ranked
 challenges: their phase is random, so identical gust settings do not give
 identical wind.
 
+### Implementation status
+
+Built, verified in flight: pending. `FoqaWeather` (`msfs-panel/efb/foqa-weather.js`)
+selects the base preset ("clear" is found by the name containing
+`CLEAR_SKY`), edits a copy (wind layers, QNH, temperature, converted from
+each field's `unit`; unknown unit fails), calls `UpdateTempWeatherPreset`,
+reads back the echoed preset and, after 4 s, the four SimVars, and reports
+`{ ok, applied, measured, mismatches }`. The app asks over the Comm Bus
+(`set_weather`, [ingame-panel.md](ingame-panel.md#weather-efb-app)); no
+challenge flow uses it yet. Assumptions to check in flight: that
+`gustWaveData.dvSpeedMultiplier = 1` means no gust, that `dvAngleRad` is the
+direction the wind blows from, and that the SimVars follow within 4 s.
+Visibility has no direct preset field and is not set; clouds stay the
+base preset's.
+
 ## Challenge definition
 
 A versioned JSON file, opened locally or served by a site; the app (and a

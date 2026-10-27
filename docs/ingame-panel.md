@@ -53,7 +53,7 @@ Source in `msfs-panel/`:
 | `PackageSources/InGamePanels/InGamePanel_FOQASim.xml` | Panel definition, compiled to `InGamePanel_FOQASim.spb`: id `PANEL_FOQA_SIM`, name "FOQA-Sim", toolbar icon `ICON_TOOLBAR_FOQA_SIM` |
 | `PackageSources/html_ui/InGamePanels/FOQASim/` | `FOQASim.html` and `FOQASim.js` (sim glue: `ingame-ui` frame, Comm Bus listener), `foqa-board.js` (rendering, no sim APIs), `FOQASim.css` |
 | `PackageSources/html_ui/icons/toolbar/ICON_TOOLBAR_FOQA_SIM.svg` | Toolbar button |
-| `efb/` | EFB app: `FoqaSimApp.js` (EFB glue, Live and Flights tabs), `foqa-history.js` (Flights), `build.ps1` |
+| `efb/` | EFB app: `FoqaSimApp.js` (EFB glue, Live and Flights tabs), `foqa-history.js` (Flights), `foqa-weather.js` (weather setter, `node efb/test/foqa-weather.test.js`), `build.ps1` |
 | `dev/index.html`, `dev/efb.html` | The board and the EFB app in a browser with a stubbed Comm Bus |
 
 `foqa-board.js` is plain ES2015 with no sim dependency, so the EFB app
@@ -151,6 +151,7 @@ values in `monitor.rs`) and the views. JSON, UTF-8. Every message carries
 | `FOQA_SIM_LANDINGS` | `{ v, landings: LandingNotice[] }` | every 5 s while recording; the last 3 landings of this flight, newest first |
 | `FOQA_SIM_FLIGHTS` | `Flights` | reply to `list_flights`, every 1 s for ~5 s |
 | `FOQA_SIM_DEBRIEF` | `DebriefPart` | reply to `debrief`, all parts every 1 s for ~5 s |
+| `FOQA_SIM_WEATHER` | `{ v: 2, cmd: "set_weather", req, spec: WeatherSpec }` | EFB app only; see Weather. Not sent by any flow yet |
 
 `EVENTS` and `LANDINGS` come from the app's own analysis of the open
 journal, run every 5 s in the background (one at a time), so they trail the
@@ -272,6 +273,46 @@ Flight history). The ack has `cmd`, `ok` and, on failure, `message`, e.g.
 - `start_flight`: answered at once; the flight opens at the next sim frame.
   It fails with `"a flight is already recording"` while one is open.
 - Any other command while no flight is recorded fails with `"no flight open"`.
+
+### Weather (EFB app)
+
+`set_weather` sets the sim's weather through its own weather service
+(`msfs-panel/efb/foqa-weather.js`, `FoqaWeather`; how and why in
+[challenges.md](challenges.md#setting-the-weather-experiment-2026-10-27)).
+It goes app to EFB on `FOQA_SIM_WEATHER` (repeated like every app message;
+the EFB handles each `req` once, 6 KB cap as above) and is answered view to
+app on `FOQA_SIM_CMD`. Types: `WeatherSpec`, `WeatherResult` in
+`crates/capture/src/panel.rs` (`WeatherSpec::message`, `WeatherResult::parse`).
+Status: built and unit-tested, not wired into the app's flows, not yet
+verified in flight.
+
+```ts
+interface WeatherSpec {
+  base: "clear" | number;    // "clear": the preset whose name contains CLEAR_SKY; else a preset index
+  wind: { alt_ft: number; from_deg: number; kt: number }[];  // 1 to 8 layers, no gusts (the base's gusts are turned off)
+  qnh_hpa?: number;          // 850..1085
+  temp_c?: number;           // sea-level ground temperature, -80..60
+  clouds?: [];               // only empty: the base preset's clouds stay
+}                            // no visibility: the preset has no direct field
+
+// EFB -> app, FOQA_SIM_CMD
+interface WeatherResult {
+  v: 2; cmd: "weather_result"; req: string;   // sent 3 times, 1 s apart
+  ok: boolean;               // no mismatches
+  applied: { wind: WindLayer[]; qnh_hpa?: number; temp_c?: number } | null;   // read back from the echoed preset, in spec units
+  measured: { wind_dir_deg: number; wind_kt: number; qnh_hpa: number; temp_c: number; alt_ft: number } | null;   // SimVars after 4 s
+  mismatches: string[];      // preset read-back and SimVars vs the spec, in words
+  error?: string;            // instead of a report: bad spec, "no weather list", "busy", unknown unit, ...
+}
+```
+
+The preset's wind layers past the spec's repeat its last layer (altitudes
+stay the preset's); more spec layers than the preset has fails. Values are
+converted from each field's `unit` (kt, m/s, km/h; ft, m; hPa, mbar, inHg;
+°C, °F; rad, deg); an unknown unit fails with an error. The SimVar check
+compares the spec's wind at the aircraft's altitude (interpolated between
+layers) within 10 deg and 2 kt, QNH within 1.5 hPa, and temperature within
+2.5 C after an ISA lapse from sea level.
 
 ### Flight history (EFB app)
 
