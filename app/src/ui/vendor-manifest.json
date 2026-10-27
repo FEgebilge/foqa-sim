@@ -1,0 +1,185 @@
+{
+  "source": {
+    "repo": "egebilge-ui",
+    "commit": "734942db1f9e98f29442b1a971b7d1bd45ac63a7",
+    "branch": "main",
+    "dirty": false,
+    "vendoredAt": "2026-10-26T17:34:53.656Z"
+  },
+  "importPrefix": "@ui/",
+  "requested": [
+    "badge",
+    "button",
+    "empty-state",
+    "search-field",
+    "segmented-control",
+    "sortable-data-table",
+    "theme-switch",
+    "tooltip"
+  ],
+  "items": [
+    {
+      "slug": "badge",
+      "path": "badge",
+      "source": "arc"
+    },
+    {
+      "slug": "button",
+      "path": "button",
+      "source": "arc"
+    },
+    {
+      "slug": "empty-state",
+      "path": "empty-state",
+      "source": "arc"
+    },
+    {
+      "slug": "search-field",
+      "path": "search-field",
+      "source": "arc"
+    },
+    {
+      "slug": "segmented-control",
+      "path": "segmented-control",
+      "source": "arc"
+    },
+    {
+      "slug": "sortable-data-table",
+      "path": "sortable-data-table",
+      "source": "arc"
+    },
+    {
+      "slug": "spinner",
+      "path": "spinner",
+      "source": "egebilge"
+    },
+    {
+      "slug": "theme-switch",
+      "path": "theme-switch",
+      "source": "arc"
+    },
+    {
+      "slug": "tooltip",
+      "path": "tooltip",
+      "source": "arc"
+    }
+  ],
+  "lib": [
+    "arc-provider.tsx",
+    "motion-tokens.ts",
+    "use-controllable-state.ts"
+  ],
+  "packages": {
+    "@radix-ui/react-tooltip": {
+      "range": "^1.3.0"
+    },
+    "lucide-react": {
+      "range": "^1.55.0"
+    },
+    "motion": {
+      "range": "^14.1.0"
+    }
+  },
+  "files": {
+    "LICENSE-ARC": {
+      "sha256": "5fddd02f2562c485c386bf1d1bd28ecede57b3e72e0b73d0fe2a39856347315b"
+    },
+    "NOTICE.md": {
+      "sha256": "90c0c1a9ee99a2ec2dc1f291293c036607b180f0510e2a79fdf5ce42ceb95f88"
+    },
+    "components/badge/badge.module.css": {
+      "sha256": "8914801479d168d8bc8fe45ffd6b97d326e8e891130205f9fa4148efcc797a72"
+    },
+    "components/badge/badge.tsx": {
+      "sha256": "e791beee3197e14297df44d3c75abbced660e650e188ef1bca093f5cbcad3df0"
+    },
+    "components/badge/meta.json": {
+      "sha256": "ed27f7e4559ae023eff246d31ec84a8b23728d0154086b7c60bdf8a1e0df74f0"
+    },
+    "components/button/button.module.css": {
+      "sha256": "16273f9744e167ab0c75138f30db5273c5a0ea7f80f1512e2ee2750838765eaa"
+    },
+    "components/button/button.tsx": {
+      "sha256": "f578dc2183de3b22b0d08b72a62b4106c326f30b4ed405148422ddcfe26eaa87"
+    },
+    "components/button/meta.json": {
+      "sha256": "2e0ec32c4d3fbb305c4e8a6d374211b7b64696e518e8af4c683f17b956ae8e68"
+    },
+    "components/empty-state/empty-state.module.css": {
+      "sha256": "b78a82bcbfc90e8ed8befc5553e76646e1aabb553f4c30cb0b7f78ab30d78d8d"
+    },
+    "components/empty-state/empty-state.tsx": {
+      "sha256": "ca328fa50f2506f6ac2c11b5bc16387a7e105391f223722689fdb285fce39ccb"
+    },
+    "components/empty-state/meta.json": {
+      "sha256": "0e921bc6ca74385adb49416aac4c6efe28ef574fa2064c5719751f53bc3155e3"
+    },
+    "components/search-field/meta.json": {
+      "sha256": "e3926648eb04b05b9a9ee9f3020674bb41635b98ec0c6cbeb2b178be629a910e"
+    },
+    "components/search-field/search-field.module.css": {
+      "sha256": "350582588935cf47eeeae384a3ccf5ecd5b246978fb3511b0335e0c8e5191967"
+    },
+    "components/search-field/search-field.tsx": {
+      "sha256": "7632fc982ab5af1f9509ced035363c287e5359ca97f8acf2aa14fce1b3100374"
+    },
+    "components/segmented-control/meta.json": {
+      "sha256": "7363fb951e57aa68226fb488eccec6a15afcbcaff69648ca0d6de4e5195a082e"
+    },
+    "components/segmented-control/segmented-control.module.css": {
+      "sha256": "a2e3e83800f9532e4336bbdfea0bba9f639dfb459f69fe9b90d5edd5f5402dcd"
+    },
+    "components/segmented-control/segmented-control.tsx": {
+      "sha256": "509afd63d81236514ca2163f3410ab4cea2dd85ac0cd1e830353220af4b69d4a"
+    },
+    "components/sortable-data-table/meta.json": {
+      "sha256": "67c2e7189d4d37f6295eccbdc9fa0bf46eb7656457bfa03c3ef6f01de5cc295d"
+    },
+    "components/sortable-data-table/sortable-data-table.module.css": {
+      "sha256": "c194b539bd2f0b5a3d9dc4d1343b3339fb3c123c5d124c8e46dc75f7e54c9a21"
+    },
+    "components/sortable-data-table/sortable-data-table.tsx": {
+      "sha256": "985367470d172463d009a9a7a1e6e208082b1c0f1fb74d0fe28a188bd9a22a70"
+    },
+    "components/spinner/meta.json": {
+      "sha256": "d9e91a2ec1c0ef06e3f895ad4c03ace03b1f65f47d547ea7882aba0f6a1d8c0f"
+    },
+    "components/spinner/spinner.module.css": {
+      "sha256": "ccd9597344f36be47088a8668aad25683efaaa6b8045c796a27ede23b298d23a"
+    },
+    "components/spinner/spinner.tsx": {
+      "sha256": "93781a9e17b3e7ee262297c44a1e9ee89dbe72cc092f017d9ed82e3ffa3d30a1"
+    },
+    "components/theme-switch/meta.json": {
+      "sha256": "3f12275ee0ef4cad934036b3581fc9b8b995f903f9bd20c7dd48ca7738ad69af"
+    },
+    "components/theme-switch/theme-switch.module.css": {
+      "sha256": "b3a100c4936aba47311e732a2ba92b2bf71375e07172bbde1d3a398c4845228f"
+    },
+    "components/theme-switch/theme-switch.tsx": {
+      "sha256": "aa326f379a0db9374c3b763ad70ae5f93d18211a2e653a39e907c17d0a11cfde"
+    },
+    "components/tooltip/meta.json": {
+      "sha256": "ed268d12a4857d54da672f48ab9ebb5d862b99ebb2736c016499d6abd2b1979e"
+    },
+    "components/tooltip/tooltip.module.css": {
+      "sha256": "f22931b51438b6815dcf3838bbae9e50fa13775b9df6bee4cadbb3798faac6ea"
+    },
+    "components/tooltip/tooltip.tsx": {
+      "sha256": "abe57a231588417a33ada0cbc889827d6464a51657f8597031fc1e13af3cbe6a"
+    },
+    "foundation.css": {
+      "sha256": "698e8e6c59f8e33ffcb48951f1c57b927eb6a28a50441caafd77e9da0cb060ea"
+    },
+    "lib/arc-provider.tsx": {
+      "sha256": "3f4cce7e9b7ff16d4d4bf2eb23478d27ce3461368948a84af7fa4d1300e8c646"
+    },
+    "lib/motion-tokens.ts": {
+      "sha256": "1ebf245b7dbc9af0b457d49428ce97d0519e73ce3ea951b0938a3b78955a4c78"
+    },
+    "lib/use-controllable-state.ts": {
+      "sha256": "2735d4d5f4bf5a4e7781d5efe3c23c6981c275fad8ab674350c12c6d22d85f81"
+    }
+  },
+  "patches": {}
+}

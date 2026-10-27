@@ -1,0 +1,16 @@
+{
+  "title": "Badge",
+  "description": "A small label for status, category, or metadata.",
+  "category": "Data",
+  "kind": "component",
+  "dependencies": [
+    "motion"
+  ],
+  "requires": [],
+  "tags": [
+    "label",
+    "status"
+  ],
+  "source": "arc",
+  "canvas": []
+}

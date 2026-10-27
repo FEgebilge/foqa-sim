@@ -1,0 +1,17 @@
+{
+  "title": "Segmented control",
+  "description": "Switch between a small set of related views: a compact pill toggle, or an underline tab row for views over a list.",
+  "category": "Inputs",
+  "kind": "component",
+  "dependencies": [
+    "motion"
+  ],
+  "requires": [],
+  "tags": [
+    "control",
+    "choice",
+    "tabs"
+  ],
+  "source": "arc",
+  "canvas": []
+}

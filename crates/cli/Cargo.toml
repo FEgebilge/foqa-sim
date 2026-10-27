@@ -1,0 +1,32 @@
+[package]
+name = "cli"
+description = "Ground-station tools: fdm (analysis) and foqa-airports (runway data check)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "fdm"
+path = "src/main.rs"
+
+# Talks to the sim: Windows with the MSFS SDK. The server builds fdm alone,
+# `--no-default-features` (docs/challenges.md).
+[[bin]]
+name = "foqa-airports"
+path = "src/bin/foqa-airports.rs"
+required-features = ["sim"]
+
+[features]
+default = ["sim"]
+sim = ["dep:sim-link"]
+
+[dependencies]
+analyzer = { path = "../analyzer" }
+challenge = { path = "../challenge" }
+debrief = { path = "../debrief" }
+fdm-core = { path = "../fdm-core" }
+rules = { path = "../rules" }
+serde_json = "1"
+sim-link = { path = "../sim-link", optional = true }

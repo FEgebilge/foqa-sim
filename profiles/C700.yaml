@@ -1,0 +1,15 @@
+# Cessna Citation Longitude (Model 700) type profile. Schema: docs/rules.md.
+#
+# No max_crosswind/max_tailwind: neither the TCDS nor a reachable AFM lists one.
+type: C700
+name: Cessna Citation Longitude (700)
+class: transport
+vmo: { value: 290 kt, source: "EASA TCDS EASA.IM.A.620 Model 700 Issue 03, https://www.easa.europa.eu/en/downloads/129064/en", note: "VMO 290 KIAS at sea level (305 KIAS at 8000 ft); the low-altitude value is the one used" }
+vle: { value: 230 kt, source: "EASA TCDS EASA.IM.A.620 Issue 03 (VLE 230 KIAS)" }
+vlo: { value: 230 kt, source: "EASA TCDS EASA.IM.A.620 Issue 03 (VLO 230 KIAS)" }
+flaps:
+  - up_to: 7 deg
+    vfe: { value: 250 kt, source: &fpg "Citation Longitude Flight Planning Guide, Specifications p. 2-4, https://aviav.ru/wp-content/uploads/2020/04/citation-longitude-fpg.pdf", note: "Flaps 1" }
+  - up_to: 15 deg
+    vfe: { value: 230 kt, source: *fpg, note: "Flaps 2" }
+  - vfe: { value: 180 kt, source: *fpg, note: "Flaps FULL" }

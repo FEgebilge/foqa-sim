@@ -1,0 +1,11 @@
+[package]
+name = "sim-link"
+description = "Own SimConnect client: hand-written FFI over the statically linked SimConnect.lib."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+fdm-core = { path = "../fdm-core" }

@@ -1,0 +1,22 @@
+{
+  "title": "Theme switcher",
+  "description": "Four smooth ways to move between light and dark appearance.",
+  "category": "Actions",
+  "kind": "component",
+  "dependencies": [
+    "lucide-react",
+    "motion"
+  ],
+  "requires": [
+    "button"
+  ],
+  "tags": [
+    "theme",
+    "appearance",
+    "motion"
+  ],
+  "source": "arc",
+  "canvas": [
+    "canvasCompact"
+  ]
+}

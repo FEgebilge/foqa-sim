@@ -1,0 +1,16 @@
+# Cessna 208B Grand Caravan EX type profile. Schema: docs/rules.md.
+#
+# No vle/vlo: fixed gear. No tail_contact, hard_landing_g, max_tailwind: not published.
+# The TCDS also has an UP-TO/APR 150, TO/APR-LAND 125 table for a later
+# variant; the 3-band table is used.
+type: C208
+name: Cessna 208B Grand Caravan EX
+class: light
+vmo: { value: 175 kt, source: "FAA TCDS A37CE / EASA TCDS IM.A.226 Issue 15 (208B): VMO 175 KIAS (175 KCAS), https://www.easa.europa.eu/en/downloads/7230/en" }
+max_crosswind: { value: 20 kt, source: "Max demonstrated crosswind Cessna 208 Caravan, Boldmethod list https://www.boldmethod.com/learn-to-fly/maneuvers/maximum-demonstrated-crosswind/" }
+flaps:
+  - { up_to: 10 deg, vfe: { value: 175 kt, source: &tcds "EASA TCDS IM.A.226 Issue 15", note: "VFE to 10 deg 175 KIAS" } }
+  - { up_to: 20 deg, vfe: { value: 150 kt, source: *tcds, note: "VFE 10-20 deg 150 KIAS" } }
+  - { vfe: { value: 125 kt, source: *tcds, note: "VFE 20-30 deg 125 KIAS; full flaps 30" } }
+phases:
+  approach_ft: { value: 1500 ft, source: "FAA AIM 4-3-3 (traffic patterns): large and turbine-powered aircraft enter the pattern at 1500 ft AGL", note: "CICTT starts the approach at 1000 ft or at the VFR pattern entry" }

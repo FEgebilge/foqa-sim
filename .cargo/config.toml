@@ -1,0 +1,4 @@
+# SimConnect.lib (MSFS SDK) names a SimConnect.pdb the SDK doesn't ship;
+# silence the resulting LNK4099 on every link.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "link-arg=/IGNORE:4099"]

@@ -1,0 +1,89 @@
+/* FOQA-Sim EFB app: the board's "Night Flight" theme (FOQASim.css, built in
+   ahead of this file) at tablet scale, touch targets of 44 px or more.
+   Coherent GT: flex only (no grid, no gap). */
+.foqa-efb {
+    position: absolute; left: 0; top: 0; right: 0; bottom: 0;
+    display: flex; flex-direction: column;
+    background: #050e1d; color: #e8f0f6;
+    font-family: "Roboto-Regular", sans-serif;
+}
+.foqa-efb .efb-tabs { display: flex; flex-shrink: 0; padding: 10px 14px 0; border-bottom: 1px solid #1f2c3f; }
+.foqa-efb .efb-tab {
+    flex: 1 1 auto; height: 48px; line-height: 48px; text-align: center;
+    font-size: 20px; color: #8c9aa9; border-bottom: 3px solid transparent; cursor: pointer;
+}
+.foqa-efb .efb-tab.on { color: #e8f0f6; border-bottom-color: #58d1e5; font-family: "Roboto-Bold", "Roboto-Regular", sans-serif; }
+.foqa-efb .efb-pane { display: none; flex: 1 1 auto; min-height: 0; position: relative; }
+.foqa-efb .efb-pane.on { display: flex; }
+
+/* Board and history at tablet scale */
+.foqa-efb .foqa { --big: 40px; padding: 10px 14px; font-size: 18px; background: transparent; }
+.foqa-efb .foqa .top { min-height: 48px; }
+.foqa-efb .foqa .dot { width: 12px; height: 12px; }
+.foqa-efb .foqa .phase { font-size: 15px; padding: 3px 10px; border-radius: 14px; }
+.foqa-efb .foqa .btn { min-width: 48px; height: 44px; line-height: 42px; padding: 0 14px; font-size: 17px; border-radius: 6px; }
+.foqa-efb .foqa .btn.wide { height: 52px; line-height: 50px; margin-top: 10px; font-size: 18px; }
+.foqa-efb .foqa .tab { padding: 12px 4px 10px; font-size: 17px; }
+.foqa-efb .foqa .badge { min-width: 22px; line-height: 22px; border-radius: 11px; font-size: 14px; }
+.foqa-efb .foqa .section, .foqa-efb .foqa .tile .label, .foqa-efb .foqa .fact .label { font-size: 14px; }
+.foqa-efb .foqa .tile .value { font-size: 26px; }
+.foqa-efb .foqa .tile .unit, .foqa-efb .foqa .stat .unit { font-size: 14px; }
+.foqa-efb .foqa .tile { padding: 8px 10px; }
+.foqa-efb .foqa .gate { padding: 10px 12px; }
+.foqa-efb .foqa .gate .at { font-size: 22px; }
+.foqa-efb .foqa .gstate, .foqa-efb .foqa .tag, .foqa-efb .foqa .count { font-size: 15px; padding: 3px 10px; }
+.foqa-efb .foqa .gate .gbody, .foqa-efb .foqa .gate .fail, .foqa-efb .foqa .where, .foqa-efb .foqa .clean { font-size: 16px; }
+.foqa-efb .foqa .event { margin-top: 8px; padding: 10px 12px; }
+.foqa-efb .foqa .event .detail, .foqa-efb .foqa .event .time, .foqa-efb .foqa .lrow .nums { font-size: 16px; }
+.foqa-efb .foqa .lrow { min-height: 48px; padding: 8px 12px; }
+.foqa-efb .foqa .flash { padding: 10px 12px; }
+.foqa-efb .foqa .toast { padding: 12px; }
+.foqa-efb .foqa .hint { font-size: 15px; }
+.foqa-efb .foqa .fact .fv { font-size: 18px; }
+.foqa-efb .foqa .body::-webkit-scrollbar { width: 10px; }
+
+/* Flights: list rows and the debrief */
+.foqa.history .btn.back { margin-right: 8px; }
+.foqa.history .state { flex-shrink: 0; font-family: var(--bold); }
+.foqa.history .frow {
+    margin-top: 8px; padding: 10px 12px; border-left-style: solid; border-left-width: 4px; border-radius: 4px;
+    background: var(--surface); cursor: pointer;
+}
+.foqa.history .frow:hover { background: var(--surface-2); }
+.foqa.history .fline { display: flex; align-items: baseline; }
+.foqa.history .fwhen, .foqa.history .froute { flex: 1 1 auto; min-width: 0; }
+.foqa.history .fwhen { font-family: var(--mono); }
+.foqa.history .froute { font-family: var(--bold); }
+.foqa.history .fac, .foqa.history .fnums { margin-left: 10px; color: var(--secondary); white-space: nowrap; }
+.foqa.history .fnums { font-family: var(--mono); }
+.foqa.history .counts { margin-top: 6px; }
+.foqa.history .dhead { margin-top: 6px; padding-top: 8px; border-top-style: solid; border-top-width: 3px; }
+.foqa.history .dhead .title { font-size: 22px; }
+.foqa.history .card .time { font-family: var(--mono); color: var(--muted); }
+.foqa.history .event { cursor: pointer; }
+.foqa.history .event .lvl {
+    margin-right: 10px; font-size: 13px; color: var(--muted);
+    font-family: var(--bold); text-transform: uppercase; letter-spacing: 1px;
+}
+.foqa.history .event.open { background: var(--surface-2); }
+.foqa.history .why { margin-top: 6px; font-size: 16px; color: var(--secondary); }
+.foqa.history .why b { display: block; font-weight: normal; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+.foqa.history .chart { display: block; margin-top: 8px; }
+.foqa.history .grade {
+    flex-shrink: 0; margin-left: 10px; padding: 2px 10px; border-radius: 12px;
+    font-size: 14px; font-family: var(--bold); color: var(--ink); background: var(--ok);
+}
+.foqa.history .grade.g-fair { background: var(--medium); }
+.foqa.history .grade.g-poor { background: var(--high); }
+.foqa.history .assess { display: flex; align-items: center; margin-top: 8px; }
+.foqa.history .assess .grade { margin-left: 0; padding: 4px 14px; font-size: 18px; }
+.foqa.history .assess .why { margin-left: 10px; font-size: 15px; color: var(--secondary); }
+.foqa.history .parts-toggle { display: inline-block; margin-top: 8px; padding: 6px 0; font-size: 14px; color: var(--muted); text-decoration: underline; }
+.foqa.history .parts { margin-top: 2px; font-size: 15px; line-height: 1.4; color: var(--secondary); }
+.foqa.history .parts .bands { margin-top: 4px; font-size: 13px; color: var(--muted); }
+.foqa.history .phases { margin: 2px 0 8px; font-size: 15px; line-height: 1.35; }
+.foqa.history .phrow { display: grid; grid-template-columns: 52px 1fr; column-gap: 8px; padding: 5px 0; border-top: 1px solid #1f2c3f; }
+.foqa.history .phrow .time { font-family: var(--mono); color: var(--muted); }
+.foqa.history .phrow .name { color: #e8f0f6; }
+.foqa.history .phrow .trigger { grid-column: 2; font-size: 13px; color: var(--muted); }
+.foqa.history .bounces { margin-top: 6px; font-size: 15px; font-family: var(--mono); color: var(--medium); }

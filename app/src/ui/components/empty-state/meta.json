@@ -1,0 +1,17 @@
+{
+  "title": "Empty state",
+  "description": "A useful next step when there is nothing to show yet.",
+  "category": "Data",
+  "kind": "component",
+  "dependencies": [
+    "lucide-react",
+    "motion"
+  ],
+  "requires": [],
+  "tags": [
+    "data",
+    "guidance"
+  ],
+  "source": "arc",
+  "canvas": []
+}

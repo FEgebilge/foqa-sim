@@ -1,0 +1,22 @@
+[package]
+name = "capture"
+description = "Live recording: every MSFS flight to a journal and a raw capture (foqa-rec, and the service the desktop app runs)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "foqa-rec"
+path = "src/main.rs"
+
+[dependencies]
+analyzer = { path = "../analyzer" }
+debrief = { path = "../debrief" }
+fdm-core = { path = "../fdm-core" }
+recorder = { path = "../recorder" }
+rules = { path = "../rules" }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1"
+sim-link = { path = "../sim-link" }

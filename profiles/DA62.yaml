@@ -1,0 +1,13 @@
+# Diamond DA62 type profile. Schema: docs/rules.md.
+#
+# No tail_contact, hard_landing_g, max_tailwind: not published or reachable.
+type: DA62
+name: Diamond DA62
+class: light
+vmo: { value: 201 kt, source: &tcds "EASA TCDS EASA.IM.A.629 Issue 8 (16 Aug 2023), https://www.easa.europa.eu/en/downloads/44256/en", note: "VNE 201 KEAS (about KCAS); Vno 160 KEAS" }
+vle: { value: 201 kt, source: *tcds, note: "VLE 201 KEAS" }
+vlo: { value: 160 kt, source: *tcds, note: "VLO 160 KEAS, single value for extend/retract" }
+max_crosswind: { value: 25 kt, source: "Diamond DA62 tech specs, max demonstrated crosswind 25 kts, https://www.diamondaircraft.com/en/private-owners/aircraft/da62/tech-specs/" }
+flaps:
+  - { up_to: 20 deg, vfe: { value: 135 kt, source: *tcds, note: "VFE approach 135 KEAS; cruise 0, approach 20 deg" } }
+  - { vfe: { value: 118 kt, source: *tcds, note: "VFE landing 118 KEAS, landing flap 42 deg; the TCDS two-column text extraction is garbled, read as 135 approach / 118 landing" } }

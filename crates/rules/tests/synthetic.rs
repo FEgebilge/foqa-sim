@@ -1,0 +1,511 @@
+//! Synthetic golden flights (`testkit`) through the core rule set, to check
+//! the phase, touchdown and rule logic against flights whose answer is known
+//! by construction.
+
+use analyzer::{Flight, Phase, Track, phases, touchdowns};
+use fdm_core::Airport;
+use fdm_core::geo::LocalFrame;
+use recorder::SimEvent;
+use rules::{Event, Level, ProfileSet, evaluate, load};
+use testkit::*;
+
+const CORE: &str = include_str!("../../../rules/core.yaml");
+/// Every event the rules in `yaml` raise, in full, with the shipped
+/// profiles.
+fn all_events(yaml: &str, flight: &Flight, track: &Track) -> Vec<Event> {
+    graded(&ProfileSet::shipped().unwrap(), yaml, flight, track)
+}
+
+/// `all_events` with the given profiles.
+fn graded(profiles: &ProfileSet, yaml: &str, flight: &Flight, track: &Track) -> Vec<Event> {
+    evaluate(
+        &load(yaml).unwrap(),
+        &profiles.select(flight),
+        flight,
+        track,
+    )
+}
+
+/// Just the (rule, level) pairs.
+fn pairs(events: Vec<Event>) -> Vec<(String, Level)> {
+    events.into_iter().map(|e| (e.rule, e.level)).collect()
+}
+
+fn events(yaml: &str, flight: &Flight, track: &Track) -> Vec<(String, Level)> {
+    pairs(all_events(yaml, flight, track))
+}
+
+fn found(rules: &[(&str, Level)]) -> Vec<(String, Level)> {
+    rules.iter().map(|&(r, l)| (r.to_owned(), l)).collect()
+}
+
+/// The phases, with the boundaries the flight is graded with.
+fn sequence(flight: &Flight, track: &Track) -> Vec<Phase> {
+    let profiles = ProfileSet::shipped().unwrap();
+    let cfg = profiles.select(flight).phases;
+    phases(track, &cfg).iter().map(|s| s.phase).collect()
+}
+
+/// A stabilised airliner approach and a smooth landing (1.2 g, 300 fpm):
+/// the stable flight a FOQA programme must stay silent on.
+#[test]
+fn stable_airliner_approach_raises_nothing() {
+    let (flight, track) = fly(AIRLINER_LB, TD_S + ROLLOUT_S, |t| landing(t, TD_S, 1.2));
+    assert_eq!(
+        sequence(&flight, &track),
+        [Phase::EnRoute, Phase::Approach, Phase::Landing, Phase::Taxi]
+    );
+    assert_eq!(events(CORE, &flight, &track), []);
+    let [td] = &touchdowns(&flight, &track)[..] else {
+        panic!("expected one touchdown")
+    };
+    assert!(!td.bounce);
+    assert!((td.sink_fpm - 300.0).abs() < 30.0, "{:.0} fpm", td.sink_fpm);
+}
+
+/// The same landing with a 2.0 g impact: above the transport hard-landing
+/// medium level (1.8 g) but below high (2.1 g).
+#[test]
+fn airliner_hard_landing_is_medium() {
+    let (flight, track) = fly(AIRLINER_LB, TD_S + ROLLOUT_S, |t| landing(t, TD_S, 2.0));
+    assert_eq!(
+        events(CORE, &flight, &track),
+        found(&[("hard-landing", Level::Medium)])
+    );
+}
+
+/// 2.0 g is a hard landing for a 2300 lb light aircraft only at its low level
+/// (1.8 g; medium starts at 2.2 g), and the transport rule is not applied to
+/// it; 1.7 g is within limits.
+#[test]
+fn light_aircraft_uses_its_own_hard_landing_levels() {
+    let (flight, track) = fly(LIGHT_LB, TD_S + ROLLOUT_S, |t| landing(t, TD_S, 2.0));
+    assert_eq!(
+        events(CORE, &flight, &track),
+        found(&[("hard-landing-light", Level::Low)])
+    );
+    let (flight, track) = fly(LIGHT_LB, TD_S + ROLLOUT_S, |t| landing(t, TD_S, 1.7));
+    assert_eq!(events(CORE, &flight, &track), []);
+}
+
+/// Touchdown, a 1.5 s hop to 2 ft, touchdown again. Only the second contact
+/// is the bounce, and the landing is graded Medium once.
+#[test]
+fn bounce_flags_only_the_second_touchdown() {
+    const HOP_S: f64 = 1.5;
+    let (flight, track) = fly(AIRLINER_LB, TD_S + ROLLOUT_S, |t| {
+        let mut p = landing(t, TD_S, 1.3);
+        let hop = (t - TD_S - 0.3) / HOP_S;
+        if (0.0..1.0).contains(&hop) {
+            p.alt = 8.0 * hop * (1.0 - hop);
+            p.ground = false;
+        } else if (1.0..1.13).contains(&hop) {
+            p.g = 1.4;
+        }
+        p
+    });
+    let tds = touchdowns(&flight, &track);
+    assert_eq!(
+        tds.iter().map(|t| t.bounce).collect::<Vec<_>>(),
+        [false, true]
+    );
+    let events = all_events(CORE, &flight, &track);
+    let [bounce] = &events[..] else {
+        panic!("expected one event, got {events:?}")
+    };
+    assert_eq!(
+        (bounce.rule.as_str(), bounce.level),
+        ("bounced-landing", Level::Medium)
+    );
+    assert_eq!(bounce.start, tds[1].t);
+}
+
+/// Approach down to 300 ft AAL, go-around back above 1000 ft, second
+/// approach to a landing. The go-around is recorded as an advisory, and the
+/// 500 ft gate fires on each approach that reaches it.
+#[test]
+fn go_around_is_recorded_and_rearms_the_gates() {
+    const GATE: &str = "
+rule: gate-500
+version: 1
+title: Passed 500 ft on approach
+phase: Approach
+gate: height <= 500 ft
+measure: true
+level: advisory
+";
+    const SECOND_TD_S: f64 = 175.0 + APPROACH_S; // second approach starts where the climb ends
+    let (flight, track) = fly(AIRLINER_LB, SECOND_TD_S + ROLLOUT_S, |t| {
+        if t < SECOND_TD_S - APPROACH_S {
+            let alt = lerp(&[(0.0, 1500.0), (103.0, 300.0), (175.0, 1600.0)], t);
+            Pt {
+                alt,
+                speed: 140.0,
+                ..landing(t, SECOND_TD_S, 1.0)
+            }
+        } else {
+            landing(t, SECOND_TD_S, 1.2)
+        }
+    });
+    assert_eq!(
+        sequence(&flight, &track),
+        [
+            Phase::EnRoute,
+            Phase::Approach,
+            Phase::GoAround,
+            Phase::EnRoute,
+            Phase::Approach,
+            Phase::Landing,
+            Phase::Taxi
+        ]
+    );
+    assert_eq!(
+        events(CORE, &flight, &track),
+        found(&[("go-around", Level::Advisory)])
+    );
+    assert_eq!(
+        events(GATE, &flight, &track),
+        found(&[("gate-500", Level::Advisory); 2])
+    );
+}
+
+/// A continuous rule with `sustain: 2 s` ignores a 1 s excursion above 1.2 g
+/// early in the flight and reports a 3 s one.
+#[test]
+fn sustain_filters_short_exceedances() {
+    const RULE: &str = "
+rule: g-sustained
+version: 1
+title: Normal load above 1.2 g
+phase: EnRoute
+measure: accel.normal
+sustain: 2 s
+above: { low: 1.2 g }
+";
+    let with_bump = |secs: f64| {
+        let (flight, track) = fly(AIRLINER_LB, TD_S + ROLLOUT_S, |t| Pt {
+            g: if (5.0..5.0 + secs).contains(&t) {
+                1.5
+            } else {
+                1.0
+            },
+            ..landing(t, TD_S, 1.0)
+        });
+        all_events(RULE, &flight, &track)
+    };
+    assert_eq!(with_bump(1.0), []);
+    let [event] = &with_bump(3.0)[..] else {
+        panic!("expected one event")
+    };
+    assert_eq!(event.level, Level::Low);
+    assert_eq!(event.value, Some(1.5));
+}
+
+fn land_on(airports: &[Airport]) -> (Flight, Track) {
+    let events: Vec<_> = airports.iter().cloned().map(SimEvent::Airport).collect();
+    fly_to(&events, AIRLINER_LB, TD_S + ROLLOUT_S, |t| {
+        landing(t, TD_S, 1.2)
+    })
+}
+
+/// 1500 m past the threshold is beyond the 914 m touchdown zone: a medium
+/// long landing, nothing else, and the touchdown carries the runway fix.
+#[test]
+fn touchdown_past_the_zone_is_a_long_landing() {
+    let (flight, track) = land_on(&[runway_behind_touchdown(1500.0)]);
+    assert_eq!(
+        events(CORE, &flight, &track),
+        found(&[("long-landing", Level::Medium)])
+    );
+    let fix = touchdowns(&flight, &track)[0].runway.clone().unwrap();
+    assert_eq!((fix.icao.as_str(), fix.runway.as_str()), ("TEST", "20"));
+    assert!((fix.along_m - 1500.0).abs() < 2.0 && fix.cross_m.abs() < 1.0);
+}
+
+#[test]
+fn touchdown_inside_the_zone_raises_nothing() {
+    let (flight, track) = land_on(&[runway_behind_touchdown(400.0)]);
+    assert_eq!(events(CORE, &flight, &track), []);
+    assert!(
+        touchdowns(&flight, &track)[0]
+            .runway
+            .as_ref()
+            .unwrap()
+            .in_tdz
+    );
+}
+
+/// Runway moved 15 m to the left of the touchdown: contact ~49 ft right of
+/// the centreline, inside the touchdown zone, a medium off-centreline event.
+#[test]
+fn touchdown_right_of_the_centreline_is_flagged() {
+    let mut airport = runway_behind_touchdown(400.0);
+    let rw = &mut airport.runways[0];
+    let (sin, cos) = TRACK_DEG.to_radians().sin_cos();
+    (rw.lat_deg, rw.lon_deg) =
+        LocalFrame::new(rw.lat_deg, rw.lon_deg).point(-15.0 * cos, 15.0 * sin);
+    let (flight, track) = land_on(&[airport]);
+    assert_eq!(
+        events(CORE, &flight, &track),
+        found(&[("off-centreline-touchdown", Level::Medium)])
+    );
+    let cross = touchdowns(&flight, &track)[0]
+        .runway
+        .as_ref()
+        .unwrap()
+        .cross_m;
+    assert!((cross - 15.0).abs() < 1.0, "{cross:.1} m");
+}
+
+#[test]
+fn touchdown_before_the_threshold_is_a_short_landing() {
+    let (flight, track) = land_on(&[runway_behind_touchdown(-80.0)]);
+    assert_eq!(
+        events(CORE, &flight, &track),
+        found(&[("short-landing", Level::High)])
+    );
+}
+
+/// Without an airport snapshot the runway values are unknown: no runway
+/// event fires and the rest of the flight is graded as before.
+#[test]
+fn no_airport_data_leaves_runway_values_unknown() {
+    let (flight, track) = land_on(&[]);
+    assert_eq!(touchdowns(&flight, &track)[0].runway, None);
+    assert_eq!(events(CORE, &flight, &track), []);
+    let probe = "
+rule: probe
+version: 1
+title: Distance known
+at: touchdown
+measure: td.distance > -1000 ft
+level: advisory
+";
+    assert_eq!(events(probe, &flight, &track), []);
+    let (flight, track) = land_on(&[runway_behind_touchdown(400.0)]);
+    assert_eq!(
+        events(probe, &flight, &track),
+        found(&[("probe", Level::Advisory)])
+    );
+}
+
+/// A light aircraft on approach at 80 kt with the flaps at 20 deg (C172: VFE
+/// 85 kt above 10 deg), at 95 kt for 3 s. As a C172 that is 10 kt over VFE
+/// for 3 s: Medium (over 5 kt; High needs more than 10 kt). Without an
+/// identity no type profile applies and nothing fires.
+#[test]
+fn flap_overspeed_uses_the_vfe_of_the_type_profile() {
+    let script = |t: f64| {
+        let p = landing(t, TD_S, 1.2);
+        Pt {
+            speed: if (10.0..13.0).contains(&t) {
+                95.0
+            } else {
+                p.speed.min(80.0)
+            },
+            flaps: 20.0,
+            ..p
+        }
+    };
+    let (flight, track) = fly_to(&[identity("C172")], LIGHT_LB, TD_S + ROLLOUT_S, script);
+    let found = all_events(CORE, &flight, &track);
+    let [e] = &found[..] else {
+        panic!("expected one event, got {found:?}")
+    };
+    assert_eq!(
+        (e.rule.as_str(), e.level, e.value, e.threshold),
+        ("flap-overspeed", Level::Medium, Some(10.0), Some(5.0))
+    );
+    assert_eq!(e.detail.as_deref(), Some("95 kt at flaps 20°, limit 85 kt"));
+    assert!(e.end.us_since(e.start) >= 2_000_000);
+    let (flight, track) = fly(LIGHT_LB, TD_S + ROLLOUT_S, script);
+    assert_eq!(events(CORE, &flight, &track), []);
+}
+
+/// A test type whose tail touches at 6 deg on rotation and 3.5 deg at
+/// touchdown, inspected from 1.1 g.
+const TEST_PROFILE: &str = r#"
+type: TEST
+name: Synthetic test aircraft
+class: light
+tail_contact:
+  takeoff: { value: 6 deg, source: synthetic }
+  landing: { value: 3.5 deg, source: synthetic }
+hard_landing_g: { value: 1.1 g, source: synthetic }
+"#;
+
+/// Takeoff roll to 60 kt, rotation to 4.5 deg, liftoff at 20 s, climb to
+/// 1500 ft, then the 3 deg nose-up 1.2 g landing. Rotation leaves ~1.5 deg
+/// of tail clearance (Medium), touchdown 0.5 deg (High), and 1.2 g passes
+/// the 1.1 g inspection load. Without the type's profile the same flight is
+/// graded by its class and raises nothing.
+#[test]
+fn tail_contact_and_inspection_values_drive_their_rules() {
+    const LIFTOFF_S: f64 = 20.0;
+    const CLIMB_END_S: f64 = 100.0;
+    const TD: f64 = CLIMB_END_S + APPROACH_S;
+    let (flight, track) = fly_to(&[identity("TEST")], LIGHT_LB, TD + ROLLOUT_S, |t| {
+        if t < CLIMB_END_S {
+            Pt {
+                alt: lerp(&[(LIFTOFF_S, 0.0), (CLIMB_END_S, 1500.0)], t),
+                speed: lerp(&[(0.0, 0.0), (LIFTOFF_S, 60.0)], t),
+                g: 1.0,
+                pitch: lerp(&[(LIFTOFF_S - 3.0, 0.0), (LIFTOFF_S, 4.5)], t),
+                flaps: 0.0,
+                gear: 100.0,
+                wind: (0.0, 0.0),
+                sim_rate: 1.0,
+                ap: false,
+                ground: t < LIFTOFF_S,
+                lost: &[],
+            }
+        } else {
+            landing(t, TD, 1.2)
+        }
+    });
+    let profiles = ProfileSet::load([("TEST", TEST_PROFILE)]).unwrap();
+    assert_eq!(profiles.select(&flight).to_string(), "TEST profile");
+    let events = graded(&profiles, CORE, &flight, &track);
+    assert_eq!(
+        pairs(events.clone()),
+        found(&[
+            ("tailstrike-risk-takeoff", Level::Medium),
+            ("tailstrike-risk-landing", Level::High),
+            ("hard-landing-inspection", Level::High),
+        ])
+    );
+    let margin = |rule: &str| {
+        events
+            .iter()
+            .find(|e| e.rule == rule)
+            .unwrap()
+            .value
+            .unwrap()
+    };
+    assert!((margin("tailstrike-risk-takeoff") - 1.5).abs() < 0.2);
+    assert!((margin("tailstrike-risk-landing") - 0.5).abs() < 0.05);
+
+    let shipped = ProfileSet::shipped().unwrap();
+    assert_eq!(
+        shipped.select(&flight).to_string(),
+        "light class default (no TEST profile)"
+    );
+    assert_eq!(graded(&shipped, CORE, &flight, &track), []);
+}
+
+/// A touch-and-go: the landing roll slows to 122 kt at 6 s with the nose
+/// lowered, power goes on, rotation to 4.5 deg and liftoff at 14 s. The
+/// landing ends at the lowest speed and the second takeoff roll starts
+/// there, so its rotation is checked (1.5 deg of tail clearance, Medium)
+/// as well as the 3 deg touchdown (0.5 deg, High).
+#[test]
+fn a_touch_and_go_splits_the_roll_and_checks_the_second_rotation() {
+    const LIFTOFF_S: f64 = TD_S + 14.0;
+    let (flight, track) = fly_to(&[identity("TEST")], LIGHT_LB, LIFTOFF_S + 60.0, |t| {
+        let p = landing(t, TD_S, 1.0);
+        if t < TD_S {
+            return p;
+        }
+        let pitch = [
+            (TD_S, 3.0),
+            (TD_S + 2.0, 0.0),
+            (LIFTOFF_S - 3.0, 0.0),
+            (LIFTOFF_S, 4.5),
+        ];
+        Pt {
+            alt: lerp(&[(LIFTOFF_S, 0.0), (LIFTOFF_S + 60.0, 1500.0)], t),
+            speed: lerp(&[(TD_S, 140.0), (TD_S + 6.0, 122.0), (LIFTOFF_S, 140.0)], t),
+            pitch: lerp(&pitch, t),
+            ground: t < LIFTOFF_S,
+            ..p
+        }
+    });
+    let profiles = ProfileSet::load([("TEST", TEST_PROFILE)]).unwrap();
+    let spans = phases(&track, &profiles.select(&flight).phases);
+    use Phase::*;
+    let seq: Vec<_> = spans.iter().map(|s| s.phase).collect();
+    assert_eq!(
+        seq,
+        [EnRoute, Approach, Landing, Takeoff, InitialClimb, EnRoute]
+    );
+    let go = &spans[3];
+    assert_eq!(go.cause.trigger, analyzer::Trigger::TouchAndGo);
+    assert!((go.start.as_secs_f64() - (TD_S + 6.0)).abs() < 0.2);
+    assert!((go.cause.value - 122.0).abs() < 0.5);
+    assert_eq!(
+        pairs(graded(&profiles, CORE, &flight, &track)),
+        found(&[
+            ("tailstrike-risk-landing", Level::High),
+            ("tailstrike-risk-takeoff", Level::Medium),
+        ])
+    );
+}
+
+/// A test type with speed and wind limits under what the scripted approach
+/// flies: VMO 132 kt, gear 150 kt extended and 125 kt moving, 10 kt
+/// demonstrated crosswind, 5 kt tailwind.
+const LIMITS_PROFILE: &str = r#"
+type: TEST
+name: Synthetic test aircraft
+class: transport
+vmo: { value: 132 kt, source: synthetic }
+vle: { value: 150 kt, source: synthetic }
+vlo: { value: 125 kt, source: synthetic, approximate: true, note: "synthetic sister type" }
+max_crosswind: { value: 10 kt, source: synthetic }
+max_tailwind: { value: 5 kt, source: synthetic }
+"#;
+
+/// The 140 kt approach onto runway 20 with the gear moving for 3 s at
+/// 30 s and the wind `wind`, graded with `LIMITS_PROFILE`.
+fn limits_flight(wind: (f64, f64)) -> Vec<(String, Level)> {
+    let events = [
+        identity("TEST"),
+        SimEvent::Airport(runway_behind_touchdown(400.0)),
+    ];
+    let (flight, track) = fly_to(&events, AIRLINER_LB, TD_S + ROLLOUT_S, |t| Pt {
+        gear: if (30.0..33.0).contains(&t) {
+            50.0
+        } else {
+            100.0
+        },
+        wind,
+        ..landing(t, TD_S, 1.2)
+    });
+    let profiles = ProfileSet::load([("TEST", LIMITS_PROFILE)]).unwrap();
+    pairs(graded(&profiles, CORE, &flight, &track))
+}
+
+/// 140 kt is 8 kt over VMO (Medium) and 15 kt over VLO while the gear
+/// moves (High); under VLE with it down. In calm air nothing else.
+#[test]
+fn speed_limits_of_the_type_profile_drive_their_rules() {
+    assert_eq!(
+        limits_flight((0.0, 0.0)),
+        found(&[
+            ("vmo-exceedance", Level::Medium),
+            ("gear-operating-overspeed", Level::High),
+        ])
+    );
+}
+
+/// 17 kt square across runway 20 is 7 kt over the demonstrated crosswind
+/// (Medium); 12 kt straight behind it is 7 kt over the certified tailwind
+/// limit (High, more than 5 kt).
+#[test]
+fn touchdown_wind_is_resolved_on_the_runway() {
+    let wind = |from: f64, kt: f64| {
+        limits_flight((from, kt))
+            .into_iter()
+            .filter(|(rule, _)| !rule.contains("speed") && rule != "vmo-exceedance")
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        wind(290.0, 17.0),
+        found(&[("crosswind-above-demonstrated", Level::Medium)])
+    );
+    assert_eq!(
+        wind(20.0, 12.0),
+        found(&[("tailwind-landing-limit", Level::High)])
+    );
+    assert_eq!(wind(200.0, 25.0), []);
+}

@@ -1,0 +1,233 @@
+// The data contract of docs/debrief-api.md. Times are seconds of sim time since the start of the recording.
+
+export type Level = "advisory" | "low" | "medium" | "high";
+
+export type RecorderStatus =
+  | { state: "waiting_for_sim" }
+  | { state: "connected" }
+  | { state: "recording"; flight_id: string; elapsed_s: number }
+  | { state: "error"; message: string };
+
+export interface Aircraft {
+  icao?: string;
+  title: string;
+}
+
+export type Grade = "good" | "fair" | "poor";
+
+/** The flight graded as a whole: each rule broken counts once at its worst level (high 4 points, medium 2, low 1, advisory 0). */
+export interface Assessment {
+  grade: Grade;
+  points: number;
+  /** Rules broken at low or above. */
+  findings: number;
+}
+
+/** One rule's share of the assessment: its worst level in the flight alone counts. */
+export interface AssessmentPart {
+  rule: string;
+  title: string;
+  level: Level;
+  points: number;
+  /** How many times it fired. */
+  count: number;
+}
+
+/** A grade's reach on the points scale: up to `up_to` inclusive, the last (no `up_to`) any more. */
+export interface GradeBand {
+  grade: Grade;
+  up_to?: number;
+}
+
+/** How the assessment was reached: the parts, most points first, and the scale they are read on. */
+export interface AssessmentDetail {
+  parts: AssessmentPart[];
+  bands: GradeBand[];
+}
+
+export interface FlightSummary {
+  id: string;
+  started_utc?: string;
+  duration_s: number;
+  aircraft?: Aircraft;
+  departure?: string;
+  arrival?: string;
+  landings: number;
+  worst_level?: Level;
+  event_counts: Record<Level, number>;
+  assessment: Assessment;
+}
+
+export interface PhaseSpan {
+  phase: string;
+  start_s: number;
+  end_s: number;
+  /** What opened it, with the value there, e.g. "descending through 1000 ft above the aerodrome (998 ft AAL)". */
+  trigger: string;
+}
+
+export interface RunwayFix {
+  icao: string;
+  runway: string;
+  along_m: number;
+  cross_m: number;
+  lda_m: number;
+  tdz_m: number;
+  aiming_point_m: number;
+  in_tdz: boolean;
+  long_landing: boolean;
+  short_landing: boolean;
+  /** "In TDZ", "Long" or "Short". */
+  zone: string;
+}
+
+/** Along the runway (negative headwind = tailwind) and across it (positive = from the right). */
+export interface TouchdownWind { from_deg: number; speed_kt: number; headwind_kt: number; crosswind_kt: number }
+
+export interface Touchdown {
+  t_s: number;
+  bounce: boolean;
+  sink_fpm: number;
+  sim_sink_fpm?: number;
+  peak_g: number;
+  pitch_deg?: number;
+  roll_deg?: number;
+  ias_kt?: number;
+  /** Wind at contact on the runway; absent without a runway fix or wind data. */
+  wind?: TouchdownWind;
+  runway?: RunwayFix;
+}
+
+export interface FlightEvent {
+  rule: string;
+  version: number;
+  title: string;
+  description: string;
+  level: Level;
+  start_s: number;
+  end_s: number;
+  /** Where `value` was measured; absent from older debriefs. */
+  peak_s?: number;
+  measure: string;
+  value?: number;
+  threshold?: number;
+  unit?: string;
+  /** Plain-language consequence and technique, from the rule. */
+  why_it_matters?: string;
+  advice?: string;
+  /** The event in words, e.g. "111 kt at flaps 12°, limit 85 kt". */
+  detail?: string;
+}
+
+export type SeriesValues = (number | null)[];
+
+export interface Series {
+  t_s: number[];
+  alt_ft: SeriesValues;
+  aal_ft: SeriesValues;
+  ias_kt: SeriesValues;
+  gs_kt: SeriesValues;
+  vs_fpm: SeriesValues;
+  nz_g: SeriesValues;
+  pitch_deg: SeriesValues;
+  roll_deg: SeriesValues;
+  flap_deg: SeriesValues;
+  /** The profile's flap-speed limit at `flap_deg`. */
+  vfe_kt: SeriesValues;
+  lat: SeriesValues;
+  lon: SeriesValues;
+}
+
+export interface RunwayEnd {
+  runway: string;
+  lat: number;
+  lon: number;
+  heading_deg: number;
+  lda_m: number;
+  tdz_m: number;
+}
+
+export interface Airport {
+  icao: string;
+  runways: { width_m: number; ends: RunwayEnd[] }[];
+}
+
+/** A type-profile value with the document it comes from. */
+export interface Sourced {
+  value: number;
+  source: string;
+  /** The closest value found, not the type's own published one; `note` says how. */
+  approximate?: boolean;
+  note?: string;
+}
+
+export interface Debrief {
+  flight: FlightSummary & {
+    lfl_version: number;
+    profile: string;
+    class?: "light" | "transport";
+    /** The profile's values by rule name, e.g. `hard_landing_g`, `tail_landing_pitch`. */
+    profile_limits?: Record<string, Sourced>;
+    /**
+     * The phase boundaries in effect (docs/phases.md), e.g. `flare_ft`, `approach_ft`; `source` is the profile and
+     * its document ("PC12 profile, FAA AIM 4-3-3 …") or the class default ("light class default").
+     */
+    phase_values: Record<string, Sourced>;
+    damaged_at?: number;
+    assessment_detail: AssessmentDetail;
+  };
+  phases: PhaseSpan[];
+  touchdowns: Touchdown[];
+  events: FlightEvent[];
+  series: Series;
+  airports: Airport[];
+}
+
+export interface LandingNotice {
+  flight_id: string;
+  touchdown: Touchdown;
+  events: FlightEvent[];
+}
+
+/** Payload of the `open-flight` event (a notification click asks the app to show a flight). */
+export interface OpenFlight {
+  flight_id: string;
+}
+
+/** Disk use of the flights folder, raw captures included. */
+export interface StorageUsage {
+  flights: number;
+  bytes: number;
+  folder: string;
+}
+
+export type CheckState = "pass" | "warn" | "fail";
+
+export interface SetupFix {
+  action: "install" | "remove" | "pick_community";
+  package?: string;
+  label: string;
+}
+
+export interface SetupCheck {
+  id: string;
+  title: string;
+  state: CheckState;
+  detail: string;
+  paths?: string[];
+  files?: string[];
+  fixes?: SetupFix[];
+}
+
+export interface SimInstall {
+  store: "ms_store" | "steam";
+  user_cfg: string;
+  community: string;
+}
+
+export interface SetupStatus {
+  checks: SetupCheck[];
+  sims: SimInstall[];
+  community: string | null;
+  choice: "found" | "install" | "folder";
+}

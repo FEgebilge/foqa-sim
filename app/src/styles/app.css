@@ -1,0 +1,13 @@
+/* Third-party widgets restyled to the theme: uPlot cursor and selection, MapLibre markers and controls. */
+
+.foqa-chart .u-select { background: color-mix(in oklab, var(--accent) 18%, transparent); }
+.foqa-chart .u-cursor-x { border-right: 1px solid color-mix(in oklab, var(--foreground) 55%, transparent); }
+.foqa-chart .u-cursor-y { display: none; }
+.foqa-chart .u-over { cursor: crosshair; }
+
+.foqa-map-cursor { width: 14px; height: 14px; border-radius: 50%; background: var(--accent); border: 2px solid var(--background); box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 35%, transparent); }
+.foqa-runway-label { padding: 1px 5px; border-radius: 3px; background: var(--foreground); color: var(--background); font: 600 11px var(--font-display); pointer-events: none; }
+.maplibregl-ctrl-attrib { font-family: var(--font-body); font-size: 10px; }
+
+/* Flights table: chosen columns never hide; a narrow window scrolls the table sideways (pinned date column). */
+.flights-table table { min-width: 1040px; }

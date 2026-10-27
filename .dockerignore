@@ -1,0 +1,7 @@
+target/
+**/node_modules/
+app/dist/
+msfs-panel/out/
+flights/
+*.fqj
+*.fqz

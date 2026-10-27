@@ -16,7 +16,7 @@ node_modules/
 /flights/
 /*.jsonl
 
-# SimConnect is loaded from the MSFS SDK at runtime; never commit it
+# SimConnect is linked statically from the MSFS SDK; never commit its DLL
 SimConnect.dll
 
 # Local env and secrets

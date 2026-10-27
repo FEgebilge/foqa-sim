@@ -1,0 +1,20 @@
+[package]
+name = "challenge"
+description = "Landing challenges: the definition, the start on final, and the grading of an attempt from its recording."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+analyzer = { path = "../analyzer" }
+debrief = { path = "../debrief" }
+fdm-core = { path = "../fdm-core" }
+rules = { path = "../rules" }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+recorder = { path = "../recorder" }
+testkit = { path = "../testkit" }

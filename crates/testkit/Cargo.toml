@@ -1,0 +1,13 @@
+[package]
+name = "testkit"
+description = "Synthetic flights recorded through the on-board chain, for tests only."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+analyzer = { path = "../analyzer" }
+fdm-core = { path = "../fdm-core" }
+recorder = { path = "../recorder" }

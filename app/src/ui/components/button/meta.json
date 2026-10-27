@@ -1,0 +1,18 @@
+{
+  "title": "Button",
+  "description": "A clear, responsive action with quiet secondary states.",
+  "category": "Actions",
+  "kind": "component",
+  "dependencies": [
+    "motion"
+  ],
+  "requires": [
+    "spinner"
+  ],
+  "tags": [
+    "action",
+    "control"
+  ],
+  "source": "arc",
+  "canvas": []
+}

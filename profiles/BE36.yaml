@@ -1,0 +1,13 @@
+# Beechcraft Bonanza G36 type profile. Schema: docs/rules.md.
+#
+# No vlo: the TCDS has none and the POH value is not reachable. No
+# tail_contact, hard_landing_g, max_tailwind: not published or reachable.
+type: BE36
+name: Beechcraft Bonanza G36
+class: light
+vmo: { value: 203 kt, source: &tcds "EASA TCDS EASA.IM.A.279 Issue 03 (G36), https://www.easa.europa.eu/en/downloads/7204/en", note: "VNE 203 KCAS; Vno 165, Va 139 KCAS" }
+vle: { value: 152 kt, source: *tcds, note: "landing gear extended 152 KCAS" }
+max_crosswind: { value: 17 kt, source: "Secondary spec sheet listing G36 demonstrated crosswind 17 kt, https://cdn.sprinkle.com/library/pdfs/a05c6e96-d904-40d7-ba66-1726d711b795.pdf", approximate: true, note: "secondary spec sheet, not the POH" }
+flaps:
+  - { up_to: 12 deg, vfe: { value: 152 kt, source: *tcds, note: "flaps extended (12 deg) 152 KCAS, approach flaps" } }
+  - { vfe: { value: 122 kt, source: *tcds, note: "flaps extended (normal) 122 KCAS, full flaps" } }
