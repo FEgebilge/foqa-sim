@@ -16,7 +16,7 @@ export interface Scale { min: number; max: number; marks: Mark[]; bands?: ScoreB
 export function scoreBands(c: CriterionAssessment | undefined, map: (x: number) => number = (x) => x): ScoreBands | undefined {
   if (!c) return undefined;
   const bands = zones(c.bands).map((z) => ({ to: z.to === Infinity ? Infinity : map(z.to), label: ZONES[z.zone], color: ZONE_COLOR[z.zone] }));
-  return { bands, source: `landing-2 ${c.id}, ${c.title} (docs/scoring.md): ${c.standard}` };
+  return { bands, source: `${c.title}: ${c.standard}` };
 }
 
 /** The finite band edges, for sizing a scale around them. */

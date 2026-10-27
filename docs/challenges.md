@@ -205,7 +205,11 @@ recorded, `confidence: full`; a landing without a runway fix, peak g or
 sink is not scored at all) and `go_around` (an attempt that went around
 after the gate is not ranked: fly again). Boards should be split by
 scoring class (light, turboprop, jet); the attempt does not carry the
-class yet, the site reads it from the type.
+class yet, the site reads it from the type. The attempt also carries
+`assessment { method, score, grade, confidence, caps[{ kind, score,
+reason, source }] }`, the debrief's grade bands, `confidence` and safety
+caps for that landing, so a site does not rederive them from `parts`
+(absent for `landing-1`).
 
 **`landing-1`** (frozen, for the challenges that name it), 0 to 100, sum of
 smooth sub-scores (curves, not bands), per aircraft class:

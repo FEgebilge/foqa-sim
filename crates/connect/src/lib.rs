@@ -12,10 +12,13 @@
 //! - [`sidecar`] and [`uploader`]: an attempt's site state and its upload
 //!   queue (B5, B6).
 //! - [`copy`]: what every status and error says to the pilot (A6).
+//! - [`deeplink`]: links from websites, parsed strictly, and the consent
+//!   gate (A3, B2).
 
 pub mod api;
 pub mod auth;
 pub mod copy;
+pub mod deeplink;
 pub mod discovery;
 pub mod http;
 pub mod origin;

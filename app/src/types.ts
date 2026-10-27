@@ -56,6 +56,9 @@ export type ScoringClass = "light" | "turboprop" | "jet";
 export interface CapNote {
   kind: "material" | "unstable" | "inspection" | "undershoot" | "excursion" | "flight";
   score: number;
+  /** The headline, in plain words. */
+  title: string;
+  /** Cause and consequence in one sentence: "Bounce (level 2) holds this landing below Good (max 84.9)." */
   reason: string;
   source: string;
   /** Index in `AssessmentDetail.landings`. */
@@ -74,7 +77,7 @@ export interface CriterionAssessment {
   value: number;
   /** `value` as shown: "+12 kt", "1.48 g", "L2". */
   value_text: string;
-  /** "at or above 500 ft" for a criterion graded on one half of the approach window; null for `all`. */
+  /** "above 500 ft" for a criterion graded on one half of the approach window; null for `all`. */
   height_text: string | null;
   unit: string | null;
   /** Continuous level 0-3. */
@@ -102,6 +105,10 @@ export interface FindingAssessment {
 export interface DomainAssessment {
   id: Domain;
   title: string;
+  /** The title in a word or two, for small bars. */
+  short: string;
+  /** What the domain looks at, in one line. */
+  summary: string;
   weight: number;
   /** Fraction of the weight lost; null: n/a, its weight shared out. */
   loss: number | null;
@@ -111,7 +118,7 @@ export interface DomainAssessment {
   criteria: CriterionAssessment[];
   findings: FindingAssessment[];
   sets_by: string | null;
-  /** The item that set the deduction, in words: "Descent rate 1,562 fpm at or above 300 ft" or the event's title. */
+  /** The item that set the deduction, in words: "Descent rate 1,562 fpm above 300 ft" or the event's title. */
   set_by_text: string | null;
 }
 
@@ -125,6 +132,10 @@ export interface LandingAssessment {
   class: ScoringClass | null;
   partial: string[];
   missing: string[];
+  /** Why an insufficient landing is not scored, in plain words. */
+  note: string | null;
+  /** Class, reference speeds and stable height, in plain words. */
+  facts: string[];
   /** false: a touch-and-go, scored without its rollout, not setting the flight grade. */
   full_stop: boolean;
   caps: CapNote[];
@@ -145,6 +156,8 @@ export interface AssessmentDetail {
   grade?: Grade;
   confidence?: Confidence | null;
   caps?: CapNote[];
+  /** Which items were not graded for lack of data, in plain words; null when none. */
+  partial_note?: string | null;
   graded_by?: number | null;
   landings?: LandingAssessment[];
   /** Indices in `Debrief.events` outside every landing. */

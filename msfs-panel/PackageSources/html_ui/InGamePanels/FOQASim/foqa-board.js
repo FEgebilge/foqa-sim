@@ -25,7 +25,12 @@ var FoqaSim = (function () {
         start_flight: { busy: "Starting…", ok: "Recording a new flight", fail: "Could not start a flight" },
         end_flight: { busy: "Saving…", ok: "Flight saved", fail: "Could not save the flight" },
         discard_flight: { busy: "Discarding…", ok: "Flight discarded", fail: "Could not discard the flight" },
-        mark: { busy: "Marking…", ok: "Marked: it is in the debrief", fail: "Could not mark" }
+        mark: { busy: "Marking…", ok: "Marked: it is in the debrief", fail: "Could not mark" },
+        // Challenge attempts (the strip, foqa-strip.js, and the EFB's Challenges tab).
+        place: { ok: "Placed at the challenge's start", fail: "Could not place the aircraft" },
+        fly_again: { ok: "New attempt placed", fail: "Could not fly again" },
+        finish: { ok: "Attempt finished: grading", fail: "Could not finish the attempt" },
+        abandon: { ok: "Attempt abandoned", fail: "Could not abandon the attempt" }
     };
 
     function esc(s) {
@@ -124,9 +129,10 @@ var FoqaSim = (function () {
         this.confirmAt = 0;      // first click on Discard
         this.toast = null;       // { ok, text, at }
         this.cache = {};
+        this.ackHooks = [];      // also told each ack: the strip, the Challenges tab
         root.classList.add("foqa");
         root.innerHTML = '<div class="top"></div><div class="flash-slot"></div><div class="tabs"></div>' +
-            '<div class="body"></div><div class="toast-slot"></div>';
+            '<div class="body"></div><div class="strip-slot"></div><div class="toast-slot"></div>';
         this.slots = {};
         var self = this;
         ["top", "flash-slot", "tabs", "body", "toast-slot"].forEach(function (c) { self.slots[c] = root.querySelector("." + c); });
@@ -170,7 +176,8 @@ var FoqaSim = (function () {
                 this.flashes = [];
             }
             this.toast = { ok: msg.ack.ok, text: msg.ack.message || (msg.ack.ok ? t.ok : t.fail), at: this.now() };
-            this.pending = null;
+            if (this.pending && this.pending.cmd === msg.ack.cmd) this.pending = null;
+            this.ackHooks.forEach(function (f) { f(msg.ack); });
         }
         this.render();
     };
@@ -477,10 +484,18 @@ var FoqaSim = (function () {
         return html + "</div>";
     }
 
+    Board.prototype.onAck = function (f) { this.ackHooks.push(f); };
+
     // Renders into `root` what `bus` hears and sends the pilot's commands on
-    // it. bus: { on(name, cb(json)), send(name, json) }.
+    // it, with the attempt strip under it (foqa-strip.js, when loaded).
+    // bus: { on(name, cb(json)), send(name, json) }.
     function attach(root, bus, now) {
         var board = new Board(root, bus, now);
+        if (typeof FoqaStrip !== "undefined") {
+            var strip = board.strip = FoqaStrip.attach(bus, now);
+            strip.mount(root.querySelector(".strip-slot"));
+            board.onAck(function (ack) { strip.onAck(ack); });
+        }
         bus.on(MSG.status, function (json) { board.onStatus(json); });
         bus.on(MSG.live, function (json) { board.onLive(json); });
         bus.on(MSG.events, function (json) { board.onEvents(json); });

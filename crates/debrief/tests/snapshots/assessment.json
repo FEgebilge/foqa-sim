@@ -63,7 +63,7 @@
               },
               "ell": 0.0,
               "height": "above",
-              "height_text": "at or above 500 ft",
+              "height_text": "above 500 ft",
               "id": "A1",
               "level": 0,
               "loss": 0.0,
@@ -155,7 +155,7 @@
               },
               "ell": 0.0,
               "height": "above",
-              "height_text": "at or above 500 ft",
+              "height_text": "above 500 ft",
               "id": "A2",
               "level": 0,
               "loss": 0.0,
@@ -247,7 +247,7 @@
               },
               "ell": 0.0,
               "height": "above",
-              "height_text": "at or above 500 ft",
+              "height_text": "above 500 ft",
               "id": "A3",
               "level": 0,
               "loss": 0.0,
@@ -339,7 +339,7 @@
               },
               "ell": 0.0,
               "height": "above",
-              "height_text": "at or above 500 ft",
+              "height_text": "above 500 ft",
               "id": "A4",
               "level": 0,
               "loss": 0.0,
@@ -450,6 +450,8 @@
           "points": 0.0,
           "set_by_text": null,
           "sets_by": null,
+          "short": "Approach",
+          "summary": "Speed, descent rate, bank, pitch, glideslope and configuration on final",
           "title": "Approach stability",
           "weight": 25.0
         },
@@ -601,6 +603,8 @@
           "points": 1.0,
           "set_by_text": "Touchdown IAS +5 kt",
           "sets_by": "B2",
+          "short": "Flare",
+          "summary": "Height over the threshold, touchdown speed and float down the runway",
           "title": "Threshold and flare",
           "weight": 10.0
         },
@@ -647,7 +651,7 @@
               "loss": 0.0,
               "sets": false,
               "standard": "S2 aiming point -250/+500 ft; S3/S4 0/+400 and +200 ft; S7 deep landing; S9 at least 1000 ft; long-landing (L2), short-landing (L3); rest est",
-              "title": "Touchdown past the target",
+              "title": "Touchdown",
               "unit": "ft",
               "value": 0.0,
               "value_text": "0.0 ft"
@@ -660,6 +664,8 @@
           "points": 0.0,
           "set_by_text": null,
           "sets_by": null,
+          "short": "Landing spot",
+          "summary": "How far from the aiming point the wheels touched down",
           "title": "Touchdown point",
           "weight": 20.0
         },
@@ -857,6 +863,8 @@
           "points": 0.0,
           "set_by_text": null,
           "sets_by": null,
+          "short": "Centreline",
+          "summary": "Offset from the centreline, crab and drift at touchdown, then on the rollout",
           "title": "Lateral control",
           "weight": 15.0
         },
@@ -1146,6 +1154,8 @@
           "points": 7.0,
           "set_by_text": "Peak normal load at touchdown 1.60 g",
           "sets_by": "E1",
+          "short": "Touchdown",
+          "summary": "Load, sink rate, bounce, tail clearance and bank at touchdown",
           "title": "Touchdown contact",
           "weight": 20.0
         },
@@ -1205,13 +1215,21 @@
           "points": 0.0,
           "set_by_text": "Required deceleration 0.10 g",
           "sets_by": "F2",
+          "short": "Rollout",
+          "summary": "How soon braking began and how hard it had to be to stop",
           "title": "Rollout and stopping",
           "weight": 10.0
         }
       ],
+      "facts": [
+        "Graded with jet limits",
+        "Reference speed 135 kt, approach speed 140 kt (the selected speed: debrief only)",
+        "Approach stable from 1,000 ft down"
+      ],
       "full_stop": true,
       "grade": "good",
       "missing": [],
+      "note": null,
       "partial": [],
       "raw": 92.0,
       "score": 92.0,
@@ -1232,6 +1250,7 @@
   "legacy_points": 0,
   "method": "landing-2",
   "other_findings": [],
+  "partial_note": null,
   "parts": [],
   "score": 92.0
 }

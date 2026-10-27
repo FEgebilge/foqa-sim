@@ -338,6 +338,12 @@ impl Attempts {
         }
     }
 
+    /// The recording shows the gate passed at sim time `sim_s`.
+    pub fn gate(&self, id: &str, sim_s: f64) -> Result<Record, String> {
+        let fields = json!({ "sim_s": sim_s });
+        self.step(id, State::Approach, "gate", fields, |_| {})
+    }
+
     pub fn abandon(&self, id: &str, reason: &str) -> Result<Record, String> {
         self.step(
             id,
@@ -431,7 +437,10 @@ impl Attempts {
                 return Err(e);
             }
         };
-        if let Some(t) = attempt.gate_s {
+        let seen = read_log(&self.folder(id)?)
+            .iter()
+            .any(|l| l["event"] == "gate");
+        if let (false, Some(t)) = (seen, attempt.gate_s) {
             self.note(id, "gate", json!({ "sim_s": t }))?;
         }
         if let (None, Some(t)) = (record.touchdown_s, attempt.touchdown_s) {
@@ -709,6 +718,7 @@ pub(crate) mod tests {
                     unit: "fpm",
                 }],
             }),
+            assessment: None,
         }
     }
 
@@ -910,6 +920,19 @@ pub(crate) mod tests {
             .unwrap();
         assert_eq!((done.state, done.touchdown_s), (State::Done, Some(400.0)));
         assert!(events(&a, &r.id).contains(&"touchdown".to_owned()));
+    }
+
+    #[test]
+    fn the_gate_seen_in_flight_is_logged_once() {
+        let (_tmp, a) = attempts();
+        let r = flying(&a, 100.0);
+        assert_eq!(a.gate(&r.id, 340.0).unwrap().state, State::Approach);
+        assert!(a.gate(&r.id, 341.0).is_err(), "once");
+        assert_eq!(a.landed("flight-1", 400.0, 142.0, 1.18), [r.id.as_str()]);
+        a.finish(&r.id, "stopped", &|_, _| Ok(graded(Some(400.0))))
+            .unwrap();
+        let log = events(&a, &r.id);
+        assert_eq!(log.iter().filter(|e| *e == "gate").count(), 1, "{log:?}");
     }
 
     #[test]

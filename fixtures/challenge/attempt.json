@@ -107,5 +107,27 @@
         "unit": ""
       }
     ]
+  },
+  "assessment": {
+    "method": "landing-2",
+    "score": 59.0,
+    "grade": "poor",
+    "confidence": "full",
+    "caps": [
+      {
+        "kind": "material",
+        "score": 84.9,
+        "title": "A significant deviation limits the grade",
+        "reason": "IAS off the approach speed +70 kt above 300 ft (level 3), IAS off the approach speed +70 kt below 300 ft (level 3), Touchdown IAS +70 kt (level 3) and Approach speed off the published speed below 500 ft (level 3) hold this landing below Good (max 84.9).",
+        "source": "A material FDM event (level 2 or more); docs/scoring.md 4"
+      },
+      {
+        "kind": "unstable",
+        "score": 59.0,
+        "title": "Unstable approach continued to a landing",
+        "reason": "The approach was still unstable below 300 ft: IAS off the approach speed +70 kt below 300 ft (level 3), and the landing was continued. That holds it below Fair (max 59.0).",
+        "source": "S1 Data4Safety unstable approach, S5 FSF ALAR: go around"
+      }
+    ]
   }
 }

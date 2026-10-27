@@ -90,10 +90,9 @@ export function anchorTicks(c: CriterionAssessment) {
 /** What the value of a criterion is measured against, where its title does not say. */
 export function againstText(c: CriterionAssessment, landing: LandingAssessment) {
   const s = landing.speeds;
-  if (c.id === "A1") return s ? `vs ${landing.class === "light" ? `Vapp ${number(s.vapp_kt)}` : `Vref ${number(s.vref_kt)}`} kt` : "";
-  if (c.id === "B2") return s ? `vs ${landing.class === "light" ? `Vapp ${number(s.vapp_kt)}` : `Vref ${number(s.vref_kt)}`} kt` : "";
-  if (c.id === "B1") return "vs 50 ft";
-  if (c.id === "C1") return "vs the target";
+  const speed = s ? (landing.class === "light" ? `approach speed ${number(s.vapp_kt)}` : `reference speed ${number(s.vref_kt)}`) : "";
+  if (c.id === "A1" || c.id === "B2") return speed ? `vs ${speed} kt` : "";
+  if (c.id === "B1") return "vs 50 ft over the threshold";
   return "";
 }
 

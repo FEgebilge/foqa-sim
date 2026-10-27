@@ -129,7 +129,7 @@ criteria:
       - { classes: [turboprop, jet], above: [8 s, 10 s, 12 s, 15 s, 20 s] }
       - { classes: [light], above: [10 s, 12 s, 15 s, 20 s, 25 s] }
   - id: C1
-    title: Touchdown past the target
+    title: Touchdown
     domain: point
     unit: ft
     source: "S2 aiming point -250/+500 ft; S3/S4 0/+400 and +200 ft; S7 deep landing; S9 at least 1000 ft; long-landing (L2), short-landing (L3); rest est"

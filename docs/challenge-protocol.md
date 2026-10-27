@@ -12,10 +12,10 @@ but nothing below names it.
 Status: design. Part A is the wire protocol (what a site implements).
 Part B is the app side (how FOQA-Sim implements the client without
 depending on it). Revised 2026-10-27 after a security and a UX review.
-Built (2026-10-28): slices F1 (marker, slice, golden), F3 and F4
-(`crates/connect`, `app/src-tauri/src/connect.rs`, Challenges → Sites);
-see "Implementation notes" at the end. Deep links (F5) and F6 are not
-built.
+Built (2026-10-28): slices F1 (marker, slice, golden), F3, F4
+(`crates/connect`, `app/src-tauri/src/connect.rs`, Challenges → Sites) and
+F5 (deep links, the in-sim strip and EFB Challenges tab, toasts); see
+"Implementation notes" at the end. F6 is not built.
 
 ## Principles
 
@@ -189,17 +189,31 @@ can open it):
   `challenge` or `connect`; no userinfo, path other than empty or `/`,
   or fragment; unknown query keys ignored; a duplicated key rejects.
 - `site` must parse as an origin under A1's rules (https, DNS host, no IP
-  literal, no path/query/fragment; loopback only with the developer
-  setting).
+  literal, no path/query/fragment, no trailing dot; `localhost` and names
+  under it only with the developer setting, like loopback).
 - `id`: `^[a-z0-9][a-z0-9-]{2,63}$`; `v`: integer 1–100000.
-- A link **never acts by itself**. It only brings the window up on the
-  Challenges screen. If `site` is not a connected site, the app shows
-  "Connect to **<origin in ASCII>**?" and fetches nothing from it before
-  the user confirms; after Allow and sign-in it goes **straight to the
-  clicked challenge's briefing** (the pending link is kept in memory for
-  10 minutes, never on disk). If the site is connected, the app fetches
-  that challenge (A4) and shows its briefing; placing the aircraft and
-  uploading still need the user.
+- A link **never acts by itself**: no fetch, no library write, no
+  navigation and no placing before a click in the app. It only brings the
+  window up with a question. If `site` is not a connected site, the app
+  shows "Connect to **<origin in ASCII>**?" and fetches nothing from it
+  before the user confirms; Connect adds the site, starts the sign-in and
+  then opens **the clicked challenge's briefing** (the pending link is
+  kept in memory for 10 minutes, never on disk). A connected site that is
+  signed out asks "Sign in to <host>?" ("Sign in and open"); a signed-in
+  one asks "Open <id> from <host>?" and fetches that challenge (A4) only
+  on Open. Before the click the question shows only what the link says
+  (host, id, version); the title comes from the site after it. Placing
+  the aircraft and uploading still need the user.
+- A link with `v` opens only that version: when the site has another, the
+  app says so ("<host> has a newer version of this challenge…") and takes
+  nothing. A challenge already in the library under the same id and
+  version with other bytes is never overwritten silently: the app asks
+  "Replace your copy of “<title>”?" (Keep mine opens the copy kept).
+- One link is asked about at a time: a link arriving meanwhile waits (the
+  newest one only) and is asked about after this one is closed; the same
+  link arriving again while it waits is not queued twice. A link is given
+  to the window once: a reload drops it rather than asking again, and
+  whatever a link did needs a new click to happen again.
 - Deep links can be turned off in settings (B3); the app then ignores
   them.
 
@@ -541,13 +555,15 @@ msfs-panel/        toolbar panel strip + EFB Challenges tab (B9)
   the NSIS installer registers it; the app also calls
   `deep_link().register("foqa-sim")` at start-up (a reported NSIS
   registration issue), verified on a real NSIS install.
-- **Forwarded** (app running): `tauri-plugin-single-instance` with its
-  `deep-link` feature, still registered first, forwards the second
-  process's URL to `on_open_url`. Today `main.rs` registers
-  single-instance with a callback that ignores argv (`|app, _, _|
-  show(app, None)`); the feature replaces that path for URLs.
+- **Forwarded** (app running): `tauri-plugin-single-instance`, still
+  registered first, hands the second process's argv to its callback,
+  which passes each `foqa-sim:` argument on as it is.
 - **Cold start** (app not running): Windows starts the app with the URL
-  as argv; the app reads it with `deep_link().get_current()` at setup.
+  as argv; the app reads `std::env::args()` at setup.
+- Both read the **raw argument**, not the deep-link plugin's `Url`
+  (`on_open_url`, `get_current`), which is already parsed: tabs and
+  newlines stripped, non-ASCII percent-encoded, so A3's character checks
+  would never see them. The plugin only registers the scheme.
 - Both paths run A3's parser in `crates/connect` (pure, unit-tested with
   hostile inputs) and **buffer** the result until the frontend reports
   ready (`deep_link_pending`), so a link is not lost while the window
@@ -565,6 +581,12 @@ back in as ege; signing in as someone else discards them." Global: "Open
 challenge links from websites" (on/off), "Notify when a site scores an
 attempt" (on), developer "Allow local sites" (off). Removing every site
 leaves no network activity at all.
+
+The two global switches are under the Sites list and kept in the app's
+config folder as `sites-settings.json` (`{ "links": true, "notify": true }`;
+a missing or unreadable file is the defaults). With links off a link is
+logged (`deep_link`, reason `links_off`) and dropped without raising the
+window; with notifications off no B7 toast is shown.
 
 ## B4. Token storage
 
@@ -757,8 +779,13 @@ View → app (`FOQA_SIM_CMD`, acked in `Status.ack` like the others):
 | `{ v: 2, cmd: "list_challenges", req }` | answered in `FOQA_SIM_CHALLENGES` (cached list; no network call from the sim) |
 | `{ v: 2, cmd: "briefing", req, key }` | answered in `FOQA_SIM_BRIEFING` |
 | `{ v: 2, cmd: "place", key, practice?: boolean }` | create, issue (unless practice or offline) and place, as the app's Place |
-| `{ v: 2, cmd: "fly_again" }` | abandon the current or last attempt (`end` reason `replaced`, site abandon), issue a new one on the same challenge and place |
-| `{ v: 2, cmd: "finish" }` / `{ v: 2, cmd: "abandon" }` | as the app's buttons |
+| `{ v: 2, cmd: "fly_again", id }` | abandon the current or last attempt (`end` reason `replaced`, site abandon), issue a new one on the same challenge and place |
+| `{ v: 2, cmd: "finish", id }` / `{ v: 2, cmd: "abandon", id }` | as the app's buttons |
+
+`id` is the strip's attempt id; the app refuses a command whose `id` is
+not the attempt the strip shows now ("That attempt is no longer the
+current one."), so a double press (toolbar and EFB, or a strip that is
+behind) never acts on the attempt that followed.
 
 - **Toolbar panel:** the strip under the live board, with **Fly again**
   and **Finish** while an attempt is open.
@@ -797,7 +824,7 @@ Each slice keeps the app fully usable with no site configured.
   accepting a band is not enough. How the app sets it is under research
   (docs/challenges.md, "What MSFS 2024 allows").
 
-## Implementation notes (F1, F3, F4)
+## Implementation notes (F1, F3, F4, F5)
 
 - `crates/connect` depends on no FOQA-Sim crate; the app's `connect`
   feature (default on) adds it with `open` (system browser). Off
@@ -832,13 +859,59 @@ Each slice keeps the app fully usable with no site configured.
 - **`fdm challenge`** grades only a touchdown after the latest `begin`
   marker and reports `marker` (`ref`, `begin_s`, `end_s`) and `aircraft`
   (`icao`, `class`) in the `Attempt`.
+- **`Attempt.assessment` (additive, 2026-10-28):** a `landing-2` attempt
+  carries `assessment: { method, score, grade, confidence, caps }` from
+  `crates/assess`, with the debrief wire's types (`Grade`: `good`, `fair`,
+  `poor`; `Confidence`: `full`, `partial`; `caps`: `CapNote`
+  `{ kind, score, reason, source }`, `kind` one of `material`, `unstable`,
+  `inspection`, `undershoot`, `excursion`). `score` equals `score.total`
+  and `caps[].score` is the limit the cap sets. Absent for `landing-1`
+  and for an attempt without a score. A site no longer derives grade,
+  confidence or caps from `score.parts`.
 - **Decode cap:** `fdm challenge` and `fdm slice` refuse a compact
   flight whose body decompresses past 32 MiB
   (`recorder::CHALLENGE_MAX_BODY`); the app's own flights keep 256 MiB.
 - **Not in F1 yet:** the live `[begin, now]` grading during the rollout
   (B5).
 - "Allow local sites" is the environment variable
-  `FOQA_ALLOW_LOCAL_SITES=1` until the app has a settings screen; the
-  auto-upload, notifications and links toggles (B3), toasts (B7), the
-  stale-attempt sweep at start-up (B6) and site states in the strip/EFB
-  (B9) are not built yet.
+  `FOQA_ALLOW_LOCAL_SITES=1` until the app has a developer settings
+  screen; the links and notifications switches (B3) are built, the
+  per-site auto-upload toggle and the stale-attempt sweep at start-up (B6)
+  are not yet.
+- **Deep links (F5):** `crates/connect/src/deeplink.rs` parses A3 strictly
+  (512 bytes, printable ASCII only, host `challenge`/`connect` exactly, no
+  userinfo/port/path/fragment, a repeated key refused, `site` by A1's
+  `Origin::parse`, `id` and `v` as A3) and holds the one pending link
+  and the one waiting behind it (`Gate`, 10 minutes, memory only), each
+  with a `seq` that every answer names (`deep_link_consent`,
+  `deep_link_open`, `deep_link_done`): a click acts only on the link it
+  was shown for. An unknown site is `ask` until `deep_link_consent`; a
+  known one is `open`, and `deep_link_open` (the Open click) is the only
+  path that fetches and keeps its challenge. The `deep-link` event carries
+  nothing: the window asks `deep_link_pending` while it shows no link,
+  which gives a refused link's words once (apart from the links waiting,
+  so it drops none) or the link waiting, once. The app registers
+  `tauri-plugin-single-instance` first, then `tauri-plugin-deep-link`
+  (static scheme in `tauri.conf.json`) and calls `register("foqa-sim")`
+  at start-up; links come from argv (B2). Every link is logged in the
+  connect log (`deep_link`: kind, origin, id, v, `duplicate`, or the
+  reject reason and length, never the URL), every answer too (`consent`).
+  The window then asks as A3 says. Without `connect` the scheme is still
+  registered by the installer; the app recognises `foqa-sim:` in its
+  arguments (first start or second instance) and only says "Sites are
+  disabled in this build".
+- **Toasts (B7):** on a sidecar's change to `scored` or `rejected`, once
+  per attempt, only while the window isn't in front and "Notify when a
+  site scores an attempt" is on: "Scored 87.4, #3
+  on <title>" with the site, "Scored 81.0, not ranked on <title>" with the
+  reasons, "Rejected on <title>" with the reject copy; a click opens the
+  challenge (`open-challenge`).
+- **In-sim views (B9):** `crates/capture/src/views.rs` (types, size caps,
+  `AppCommand`, the app's `Views` handle) and `app/src-tauri/src/insim.rs`
+  (the strip's words, the cards, the briefing lines). The strip follows the
+  open attempt, else the newest, rebuilt on every attempt change and every
+  5 s; a final one (core done and the site's state final, or no site) goes
+  on for 10 minutes. While it flies, the app grades the open flight every
+  5 s for the gate, which moves the attempt to `approach`
+  (logged `gate` once). `AttemptStrip` also has `can_finish`. Views:
+  `foqa-strip.js` (toolbar board and EFB), `efb/foqa-challenges.js`.
