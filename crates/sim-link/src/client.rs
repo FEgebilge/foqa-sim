@@ -4,7 +4,7 @@ use std::mem::size_of;
 use std::{fmt, ptr, slice};
 
 use crate::facility::Requests;
-use crate::ffi::{self, HResult};
+use crate::ffi::{self, HResult, InitPosition};
 
 #[derive(Debug)]
 pub enum Error {
@@ -130,6 +130,8 @@ pub struct SimConnect {
     handle: ffi::Handle,
     /// Definitions built with `add_text`, whose data decodes as strings.
     text_defines: HashSet<u32>,
+    /// Definitions already holding the "Initial Position" datum.
+    init_defines: HashSet<u32>,
 }
 
 impl SimConnect {
@@ -151,13 +153,14 @@ impl SimConnect {
         Ok(Self {
             handle,
             text_defines: HashSet::new(),
+            init_defines: HashSet::new(),
         })
     }
 
     /// Appends a SimVar to a data definition as FLOAT64 in `unit`. Returns the
     /// send id, which an `Exception` carries if the name or unit is rejected.
     pub fn add_f64(&mut self, define_id: u32, simvar: &str, unit: &str) -> Result<u32, Error> {
-        self.add_to_definition(define_id, simvar, unit, ffi::DATATYPE_FLOAT64)
+        self.add_to_definition(define_id, simvar, Some(unit), ffi::DATATYPE_FLOAT64)
     }
 
     /// Appends a string SimVar (`TITLE`, `ATC MODEL`...) to a text
@@ -167,7 +170,66 @@ impl SimConnect {
     pub fn add_text(&mut self, define_id: u32, simvar: &str) -> Result<u32, Error> {
         self.text_defines.insert(define_id);
         // Strings take no unit.
-        self.add_to_definition(define_id, simvar, "", ffi::DATATYPE_STRING256)
+        self.add_to_definition(define_id, simvar, Some(""), ffi::DATATYPE_STRING256)
+    }
+
+    /// Puts the user aircraft at `pos`, as a flight start does: the
+    /// "Initial Position" datum of definition `define_id` (built on first
+    /// use, so give it an id of its own) set on the user aircraft. Returns
+    /// the send id, which an `Exception` carries if the sim rejects it.
+    pub fn set_init_position(&mut self, define_id: u32, pos: &InitPosition) -> Result<u32, Error> {
+        if !self.init_defines.contains(&define_id) {
+            // No unit: the SDK passes NULL for structured datums.
+            let datatype = ffi::DATATYPE_INITPOSITION;
+            self.add_to_definition(define_id, "Initial Position", None, datatype)?;
+            self.init_defines.insert(define_id);
+        }
+        // SAFETY: open handle; `pos` is one `InitPosition`, the size passed,
+        // which SimConnect only reads, during the call.
+        let hr = unsafe {
+            ffi::set_data_on_sim_object(
+                self.handle,
+                define_id,
+                ffi::OBJECT_ID_USER_AIRCRAFT,
+                ffi::DATA_SET_FLAG_DEFAULT,
+                0,
+                size_of::<InitPosition>() as u32,
+                ptr::from_ref(pos).cast_mut().cast(),
+            )
+        };
+        check("SimConnect_SetDataOnSimObject", hr)?;
+        self.last_sent_packet_id()
+    }
+
+    /// Names key event `name` (`GEAR_DOWN`, `FLAPS_SET`...) as client event
+    /// `event_id` for `transmit_event`. Keep ids apart from those of
+    /// `subscribe_system_event`: they share one space. Returns the send id,
+    /// which an `Exception` carries if the name is unknown.
+    pub fn map_event(&mut self, event_id: u32, name: &str) -> Result<u32, Error> {
+        let name = c_string(name)?;
+        // SAFETY: open handle and a NUL-terminated name that outlives the call.
+        let hr =
+            unsafe { ffi::map_client_event_to_sim_event(self.handle, event_id, name.as_ptr()) };
+        check("SimConnect_MapClientEventToSimEvent", hr)?;
+        self.last_sent_packet_id()
+    }
+
+    /// Sends a mapped key event with `data` to the user aircraft at the
+    /// highest priority, as a cockpit control would. Returns the send id.
+    pub fn transmit_event(&mut self, event_id: u32, data: u32) -> Result<u32, Error> {
+        // SAFETY: open handle; scalar arguments only.
+        let hr = unsafe {
+            ffi::transmit_client_event(
+                self.handle,
+                ffi::OBJECT_ID_USER_AIRCRAFT,
+                event_id,
+                data,
+                ffi::GROUP_PRIORITY_HIGHEST,
+                ffi::EVENT_FLAG_GROUPID_IS_PRIORITY,
+            )
+        };
+        check("SimConnect_TransmitClientEvent", hr)?;
+        self.last_sent_packet_id()
     }
 
     /// Streams a definition for the user aircraft once per simulation frame.
@@ -194,17 +256,18 @@ impl SimConnect {
         &mut self,
         define_id: u32,
         simvar: &str,
-        unit: &str,
+        unit: Option<&str>,
         datatype: i32,
     ) -> Result<u32, Error> {
-        let (simvar, unit) = (c_string(simvar)?, c_string(unit)?);
-        // SAFETY: open handle and NUL-terminated strings that outlive the call.
+        let (simvar, unit) = (c_string(simvar)?, unit.map(c_string).transpose()?);
+        // SAFETY: open handle and NUL-terminated strings (or no unit) that
+        // outlive the call.
         let hr = unsafe {
             ffi::add_to_data_definition(
                 self.handle,
                 define_id,
                 simvar.as_ptr(),
-                unit.as_ptr(),
+                unit.as_ref().map_or(ptr::null(), |u| u.as_ptr()),
                 datatype,
                 0.0,
                 ffi::UNUSED,

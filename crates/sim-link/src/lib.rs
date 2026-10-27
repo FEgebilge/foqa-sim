@@ -10,3 +10,4 @@ pub mod facility;
 mod ffi;
 
 pub use client::{AirportListEntry, Error, Facility, FacilityData, Recv, SimConnect};
+pub use ffi::InitPosition;

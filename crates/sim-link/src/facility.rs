@@ -289,8 +289,9 @@ struct Pending {
 /// Fetches airports from the facility database without blocking: callers
 /// ask (`search`, `want`), pass every `Facility` reply to `feed`, and call
 /// `poll` often, which sends requests, times out stalled ones and yields
-/// results. An ICAO is fetched once until `reset` (a new flight) or until it
-/// fails, so a bounce or a touch-and-go does not fetch the same airport again.
+/// results. A search fetches an ICAO once until `reset` (a new flight) or
+/// until it fails, so a bounce or a touch-and-go does not fetch the same
+/// airport again; `want` fetches it again unless a request is outstanding.
 #[derive(Debug)]
 pub struct AirportFetch {
     define_id: u32,
@@ -345,9 +346,14 @@ impl AirportFetch {
         });
     }
 
-    /// Fetches one airport by ICAO, wherever it is.
+    /// Fetches one airport by ICAO, wherever it is, unless a request for it
+    /// is queued or in flight: an asker whose earlier fetch was not answered
+    /// under its name (or not in time) is not left without a request.
     pub fn want(&mut self, icao: &str) {
-        if self.seen.insert(icao.to_owned()) {
+        let outstanding =
+            self.queue.iter().any(|q| q == icao) || self.pending.values().any(|p| p.icao == icao);
+        if !outstanding {
+            self.seen.insert(icao.to_owned());
             self.queue.push(icao.to_owned());
         }
     }
@@ -1137,5 +1143,26 @@ mod tests {
             None,
             "reply from before reset"
         );
+    }
+
+    #[test]
+    fn a_fetched_airport_wanted_again_is_requested_again() {
+        let (mut sim, t0) = (FakeSim::default(), Instant::now());
+        let mut f = fetch(&mut sim);
+        f.want("LTBJ");
+        f.poll(&mut sim, t0).unwrap();
+        f.feed(Facility::Data(airport_node(1, 10, "LTBJ", 0)));
+        f.feed(Facility::End { request_id: 1 });
+        assert!(matches!(
+            f.poll(&mut sim, t0).unwrap(),
+            Some(Fetched::Airport(_))
+        ));
+        f.want("LTBJ");
+        f.want("LTBJ");
+        f.poll(&mut sim, t0).unwrap();
+        assert_eq!(sim.data, [(1, "LTBJ".into()), (2, "LTBJ".into())]);
+        f.want("LTBJ");
+        f.poll(&mut sim, t0).unwrap();
+        assert_eq!(sim.data.len(), 2, "not while one is in flight");
     }
 }

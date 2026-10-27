@@ -18,6 +18,15 @@ pub const DATATYPE_FLOAT64: i32 = 4;
 pub const DATATYPE_STRING256: i32 = 9;
 /// Bytes one `DATATYPE_STRING256` field occupies in a data message.
 pub const STRING256_LEN: usize = 256;
+/// `SIMCONNECT_DATATYPE_INITPOSITION` (H:150): an `InitPosition`.
+pub const DATATYPE_INITPOSITION: i32 = 12;
+/// `SIMCONNECT_DATA_SET_FLAG_DEFAULT` (H:414): untagged data.
+pub const DATA_SET_FLAG_DEFAULT: Dword = 0;
+/// `SIMCONNECT_GROUP_PRIORITY_HIGHEST` (H:36).
+pub const GROUP_PRIORITY_HIGHEST: Dword = 1;
+/// `SIMCONNECT_EVENT_FLAG_GROUPID_IS_PRIORITY` (H:406): the group id of
+/// `TransmitClientEvent` is a priority, no notification group needed.
+pub const EVENT_FLAG_GROUPID_IS_PRIORITY: Dword = 0x10;
 /// `SIMCONNECT_PERIOD_SIM_FRAME`.
 pub const PERIOD_SIM_FRAME: i32 = 3;
 /// `SIMCONNECT_PERIOD_SECOND`.
@@ -174,6 +183,36 @@ pub struct RecvFacilityDataEnd {
     pub request_id: Dword,
 }
 
+/// `SIMCONNECT_DATA_INITPOSITION` (H:777, inside `#pragma pack(push, 1)`):
+/// where `SimConnect::set_init_position` puts the user aircraft. The fields
+/// fall on natural offsets anyway (6 doubles, 2 DWORDs, 56 bytes); `packed`
+/// only follows the header.
+#[repr(C, packed)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct InitPosition {
+    pub latitude_deg: f64,
+    pub longitude_deg: f64,
+    /// Feet above mean sea level.
+    pub altitude_ft: f64,
+    /// SimConnect's sign convention, as `PLANE PITCH DEGREES`: positive is
+    /// nose down (not verified against a live sim for this struct).
+    pub pitch_deg: f64,
+    pub bank_deg: f64,
+    /// True heading.
+    pub heading_deg: f64,
+    /// 1 forces the aircraft onto the ground, 0 leaves it where placed.
+    pub on_ground: Dword,
+    /// Knots, or `AIRSPEED_CRUISE` / `AIRSPEED_KEEP`.
+    pub airspeed_kt: Dword,
+}
+
+impl InitPosition {
+    /// `INITPOSITION_AIRSPEED_CRUISE` (H:50): the aircraft's cruise speed.
+    pub const AIRSPEED_CRUISE: Dword = Dword::MAX; // (DWORD)-1
+    /// `INITPOSITION_AIRSPEED_KEEP` (H:51): the current airspeed.
+    pub const AIRSPEED_KEEP: Dword = Dword::MAX - 1; // (DWORD)-2
+}
+
 // `SIMCONNECTAPI` is `extern "C" HRESULT` (H:1011): the C calling convention.
 // The SDK's static SimConnect.lib provides these symbols (see build.rs).
 unsafe extern "C" {
@@ -209,6 +248,34 @@ unsafe extern "C" {
         origin: Dword,
         interval: Dword,
         limit: Dword,
+    ) -> HResult;
+    /// H:1032; `data` is `unit_size` bytes per element, read only.
+    #[link_name = "SimConnect_SetDataOnSimObject"]
+    pub fn set_data_on_sim_object(
+        handle: Handle,
+        define_id: Dword,
+        object_id: Dword,
+        flags: Dword,
+        array_count: Dword,
+        unit_size: Dword,
+        data: *mut c_void,
+    ) -> HResult;
+    /// H:1020.
+    #[link_name = "SimConnect_MapClientEventToSimEvent"]
+    pub fn map_client_event_to_sim_event(
+        handle: Handle,
+        event_id: Dword,
+        event_name: *const c_char,
+    ) -> HResult;
+    /// H:1021.
+    #[link_name = "SimConnect_TransmitClientEvent"]
+    pub fn transmit_client_event(
+        handle: Handle,
+        object_id: Dword,
+        event_id: Dword,
+        data: Dword,
+        group_id: Dword,
+        flags: Dword,
     ) -> HResult;
     #[link_name = "SimConnect_SubscribeToSystemEvent"]
     pub fn subscribe_to_system_event(
@@ -285,5 +352,25 @@ mod tests {
         assert_eq!(size_of::<RecvFacilityDataEnd>(), 16);
         // H:997: list template (base + 4 DWORDs) + event id.
         assert_eq!(size_of::<RecvCommBus>(), 32);
+    }
+
+    // H:777 under pack(1): six doubles, then OnGround and Airspeed.
+    #[test]
+    fn init_position_matches_the_header() {
+        use std::mem::offset_of;
+        assert_eq!(size_of::<InitPosition>(), 6 * 8 + 2 * 4);
+        let offsets = [
+            offset_of!(InitPosition, latitude_deg),
+            offset_of!(InitPosition, longitude_deg),
+            offset_of!(InitPosition, altitude_ft),
+            offset_of!(InitPosition, pitch_deg),
+            offset_of!(InitPosition, bank_deg),
+            offset_of!(InitPosition, heading_deg),
+            offset_of!(InitPosition, on_ground),
+            offset_of!(InitPosition, airspeed_kt),
+        ];
+        assert_eq!(offsets, [0, 8, 16, 24, 32, 40, 48, 52]);
+        assert_eq!(InitPosition::AIRSPEED_CRUISE, 0xFFFF_FFFF);
+        assert_eq!(InitPosition::AIRSPEED_KEEP, 0xFFFF_FFFE);
     }
 }
