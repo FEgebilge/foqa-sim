@@ -13,6 +13,7 @@ description: Source of the thresholds.
 why_it_matters: Steep bank near the ground raises the stall speed.  # optional, for pilots
 advice: Finish the turn to final above 500 ft.                     # optional, for pilots
 phase: [Approach, Landing]      # CICTT phases the rule applies to
+domain: stability               # stability | energy | point | lateral | contact | rollout | other
 aircraft: transport             # optional: light | transport
 when: height < 500 ft           # optional precondition
 measure: abs(roll)              # what is measured
@@ -20,6 +21,12 @@ detail: "{value} bank, limit {threshold}"   # optional, the event in words
 sustain: 2 s                    # how long a level must hold
 above: { low: 15 deg, medium: 20 deg, high: 30 deg }
 ```
+
+Every rule names the `domain` of a landing assessment its events count
+toward (`docs/scoring.md` §3): approach `stability`, threshold and flare
+`energy`, touchdown `point`, `lateral` control, touchdown `contact`,
+`rollout` and stopping, or `other` (never part of a landing score). A rule
+without one fails to load.
 
 ## Triggers
 
@@ -104,6 +111,8 @@ rules using them stay silent.
 | `profile.max_tailwind` | kt | Certified maximum tailwind for takeoff and landing |
 | `profile.vso` | kt | Stalling speed in the landing configuration at maximum weight, IAS |
 | `profile.main_gear_track` | ft | Distance between the main gear centrelines |
+| `profile.vref` | kt | Vref at that point's gross weight and flap angle, from the profile's Vref table, approach speeds or VSO (below) |
+| `profile.vapp` | kt | The approach speed the profile gives there (light types: the middle of the published range, or 1.3 VSO) |
 
 ## Type profiles
 
@@ -112,7 +121,9 @@ Doc 8643 type designator; every file there is built into `fdm`, so adding a
 type takes only its file. A flight is matched by the designator in its
 recorded aircraft identity (`ATC MODEL`). Its class is then the profile's;
 without a profile the class comes from the gross weight, and class rules
-(`aircraft:`) still apply. The debrief header says which: `C172 profile`,
+(`aircraft:`) still apply; a flight of unknown class is graded with the
+transport rules, as with the transport phase boundaries. The debrief header
+says which: `C172 profile`,
 `transport class default (no B744 profile)` or
 `no aircraft identity, unknown class`.
 

@@ -50,10 +50,17 @@ pub enum ProfileField {
     Vso,
     /// Distance between the main gear centrelines, ft.
     MainGearTrack,
+    /// Vref at the gross weight and flap angle at that point, kt
+    /// (`Profile::ref_speeds`); not a single value, so `value` and
+    /// `sourced` leave it unknown.
+    Vref,
+    /// The approach speed the profile gives at that point (light types),
+    /// kt; read as `Vref`.
+    Vapp,
 }
 
 impl ProfileField {
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 13] = [
         Self::Vfe,
         Self::TailTakeoffPitch,
         Self::TailLandingPitch,
@@ -65,6 +72,8 @@ impl ProfileField {
         Self::MaxTailwind,
         Self::Vso,
         Self::MainGearTrack,
+        Self::Vref,
+        Self::Vapp,
     ];
 
     /// The field named `name` in `profile.<name>`.
@@ -86,6 +95,8 @@ impl ProfileField {
             Self::MaxTailwind => "max_tailwind",
             Self::Vso => "vso",
             Self::MainGearTrack => "main_gear_track",
+            Self::Vref => "vref",
+            Self::Vapp => "vapp",
         }
     }
 
@@ -97,7 +108,9 @@ impl ProfileField {
             | Self::Vlo
             | Self::MaxCrosswind
             | Self::MaxTailwind
-            | Self::Vso => Unit::Knots,
+            | Self::Vso
+            | Self::Vref
+            | Self::Vapp => Unit::Knots,
             Self::TailTakeoffPitch | Self::TailLandingPitch => Unit::Degrees,
             Self::MainGearTrack => Unit::Feet,
             Self::HardLandingG => Unit::G,
@@ -369,6 +382,7 @@ impl Profile {
             ProfileField::MaxTailwind => self.max_tailwind.as_ref(),
             ProfileField::Vso => self.vso.as_ref(),
             ProfileField::MainGearTrack => self.main_gear_track.as_ref(),
+            ProfileField::Vref | ProfileField::Vapp => None,
         }
     }
 

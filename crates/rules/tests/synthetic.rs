@@ -128,6 +128,7 @@ fn go_around_is_recorded_and_rearms_the_gates() {
     const GATE: &str = "
 rule: gate-500
 version: 1
+domain: other
 title: Passed 500 ft on approach
 phase: Approach
 gate: height <= 500 ft
@@ -176,6 +177,7 @@ fn sustain_filters_short_exceedances() {
     const RULE: &str = "
 rule: g-sustained
 version: 1
+domain: other
 title: Normal load above 1.2 g
 phase: EnRoute
 measure: accel.normal
@@ -276,6 +278,7 @@ fn no_airport_data_leaves_runway_values_unknown() {
     let probe = "
 rule: probe
 version: 1
+domain: other
 title: Distance known
 at: touchdown
 measure: td.distance > -1000 ft
@@ -511,4 +514,201 @@ fn touchdown_wind_is_resolved_on_the_runway() {
         found(&[("tailwind-landing-limit", Level::High)])
     );
     assert_eq!(wind(200.0, 25.0), []);
+}
+
+/// A jet whose Vref is 115 kt at any weight with the flaps up, so the
+/// 140 kt approach is Vref+25 throughout.
+const VREF_PROFILE: &str = r#"
+type: TEST
+name: Synthetic test jet
+class: transport
+vref:
+  source: synthetic
+  flaps:
+    - { flap: 0 deg, weights_kg: [50000, 70000], ias: [115 kt, 115 kt] }
+"#;
+
+/// Rule set v2, Data4Safety's split at 500 ft: Vref+25 is past the first
+/// threshold (+20) above 500 ft (SL1, Low) and below it (SL2B, Medium).
+/// Without a Vref the rules stay silent (the stable landing above).
+#[test]
+fn approach_speed_is_graded_against_vref_split_at_500_ft() {
+    let events = [identity("TEST")];
+    let (flight, track) = fly_to(&events, AIRLINER_LB, TD_S + ROLLOUT_S, |t| {
+        landing(t, TD_S, 1.2)
+    });
+    let profiles = ProfileSet::load([("TEST", VREF_PROFILE)]).unwrap();
+    let speed = graded(&profiles, CORE, &flight, &track);
+    assert_eq!(
+        pairs(speed.clone()),
+        found(&[
+            ("unstable-speed-above-500", Level::Low),
+            ("unstable-speed-below-500", Level::Medium),
+        ])
+    );
+    assert_eq!(
+        speed[0].detail.as_deref(),
+        Some("140 kt, 25 kt from Vref 115 kt, limit 20 kt")
+    );
+}
+
+/// A C172 at 84 kt with full flaps: its POH approach speed is 65 kt (60-70),
+/// so +19 kt is past the light first level (+15) but not the second (+20).
+#[test]
+fn a_light_approach_speed_is_graded_against_the_published_range() {
+    let (flight, track) = fly_to(&[identity("C172")], LIGHT_LB, TD_S + ROLLOUT_S, |t| {
+        let p = landing(t, TD_S, 1.2);
+        Pt {
+            speed: if t < TD_S { 84.0 } else { p.speed.min(84.0) },
+            flaps: 30.0,
+            ..p
+        }
+    });
+    assert_eq!(
+        events(CORE, &flight, &track),
+        found(&[("unstable-speed-light", Level::Low)])
+    );
+}
+
+/// 1290 fpm held for 20 s below 500 ft: past Data4Safety's first
+/// threshold, which below 500 ft is SL2B (Medium); the same descent in a
+/// light aircraft is its first level (Low).
+#[test]
+fn a_high_sink_below_500_ft_is_split_by_class() {
+    let script = |t: f64| Pt {
+        alt: lerp(
+            &[
+                (0.0, 1500.0),
+                (TD_S - 50.0, 480.0),
+                (TD_S - 30.0, 50.0),
+                (TD_S - 2.0, 10.0),
+                (TD_S, 0.0),
+            ],
+            t,
+        ),
+        ..landing(t, TD_S, 1.2)
+    };
+    let (flight, track) = fly(AIRLINER_LB, TD_S + ROLLOUT_S, script);
+    assert_eq!(
+        events(CORE, &flight, &track),
+        found(&[("high-sink-below-500", Level::Medium)])
+    );
+    let (flight, track) = fly(LIGHT_LB, TD_S + ROLLOUT_S, script);
+    assert_eq!(
+        events(CORE, &flight, &track),
+        found(&[("high-sink-light", Level::Low)])
+    );
+}
+
+/// 22 deg of bank held for 5 s from 225 ft to 160 ft: Data4Safety's first
+/// threshold below 500 ft (15 deg, SL2B: Medium) for a jet; for a light
+/// aircraft, below 300 ft, past its second level (20 deg).
+#[test]
+fn bank_on_short_final_is_split_by_class() {
+    let script = |t: f64| Pt {
+        set: if (TD_S - 22.0..TD_S - 17.0).contains(&t) {
+            vec![("PLANE BANK DEGREES", -22.0)]
+        } else {
+            vec![]
+        },
+        ..landing(t, TD_S, 1.2)
+    };
+    for (lb, rule) in [(AIRLINER_LB, "bank-below-500"), (LIGHT_LB, "bank-light")] {
+        let (flight, track) = fly(lb, TD_S + ROLLOUT_S, script);
+        assert_eq!(
+            events(CORE, &flight, &track),
+            found(&[(rule, Level::Medium)])
+        );
+    }
+}
+
+/// 450 fpm at contact: past the transport first level (360 fpm, 6 ft/s of
+/// 14 CFR 25.473) and the light one (400 fpm).
+#[test]
+fn touchdown_sink_is_split_by_class() {
+    let script = |t: f64| Pt {
+        alt: lerp(
+            &[
+                (0.0, 1500.0),
+                (TD_S - 12.0, 100.0),
+                (TD_S - 1.0, 7.5),
+                (TD_S, 0.0),
+            ],
+            t,
+        ),
+        ..landing(t, TD_S, 1.2)
+    };
+    for (lb, rule) in [
+        (AIRLINER_LB, "high-sink-touchdown"),
+        (LIGHT_LB, "high-sink-touchdown-light"),
+    ] {
+        let (flight, track) = fly(lb, TD_S + ROLLOUT_S, script);
+        assert_eq!(events(CORE, &flight, &track), found(&[(rule, Level::Low)]));
+    }
+}
+
+/// 1.5 dots below the glideslope held from 1000 ft to 520 ft: past
+/// Data4Safety's first threshold (1 dot), not its second (2 dots). The
+/// signal is lost before the 500 ft gate, which then never fires.
+#[test]
+fn glideslope_deviation_above_500_ft() {
+    let (flight, track) = fly(AIRLINER_LB, TD_S + ROLLOUT_S, |t| {
+        let p = landing(t, TD_S, 1.2);
+        let on = p.alt > 520.0;
+        Pt {
+            set: vec![
+                ("NAV HAS GLIDE SLOPE:1", f64::from(u8::from(on))),
+                ("NAV GSI:1", if on { 1.5 * 119.0 / 2.0 } else { 0.0 }),
+            ],
+            ..p
+        }
+    });
+    assert_eq!(
+        events(CORE, &flight, &track),
+        found(&[("glideslope-deviation-above-500", Level::Low)])
+    );
+}
+
+/// Every core rule belongs to the domain docs/scoring.md §3 gives it; the
+/// loader already rejects a rule without one.
+#[test]
+fn core_rules_map_to_the_scoring_domains() {
+    use rules::Domain::*;
+    let mut by_domain: Vec<(rules::Domain, Vec<String>)> = Vec::new();
+    for r in load(CORE).unwrap() {
+        match by_domain.iter_mut().find(|(d, _)| *d == r.domain) {
+            Some((_, ids)) => ids.push(r.id),
+            None => by_domain.push((r.domain, vec![r.id])),
+        }
+    }
+    let ids = |d| {
+        let mut ids = by_domain.iter().find(|(x, _)| *x == d).unwrap().1.clone();
+        ids.sort();
+        ids.join(" ")
+    };
+    assert_eq!(
+        ids(Stability),
+        "bank-above-500 bank-below-500 bank-light gear-not-down-500 \
+         glideslope-deviation-500 glideslope-deviation-above-500 high-sink-above-500 \
+         high-sink-below-500 high-sink-light localizer-deviation-500 \
+         localizer-deviation-above-500 unstable-bank-500 unstable-sink-500 \
+         unstable-speed-above-500 unstable-speed-below-500 unstable-speed-light"
+    );
+    assert_eq!(
+        ids(Energy),
+        "flap-overspeed gear-extended-overspeed gear-operating-overspeed stall-warning \
+         vmo-exceedance"
+    );
+    assert_eq!(ids(Point), "long-landing short-landing");
+    assert_eq!(
+        ids(Lateral),
+        "crosswind-above-demonstrated off-centreline-touchdown"
+    );
+    assert_eq!(
+        ids(Contact),
+        "bounced-landing hard-landing hard-landing-inspection hard-landing-light \
+         high-sink-touchdown high-sink-touchdown-light tailstrike-risk-landing"
+    );
+    assert_eq!(ids(Rollout), "tailwind-landing-limit");
+    assert_eq!(ids(Other), "go-around tailstrike-risk-takeoff");
 }

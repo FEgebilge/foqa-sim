@@ -26,6 +26,26 @@ impl Level {
     pub const ALL: [Self; 4] = [Self::Advisory, Self::Low, Self::Medium, Self::High];
 }
 
+/// The part of a landing assessment an event counts toward
+/// (docs/scoring.md §3); `other` never counts toward a landing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Domain {
+    /// Approach stability.
+    Stability,
+    /// Threshold and flare energy.
+    Energy,
+    /// Touchdown point.
+    Point,
+    /// Lateral control.
+    Lateral,
+    /// Touchdown contact.
+    Contact,
+    /// Rollout and stopping.
+    Rollout,
+    Other,
+}
+
 /// Aircraft a rule applies to. Transport means a maximum weight over
 /// 12,500 lb, the FAA small-aircraft limit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -207,6 +227,7 @@ pub struct Rule {
     pub why_it_matters: Option<String>,
     /// Plain-language technique to avoid it.
     pub advice: Option<String>,
+    pub domain: Domain,
     /// Empty for touchdown rules.
     pub phases: Vec<Phase>,
     pub aircraft: Option<Aircraft>,
@@ -321,6 +342,7 @@ struct Doc {
     description: String,
     why_it_matters: Option<String>,
     advice: Option<String>,
+    domain: Domain,
     phase: Option<OneOrMany>,
     aircraft: Option<Aircraft>,
     when: Option<String>,
@@ -610,6 +632,7 @@ fn compile(doc: Doc) -> Result<Rule, LoadError> {
         description: doc.description,
         why_it_matters: doc.why_it_matters,
         advice: doc.advice,
+        domain: doc.domain,
         phases,
         aircraft: doc.aircraft,
         when,
@@ -662,6 +685,7 @@ mod tests {
 rule: excessive-bank-low
 version: 1
 title: Excessive bank below 1000 ft
+domain: stability
 phase: [InitialClimb, Approach]
 when: height < 1000 ft
 measure: abs(roll)
@@ -715,9 +739,9 @@ above: { low: 30 deg, medium: 35 deg, high: 45 deg }
 
     #[test]
     fn touchdown_values_exist_only_in_touchdown_rules() {
-        let yaml = "rule: x\nversion: 1\ntitle: x\nphase: Landing\nmeasure: td.peak_g\nabove: { low: 1.6 g }";
+        let yaml = "rule: x\nversion: 1\ntitle: x\ndomain: other\nphase: Landing\nmeasure: td.peak_g\nabove: { low: 1.6 g }";
         assert!(error(yaml).contains("unknown parameter `td.peak_g`"));
-        let yaml = "rule: x\nversion: 1\ntitle: x\nat: touchdown\nmeasure: td.peak_g\nabove: { low: 1.6 g }";
+        let yaml = "rule: x\nversion: 1\ntitle: x\ndomain: other\nat: touchdown\nmeasure: td.peak_g\nabove: { low: 1.6 g }";
         assert!(matches!(load(yaml).unwrap()[0].trigger, Trigger::Touchdown));
     }
 
@@ -784,9 +808,17 @@ needs at least one level (advisory, low, medium or high)"
         assert!(error(&with("{ias")).contains("unclosed `{`"));
         assert!(error(&with("{air_ground}")).contains("must be a number"));
         assert!(error(&with("{nope}")).contains("unknown parameter `nope`"));
-        let condition =
-            "rule: x\nversion: 1\ntitle: x\nat: touchdown\nmeasure: td.bounce\nlevel: low\n";
+        let condition = "rule: x\nversion: 1\ntitle: x\ndomain: other\nat: touchdown\nmeasure: td.bounce\nlevel: low\n";
         assert!(error(&format!("{condition}detail: \"{{value}}\"")).contains("no value"));
+    }
+
+    #[test]
+    fn every_rule_names_its_domain() {
+        assert_eq!(load(BANK).unwrap()[0].domain, Domain::Stability);
+        let err = error(&BANK.replace("domain: stability\n", ""));
+        assert!(err.contains("missing field `domain`"), "{err}");
+        let err = error(&BANK.replace("domain: stability", "domain: flare"));
+        assert!(err.contains("unknown variant `flare`"), "{err}");
     }
 
     #[test]

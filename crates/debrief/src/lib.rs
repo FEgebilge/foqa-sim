@@ -614,8 +614,8 @@ mod tests {
         let d = c172().debrief();
         assert_eq!(d.flight.summary.id, "c172-pattern");
         assert_eq!(d.flight.summary.landings, 1);
-        assert_eq!(d.flight.summary.worst_level, Some(Level::High));
-        assert_eq!(d.events.len(), 6);
+        assert_eq!(d.flight.summary.worst_level, Some(Level::Medium));
+        assert_eq!(d.events.len(), 5);
         assert!(d.events.iter().all(|e| !e.description.is_empty()));
         assert!(d.events.iter().all(|e| e.advice.is_some()));
         // Every measured value is said in words.
@@ -686,11 +686,11 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         let flight = &v["flight"];
         assert_eq!(flight["profile"], "no aircraft identity, unknown class");
-        assert_eq!(flight["worst_level"], "high");
+        assert_eq!(flight["worst_level"], "medium");
 
         assert_eq!(
             flight["event_counts"],
-            serde_json::json!({"advisory": 0, "low": 1, "medium": 2, "high": 3})
+            serde_json::json!({"advisory": 2, "low": 0, "medium": 3, "high": 0})
         );
         // Unknown optional fields are left out, not null.
         assert!(
@@ -707,7 +707,7 @@ mod tests {
         let flare = &flight["phase_values"]["flare_ft"];
         assert_eq!(flare["value"], 50.0);
         assert_eq!(flare["source"], "transport class default (unknown class)");
-        assert_eq!(v["events"][0]["level"], "high");
+        assert_eq!(v["events"][0]["level"], "medium");
     }
 
     #[test]
@@ -733,8 +733,9 @@ mod tests {
             ("Pilot report", "long final")
         );
         assert_eq!((report.level, report.start_s), (Level::Advisory, 100.0));
+        // With the two 500 ft gate notes of the pattern.
         let counts = &a.summary().event_counts;
-        assert_eq!(counts[&Level::Advisory], 1);
+        assert_eq!(counts[&Level::Advisory], 3);
     }
 
     #[test]

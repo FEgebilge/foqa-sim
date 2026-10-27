@@ -164,8 +164,10 @@ T/J bands are split at 500 ft, as S1 does.
 | | | | light | flap change < 200 ft → L1; retractable gear not down < 300 ft → L3 | est; POH flaps "as desired" ✔ |
 | A7 | Low thrust | all `engN.throttle` at idle > 10 s in window (**new**) | T/J | → L1 | S1 defines it per fleet percentile; ours est. Later slice |
 
-Today `unstable-speed-500` uses `sel.speed` as the Vapp proxy at a single
-500 ft instant. A1 replaces it over the whole window.
+Rule set v1's `unstable-speed-500` used `sel.speed` as the Vapp proxy at a
+single 500 ft instant. v2 replaces it with `unstable-speed-above-500`,
+`unstable-speed-below-500` (against `profile.vref`) and
+`unstable-speed-light` (against `profile.vapp`), held 3 s.
 
 **New derived value: `stabilisation`**, per approach: each criterion's
 sustained worst and level, by height band, and the **stable height**, the
@@ -255,11 +257,11 @@ domain. The core set maps as follows:
 
 | Domain | Rules |
 |---|---|
-| A stability | unstable-speed-500, unstable-sink-500, unstable-bank-500, localizer-deviation-500, glideslope-deviation-500, gear-not-down-500, high-sink-below-1000, bank-below-500 |
+| A stability | unstable-speed-above-500, unstable-speed-below-500, unstable-speed-light, high-sink-above-500, high-sink-below-500, high-sink-light, bank-above-500, bank-below-500, bank-light, localizer-deviation-above-500, glideslope-deviation-above-500, localizer-deviation-500, glideslope-deviation-500, gear-not-down-500, unstable-sink-500 and unstable-bank-500 (advisory gate notes) |
 | B energy | stall-warning, flap-overspeed, vmo-exceedance, gear-extended-overspeed, gear-operating-overspeed |
 | C point | long-landing, short-landing |
 | D lateral | off-centreline-touchdown, crosswind-above-demonstrated |
-| E contact | hard-landing, hard-landing-light, high-sink-touchdown, bounced-landing, tailstrike-risk-landing, hard-landing-inspection |
+| E contact | hard-landing, hard-landing-light, high-sink-touchdown, high-sink-touchdown-light, bounced-landing, tailstrike-risk-landing, hard-landing-inspection |
 | F rollout | tailwind-landing-limit |
 | other (never in a landing score) | tailstrike-risk-takeoff, go-around (advisory) |
 
