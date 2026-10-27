@@ -299,8 +299,10 @@ history's, with `req` echoed back, from the app's own library (no network
 call from the sim). A key is `[a-z0-9-]`, at most 80 bytes; `req` plus `key`
 at most 256 bytes. Each message fits the 6 KB cap: the strip's text and
 reasons are cut to 160 characters, a card list to 12 cards and then to as
-many as fit, a briefing to 12 lines of 120 characters (dropped from the end
-to fit) and 6 pre-flight lines.
+many as fit, a briefing to 12 lines of 120 characters and 6 pre-flight
+lines, then briefing lines and pre-flight lines dropped from the end to
+fit; a briefing that still does not fit is sent as its `error` ("This
+briefing is too long for the sim; open it in the app.").
 
 ```ts
 interface AttemptStrip {

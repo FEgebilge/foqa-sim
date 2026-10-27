@@ -262,7 +262,9 @@ fn compact_card(c: &ChallengeCard) -> ChallengeCard {
     }
 }
 
-/// The `FOQA_SIM_BRIEFING` reply, lines dropped from the end to fit.
+/// The `FOQA_SIM_BRIEFING` reply, briefing lines then pre-flight lines
+/// dropped from the end to fit; when even that does not, an `error` reply
+/// naming the briefing only.
 pub fn briefing_message(b: &BriefingMsg) -> String {
     let mut b = BriefingMsg {
         v: VERSION,
@@ -287,11 +289,25 @@ pub fn briefing_message(b: &BriefingMsg) -> String {
     };
     loop {
         let msg = json!(b).to_string();
-        if msg.len() <= JSON_MAX || b.lines.pop().is_none() {
+        if msg.len() <= JSON_MAX {
             return msg;
         }
+        if b.lines.pop().is_none() && b.preflight.pop().is_none() {
+            break;
+        }
     }
+    // `req` and `key` come from a checked request; clipped all the same.
+    json!(BriefingMsg {
+        req: clip(&b.req, REQUEST_MAX_BYTES),
+        key: clip(&b.key, KEY_MAX_BYTES),
+        title: String::new(),
+        error: Some(BRIEFING_TOO_LONG.into()),
+        ..b
+    })
+    .to_string()
 }
+
+const BRIEFING_TOO_LONG: &str = "This briefing is too long for the sim; open it in the app.";
 
 /// The app's way to the views: what it publishes and its answers to the
 /// views' attempt commands. Cloned freely; sends are dropped once the
@@ -448,6 +464,30 @@ mod tests {
         fat.lines = vec!["l".repeat(LINE_MAX); LINES_MAX];
         let msg = briefing_message(&fat);
         assert!(msg.len() <= JSON_MAX, "{}", msg.len());
+        // Wide characters and escapes: the pre-flight lines go too, and at
+        // worst the reply says so instead of passing the cap.
+        let wide = "\u{1}".repeat(TEXT_MAX);
+        let line = PreflightLine {
+            text: wide.clone(),
+            fix: Some(wide.clone()),
+            ..b.preflight[0].clone()
+        };
+        let mut huge = b.clone();
+        huge.title = wide.clone();
+        huge.lines = vec!["\u{1}".repeat(LINE_MAX); LINES_MAX];
+        huge.preflight = vec![line; PREFLIGHT_MAX];
+        let msg = briefing_message(&huge);
+        assert!(msg.len() <= JSON_MAX, "{}", msg.len());
+        let back: BriefingMsg = serde_json::from_str(&msg).unwrap();
+        assert!(back.lines.is_empty() && back.preflight.len() < PREFLIGHT_MAX);
+        let mut wider = huge.clone();
+        wider.title = "\u{1}".repeat(JSON_MAX);
+        wider.key = "k".repeat(JSON_MAX);
+        let msg = briefing_message(&wider);
+        assert!(msg.len() <= JSON_MAX, "{}", msg.len());
+        let back: BriefingMsg = serde_json::from_str(&msg).unwrap();
+        assert_eq!(back.error.as_deref(), Some(BRIEFING_TOO_LONG));
+        assert!(back.title.is_empty() && back.preflight.is_empty());
     }
 
     #[test]
