@@ -323,6 +323,22 @@ mod tests {
             ),
             ("foqa-sim://challenge?site=https://localhost&id=abc", "site"),
             (
+                "foqa-sim://challenge?site=https://localhost.&id=abc",
+                "site",
+            ),
+            (
+                "foqa-sim://challenge?site=https://LOCALHOST.&id=abc",
+                "site",
+            ),
+            (
+                "foqa-sim://challenge?site=https://foo.localhost&id=abc",
+                "site",
+            ),
+            (
+                "foqa-sim://challenge?site=https://a.example.&id=abc",
+                "site",
+            ),
+            (
                 "foqa-sim://challenge?site=http://127.0.0.1:8080&id=abc",
                 "site",
             ),
