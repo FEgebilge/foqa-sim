@@ -13,6 +13,17 @@ const WRAPPING: [(&str, f64, f64); 4] = [
     ("pos.lon", -180.0, 360.0),
 ];
 
+/// Recordings made before the wiring scaled `GEAR TOTAL PCT EXTENDED` (a
+/// 0-1 fraction in MSFS 2024, docs/format.md) hold `gear.extended` as 0-1.
+/// A series that never passes 1 is one of those: a true % series reaches
+/// 100 with the gear down, and an always-retracted one is 0 on both scales.
+fn gear_fraction_to_pct(samples: &mut [Sample]) {
+    const MAX_FRACTION: f64 = 1.0 + 1e-6;
+    if samples.iter().all(|s| s.value <= MAX_FRACTION) {
+        samples.iter_mut().for_each(|s| s.value *= 100.0);
+    }
+}
+
 /// A decoded recording: each parameter's samples in time order.
 pub struct Flight {
     lfl: &'static Lfl,
@@ -51,6 +62,9 @@ impl Flight {
         // The journal is not time-ordered (touchdown pre-trigger buffer).
         series.iter_mut().for_each(|s| s.sort_by_key(|s| s.t));
         events.sort_by_key(|(t, _)| *t);
+        if let Some(gear) = lfl.by_name("gear.extended") {
+            gear_fraction_to_pct(&mut series[usize::from(gear.id.0)]);
+        }
         Ok(Self {
             lfl,
             series,
@@ -199,6 +213,30 @@ pub(crate) mod tests {
     fn at(name: &'static str, a: f64, b: f64, f: f64) -> f64 {
         let flight = flight(&[ok(name, 0.0, a), ok(name, 0.5, b)]);
         flight.at(name, SimTime::from_secs_f64(0.5 * f)).unwrap()
+    }
+
+    /// `gear.extended` as read back from a journal holding `values`.
+    fn gear_read(values: &[f64]) -> Vec<f64> {
+        let lfl = &Lfl::V1;
+        let id = lfl.by_name("gear.extended").unwrap().id;
+        let mut journal = recorder::JournalWriter::new(Vec::new(), lfl).unwrap();
+        for (i, &v) in values.iter().enumerate() {
+            let t = SimTime::from_secs_f64(i as f64);
+            journal.sample(&Sample::new(t, id, v)).unwrap();
+        }
+        let flight = Flight::read(&journal.into_inner()[..]).unwrap();
+        flight
+            .series("gear.extended")
+            .iter()
+            .map(|s| s.value)
+            .collect()
+    }
+
+    #[test]
+    fn old_fraction_gear_reads_as_percent() {
+        assert_eq!(gear_read(&[0.0, 0.5, 1.0]), [0.0, 50.0, 100.0]);
+        assert_eq!(gear_read(&[0.0, 50.0, 100.0]), [0.0, 50.0, 100.0]);
+        assert_eq!(gear_read(&[0.0, 0.0]), [0.0, 0.0]);
     }
 
     #[test]

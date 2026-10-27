@@ -367,18 +367,26 @@ peak_s: <when>, measure: "" }`, and counts in
 interface Series {
   t_s: number[];
   alt_ft: (number | null)[];      // pressure altitude
-  aal_ft: (number | null)[];      // height above the aerodrome
+  aal_ft: (number | null)[];      // height above the aerodrome, derived
   ias_kt: (number | null)[];
   gs_kt: (number | null)[];
-  vs_fpm: (number | null)[];      // inertial vertical speed
+  vs_fpm: (number | null)[];      // inertial vertical speed, derived from pressure altitude and load
   nz_g: (number | null)[];
   pitch_deg: (number | null)[];
   roll_deg: (number | null)[];
+  hdg_deg: (number | null)[];     // magnetic heading
+  ra_ft: (number | null)[];       // radio height, on-ground bias removed; null above 2500 ft
   flap_deg: (number | null)[];
   vfe_kt: (number | null)[];      // profile's flap-speed limit at flap_deg; null without a profile band or with flaps up
+  gear_ext: (number | null)[];    // gear.extended, 0 = up to 100 = down (%)
+  ap_engaged: (0 | 1 | null)[];   // autopilot engaged
+  at_engaged: (0 | 1 | null)[];   // autothrottle engaged
   lat: (number | null)[];
   lon: (number | null)[];
 }
+// Values go out rounded to what the app shows: t_s and nz_g 3 decimals,
+// pitch and roll 2, lat/lon 6 (about 0.1 m), vs_fpm and the engaged flags
+// whole, the rest 1.
 
 interface Airport {
   icao: string;

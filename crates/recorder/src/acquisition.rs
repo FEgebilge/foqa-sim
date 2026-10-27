@@ -13,6 +13,10 @@ const FLIP: f64 = -1.0;
 /// Unverified: check against an ILS approach.
 const LOC_DOTS: f64 = 2.0 / 127.0;
 const GS_DOTS: f64 = 2.0 / 119.0;
+/// MSFS 2024 returns GEAR TOTAL PCT EXTENDED as a 0-1 fraction whatever the
+/// unit (measured 2026-10-28, C172SP: 1 in "percent", 0.01 in "percent over
+/// 100"; GEAR CENTER POSITION in "percent" gives 100). The LFL wants %.
+const FRACTION_TO_PCT: f64 = 100.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Column {
@@ -106,7 +110,7 @@ const WIRES: &[Wire] = &[
     w("flap.handle", "FLAPS HANDLE INDEX", "number"),
     w("flap.te_angle", "TRAILING EDGE FLAPS LEFT ANGLE", "degrees"),
     w("gear.handle", "GEAR HANDLE POSITION", "bool"),
-    w("gear.extended", "GEAR TOTAL PCT EXTENDED", "percent"),
+    scaled("gear.extended", "GEAR TOTAL PCT EXTENDED", "percent", FRACTION_TO_PCT),
     w("spoiler.armed", "SPOILERS ARMED", "bool"),
     w("spoiler.handle", "SPOILERS HANDLE POSITION", "percent"),
     w("trim.pitch", "ELEVATOR TRIM POSITION", "degrees"),
@@ -294,6 +298,19 @@ mod tests {
             .unwrap();
         assert_eq!(value(&c, "pitch"), Some((7.5, Ssm::Normal)));
         assert_eq!(value(&c, "roll"), None);
+    }
+
+    #[test]
+    fn gear_fraction_becomes_percent() {
+        let acq = Acquisition::new(&Lfl::V1);
+        let raw = frame(
+            &acq,
+            &[("SIMULATION TIME", 1.0), ("GEAR TOTAL PCT EXTENDED", 1.0)],
+        );
+        assert_eq!(
+            value(&acq.condition(&raw).unwrap(), "gear.extended"),
+            Some((100.0, Ssm::Normal))
+        );
     }
 
     #[test]
