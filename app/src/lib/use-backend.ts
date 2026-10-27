@@ -77,3 +77,17 @@ export function useSetup(recorder: RecorderStatus["state"] | undefined) {
 }
 
 export type Setup = ReturnType<typeof useSetup>;
+
+export function useChallenges() {
+  const load = useCallback(() => api.challengesList(), []);
+  return useLoad(load);
+}
+
+/** Every local attempt, loaded again whenever the backend reports one changed. */
+export function useAttempts() {
+  const load = useCallback(() => api.attemptsList(), []);
+  const result = useLoad(load);
+  const { refresh } = result;
+  useBackendEvent("attempt-changed", useCallback(() => refresh(), [refresh]));
+  return result;
+}

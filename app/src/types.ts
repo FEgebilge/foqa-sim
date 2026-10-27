@@ -231,3 +231,94 @@ export interface SetupStatus {
   community: string | null;
   choice: "found" | "install" | "folder";
 }
+
+// Landing challenges (docs/challenges.md) and their local attempts (docs/challenge-protocol.md B5, B8).
+
+/** A challenge file kept in the local library. */
+export interface ChallengeEntry {
+  key: string;            // "<id>-v<version>"
+  id: string;
+  version: number;
+  title: string;
+  airport: string;
+  runway: string;
+  sha256: string;         // of the stored definition bytes
+}
+
+type Band = { min?: number; max?: number };
+
+/** The challenge JSON as written (docs/challenges.md). */
+export interface ChallengeDefinition {
+  id: string;
+  version: number;
+  title: string;
+  window?: { from: string; to: string };
+  airport: string;
+  runway: string;
+  aircraft?: { classes?: ("light" | "transport")[]; types?: string[] };
+  start: { distance_nm: number; height_ft: number; ias_kt: number; gear_down?: boolean; flaps?: number; mode: "teleport" | "self" };
+  gate: { distance_nm: number };
+  conditions?: {
+    wind?: { from_deg: number; speed_kt: number; tolerance_deg: number; tolerance_kt: number };
+    crosswind_kt?: Band;
+    tailwind_kt?: Band;
+    preset?: string;
+  };
+  rules?: { ap_off_by_height_ft?: number; stop_on_runway?: boolean };
+  scoring: { version: string };
+}
+
+export interface Briefing extends ChallengeEntry {
+  definition: ChallengeDefinition;
+}
+
+export interface PreflightLine {
+  name: "sim" | "aircraft" | "weather" | "ranking";
+  state: "ok" | "warn" | "fail" | "unknown";
+  text: string;
+  fix?: string;
+}
+
+export type AttemptState = "created" | "placing" | "failed_start" | "flying" | "approach" | "rollout" | "finished" | "graded_local" | "sliced" | "done" | "abandoned";
+
+/** `attempt.json`. */
+export interface AttemptRecord {
+  id: string;
+  key: string;
+  challenge: string;
+  version: number;
+  title: string;
+  definition_sha256: string;
+  n: number;              // attempt number on this challenge on this PC
+  state: AttemptState;
+  created_at: string;
+  updated_at: string;
+  flight_id: string | null;
+  begin_s: number | null;
+  touchdown_s: number | null;
+  reason: string | null;  // why it finished or was abandoned
+}
+
+/** The local grade (`challenge::Attempt`). */
+export interface AttemptResult {
+  challenge: string;
+  challenge_version: number;
+  valid: boolean;
+  checks: { name: string; ok: boolean; detail: string }[];
+  gate_s: number | null;
+  touchdown_s: number | null;
+  score: { version: string; total: number; parts: { name: string; weight: number; score: number; value: number | null; unit: string }[] } | null;
+}
+
+/** One line of `log.jsonl`. */
+export interface AttemptLogLine {
+  at: string;
+  seq: number;
+  event: string;
+  [field: string]: unknown;
+}
+
+export interface AttemptView extends AttemptRecord {
+  result: AttemptResult | null;
+  log: AttemptLogLine[];
+}

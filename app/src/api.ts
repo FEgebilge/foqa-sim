@@ -2,8 +2,9 @@
 // in a plain browser it reads mock JSON from /mock so the UI can be developed without the app.
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { mockChallenges } from "./lib/challenges-mock";
 import { mockSetup } from "./lib/setup-mock";
-import type { Debrief, FlightSummary, LandingNotice, OpenFlight, RecorderStatus, SetupStatus, StorageUsage } from "./types";
+import type { AttemptRecord, AttemptView, Briefing, ChallengeEntry, Debrief, FlightSummary, LandingNotice, OpenFlight, PreflightLine, RecorderStatus, SetupStatus, StorageUsage } from "./types";
 
 export type Unlisten = () => void;
 
@@ -12,9 +13,28 @@ export interface BackendEvents {
   "flight-saved": FlightSummary;
   landing: LandingNotice;
   "open-flight": OpenFlight;
+  "attempt-changed": AttemptRecord;
 }
 
-export interface Api {
+/** Landing challenges, local only: the library, the pre-flight card and the attempts. */
+export interface ChallengesApi {
+  challengesList(): Promise<ChallengeEntry[]>;
+  /** Asks for a challenge file; null when the dialog is cancelled. Errors are in plain words. */
+  challengeImport(): Promise<ChallengeEntry | null>;
+  challengeRemove(key: string): Promise<void>;
+  challengeBriefing(key: string): Promise<Briefing>;
+  challengePreflight(key: string): Promise<PreflightLine[]>;
+  /** Creates an attempt and places the aircraft at the start. */
+  attemptStart(key: string): Promise<AttemptRecord>;
+  /** Abandons the attempt if still open and starts the same definition again. */
+  attemptFlyAgain(id: string): Promise<AttemptRecord>;
+  /** Ends the attempt and grades it from its flight. */
+  attemptFinish(id: string): Promise<AttemptRecord>;
+  attemptAbandon(id: string): Promise<AttemptRecord>;
+  attemptsList(): Promise<AttemptView[]>;
+}
+
+export interface Api extends ChallengesApi {
   readonly live: boolean;
   listFlights(): Promise<FlightSummary[]>;
   debrief(id: string): Promise<Debrief>;
@@ -45,6 +65,16 @@ const tauriApi: Api = {
   setupRemove: (pkg) => invoke<SetupStatus>("setup_remove", { package: pkg }),
   setupUseCommunity: (path) => invoke<SetupStatus>("setup_use_community", { path }),
   setupPickCommunity: () => invoke<SetupStatus>("setup_pick_community"),
+  challengesList: () => invoke<ChallengeEntry[]>("challenges_list"),
+  challengeImport: () => invoke<ChallengeEntry | null>("challenge_import"),
+  challengeRemove: (key) => invoke<void>("challenge_remove", { key }),
+  challengeBriefing: (key) => invoke<Briefing>("challenge_briefing", { key }),
+  challengePreflight: (key) => invoke<PreflightLine[]>("challenge_preflight", { key }),
+  attemptStart: (key) => invoke<AttemptRecord>("attempt_start", { key }),
+  attemptFlyAgain: (id) => invoke<AttemptRecord>("attempt_fly_again", { id }),
+  attemptFinish: (id) => invoke<AttemptRecord>("attempt_finish", { id }),
+  attemptAbandon: (id) => invoke<AttemptRecord>("attempt_abandon", { id }),
+  attemptsList: () => invoke<AttemptView[]>("attempts_list"),
   on<K extends keyof BackendEvents>(event: K, handler: (payload: BackendEvents[K]) => void) {
     return listen<BackendEvents[K]>(event, (message) => handler(message.payload));
   },
@@ -99,6 +129,7 @@ const mockApi: Api = {
     return { flights: flights.length, bytes: flights.length * 1_800_000, folder: "Documents\\FOQA-Sim\\flights" };
   },
   ...mockSetup(params.get("setup")),
+  ...mockChallenges(params.get("status")),
   on: async () => () => {},
 };
 
