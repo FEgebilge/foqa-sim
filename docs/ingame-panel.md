@@ -212,10 +212,11 @@ interface Events {
 ```
 
 **Phase.** The analyzer's CICTT phases (`analyzer::phase`) computed frame by
-frame by `analyzer::LiveTrack`, with the same thresholds (35 ft takeoff end,
-1000 ft initial climb / approach, 50 ft flare, 200 ft go-around rise, 30 kt
-roll, 3 s bounce). The ground segment decides some boundaries from what
-follows (the top of a climb, a go-around, a bounce); live, they are decided
+frame by `analyzer::LiveTrack`, with the same boundaries (`docs/phases.md`:
+the class defaults or the type profile's, as known so far, plus 35 ft
+takeoff end and 3 s bounce). The ground segment decides some boundaries from
+what follows (the top of a climb, a go-around, a bounce, the lowest speed of
+a touch-and-go); live, they are decided
 once they have happened, so the debrief's phases can differ by a few
 seconds. `aal_ft` uses the analyzer's aerodrome height (pressure altitude on
 the ground, where the airport snapshots are captured): the departure, or
@@ -246,7 +247,8 @@ connection and ignores trailing NULs.
 
 | Event | Payload | |
 |---|---|---|
-| `FOQA_SIM_CMD` | `{ v: 2, cmd: "end_flight" }` | close and save the flight now, as on return to the menu |
+| `FOQA_SIM_CMD` | `{ v: 2, cmd: "start_flight" }` | record a new flight from the next frame, while none is open |
+| | `{ v: 2, cmd: "end_flight" }` | close and save the flight now, as on return to the menu |
 | | `{ v: 2, cmd: "discard_flight" }` | close the flight and delete its files (the view asks to confirm first) |
 | | `{ v: 2, cmd: "mark", note?: string }` | mark this moment in the journal (pilot report) |
 | | `{ v: 2, cmd: "list_flights", req: string }` | the saved flights, answered in `FOQA_SIM_FLIGHTS` |
@@ -259,7 +261,7 @@ Flight history). The ack has `cmd`, `ok` and, on failure, `message`, e.g.
 
 - `end_flight`: answered once the flight is saved; it is then analysed and
   compacted as usual (`flight-saved` in the app). The next flight opens at
-  the sim's next flight start, as after the main menu.
+  the sim's next flight start, as after the main menu, or on `start_flight`.
 - `discard_flight`: answered once the flight is closed and its `.fqj`,
   `.fqz` and `.raw.jsonl.gz` are deleted, nothing else.
 - After either, `Status` has `state: "connected"` and no `flight`.
@@ -267,7 +269,9 @@ Flight history). The ack has `cmd`, `ok` and, on failure, `message`, e.g.
   pilot report and appears in the next `Events` as an advisory event
   `rule: "pilot-report"`, `title: "Pilot report"`, `description`: the note
   (see `debrief-api.md`).
-- A command while no flight is recorded fails with `"no flight open"`.
+- `start_flight`: answered at once; the flight opens at the next sim frame.
+  It fails with `"a flight is already recording"` while one is open.
+- Any other command while no flight is recorded fails with `"no flight open"`.
 
 ### Flight history (EFB app)
 
@@ -286,9 +290,13 @@ interface Flights {
   error?: string;            // instead of flights, e.g. "unsupported version"
 }
 
-// FlightSummary with `aircraft` as the ICAO type, else the sim title, and
-// `duration_s` in whole seconds.
-type FlightItem = Omit<FlightSummary, "aircraft"> & { aircraft?: string };
+// FlightSummary trimmed: `aircraft` as the ICAO type, else the sim title,
+// `duration_s` in whole seconds, `event_counts` with levels that have events
+// only, and of the assessment its grade only.
+type FlightItem = Omit<FlightSummary, "aircraft" | "worst_level" | "assessment"> & {
+  aircraft?: string;
+  grade: "good" | "fair" | "poor";
+};
 
 interface DebriefPart {
   v: 2;
@@ -300,11 +308,16 @@ interface DebriefPart {
   error?: string;            // instead of seq/total/part, e.g. "no such flight"
 }
 
-// What the parts join to (by req, in seq order): the debrief without series,
-// phases or airports.
+// What the parts join to (by req, in seq order): the debrief without airports,
+// its series cut to the EFB's charts.
 interface CompactDebrief {
-  flight: FlightItem & { profile: string };
+  flight: FlightItem & {     // the assessment's points and findings, and how they came about:
+    profile: string; points: number; findings: number;
+    parts: { title: string; level: Level; points: number; count: number }[];   // only rules with points, most first
+    bands: GradeBand[];   // the grade scale (debrief-api.md)
+  };
   touchdowns: Touchdown[];
+  phases: { phase: string; start_s: number; end_s: number; trigger: string }[];   // as in the debrief (debrief-api.md); the Phases list
   events: {                  // time order
     rule: string; level: Level; title: string;
     start_s: number; peak_s: number;
@@ -314,5 +327,16 @@ interface CompactDebrief {
     why_it_matters?: string; advice?: string;
     note?: string;           // pilot reports: the note (Event.description)
   }[];
+  approaches: Grid;          // one per touchdown, same order: 180 s before to 10 s after it, every 2 s;
+                             // values aal_ft, vs_fpm (to 10), ias_kt
+  profile: Grid;             // the whole flight in ~150 steps of whole seconds; values alt_ft (to 10), ias_kt
+}
+
+// A uniform time grid: values[k] is at start_s + k * step_s, the series'
+// nearest point within a step, rounded; null without one. No values when
+// the flight has no series.
+interface Grid {
+  start_s: number; step_s: number;
+  values?: Record<string, (number | null)[]>;
 }
 ```

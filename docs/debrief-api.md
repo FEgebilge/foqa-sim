@@ -13,6 +13,8 @@ the recording; units are in the field names.
 |---|---|---|
 | `list_flights()` | `FlightSummary[]` | Newest first |
 | `debrief(id: string)` | `Debrief` | Full analysis of one flight |
+| `delete_flight(id: string)` | `void` | Deletes the flight's stored files for good; refused for the flight being recorded |
+| `place_challenge(definition: string)` | `StartState` | Puts the aircraft at a landing challenge's start (the challenge JSON, [challenges.md](challenges.md)); an error while the sim is not connected or for a `self` start |
 | `recorder_status()` | `RecorderStatus` | Current state, also pushed as an event |
 | `open_flights_folder()` | `void` | Opens the folder in Explorer |
 | `storage_usage()` | `StorageUsage` | Flight count and the folder's total size on disk (raw captures included) |
@@ -80,6 +82,10 @@ views need is in place, each failing check with its fix.
   absolute path per line (UTF-16LE with BOM), in
   `%APPDATA%\com.egebilge.foqa-sim\community-packages.txt`, which the
   uninstaller reads; removing a package drops its line.
+- **After an update** the app, on start, installs again each listed package
+  that is missing (the old version's uninstaller removed it) or older than the
+  one it ships, unless MSFS is running; then the check offers the update. A
+  package that was never installed is left to the user.
 
 ## Types
 
@@ -129,9 +135,41 @@ interface FlightSummary {
   aircraft?: Aircraft;
   departure?: string;     // ICAO of the departure airport snapshot, if any
   arrival?: string;       // ICAO of the airport of the last touchdown, if any
-  landings: number;
+  landings: number;       // touchdowns that are not bounces (see Touchdown.bounce)
   worst_level?: Level;    // most severe event, if any
   event_counts: Record<Level, number>;
+  assessment: Assessment;
+}
+
+// The flight graded as a whole. Each rule the flight broke counts once, at
+// its worst level, so a repeated finding does not pile up but different ones
+// do: high 4 points, medium 2, low 1, advisory 0. good: 0-1 points, fair: 2-5,
+// poor: 6 or more.
+interface Assessment {
+  grade: "good" | "fair" | "poor";
+  points: number;
+  findings: number;       // rules broken at low or above
+}
+
+// How the assessment was reached, for the debrief. Each rule that fired is
+// one part, at its worst level in the flight, which alone counts; the parts
+// add up to `assessment.points`.
+interface AssessmentDetail {
+  parts: AssessmentPart[];   // most points first, then by rule name; advisories (0 points) last
+  bands: GradeBand[];        // the scale, low to high: good up to 1, fair up to 5, poor above
+}
+
+interface AssessmentPart {
+  rule: string;
+  title: string;
+  level: Level;              // its worst level in the flight
+  points: number;            // high 4, medium 2, low 1, advisory 0
+  count: number;             // how many times it fired
+}
+
+interface GradeBand {
+  grade: "good" | "fair" | "poor";
+  up_to?: number;            // inclusive; absent on the last, which takes any more
 }
 
 interface Debrief {
@@ -143,24 +181,43 @@ interface Debrief {
     // their rule name (`profile.<name>`), e.g. { hard_landing_g: { value: 2.2,
     // source: "…" } }; absent without a profile or values
     profile_limits?: Record<string, { value: number; source: string; note?: string }>;
+    // The phase boundaries in effect (docs/phases.md) by name: roll_kt,
+    // climb_end_ft, approach_ft, flare_ft, go_around_rise_ft,
+    // go_around_drop_ft. `source` is "<ICAO> profile, <document>" where the
+    // type profile sets it, else e.g. "light class default"
+    phase_values: Record<string, { value: number; source: string; approximate?: boolean; note?: string }>;
+    assessment_detail: AssessmentDetail;   // how `assessment` was reached
     damaged_at?: number;    // byte offset if the journal was cut off
   };
-  phases: { phase: string; start_s: number; end_s: number }[];   // CICTT, contiguous
+  // CICTT, contiguous. `trigger` says what opened the span with the value
+  // there, e.g. "on the ground above 30 kt (34 kt)", "flare, below 20 ft
+  // above the runway (19 ft RA)", "top of climb, under 1000 ft above the
+  // aerodrome (820 ft AAL)"
+  phases: { phase: string; start_s: number; end_s: number; trigger: string }[];
   touchdowns: Touchdown[];
   events: Event[];          // time order, most severe first at equal times
   series: Series;
   airports: Airport[];      // runway geometry for the map
 }
 
+// A landing is a touchdown with `bounce: false` plus the `bounce: true`
+// touchdowns that follow it, in time order: one landing, graded on its first
+// contact, with further contacts. Ground flicker (a hop of a few samples) is
+// not a touchdown.
 interface Touchdown {
   t_s: number;
-  bounce: boolean;
+  bounce: boolean;        // a further contact of the preceding landing, not a landing of its own
   sink_fpm: number;
   sim_sink_fpm?: number;
   peak_g: number;
   pitch_deg?: number;
   roll_deg?: number;
   ias_kt?: number;
+  wind?: {                                 // at contact, on the matched runway; absent without a runway fix or wind data
+    from_deg: number; speed_kt: number;    // true direction the wind blows from
+    headwind_kt: number;                   // along the runway; negative = tailwind
+    crosswind_kt: number;                  // across it; + = from the right, - = from the left
+  };
   runway?: {
     icao: string; runway: string;          // e.g. "LTBJ", "16L"
     along_m: number; cross_m: number;      // from the landing threshold; cross + = right

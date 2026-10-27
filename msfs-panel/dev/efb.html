@@ -110,19 +110,54 @@ function repeat(messages) {
 setInterval(function () { emit(FoqaSim.MSG.status, { v: 2, status: { state: "connected" } }); }, 1000);
 
 // summary, compact and chunks mirror crates/capture/src/history.rs; change them together.
+function nonzero(c) {
+    var o = {};
+    Object.keys(c || {}).forEach(function (k) { if (c[k]) o[k] = c[k]; });
+    return o;
+}
 function summary(f) {
     return {
         id: f.id, started_utc: f.started_utc, aircraft: f.aircraft && (f.aircraft.icao || f.aircraft.title),
         departure: f.departure, arrival: f.arrival, duration_s: Math.round(f.duration_s), landings: f.landings,
-        worst_level: f.worst_level, event_counts: f.event_counts
+        event_counts: nonzero(f.event_counts), grade: f.assessment ? f.assessment.grade : "good"
     };
 }
 var EVENT_KEYS = ["rule", "level", "start_s", "peak_s", "title", "measure", "value", "threshold", "unit", "detail", "why_it_matters", "advice"];
+// history.rs Grid: the nearest point within a step on a uniform grid, rounded.
+function grid(s, from, to, step, params) {
+    var ts = s.t_s, out = { start_s: 0, step_s: step, values: {} };
+    if (!ts.length) return out;
+    from = Math.max(from, ts[0]); to = Math.min(to, ts[ts.length - 1]);
+    var near = [], j = 0;
+    for (var t = from; t <= to + 1e-9; t += step) {
+        while (j + 1 < ts.length && Math.abs(ts[j + 1] - t) <= Math.abs(ts[j] - t)) j++;
+        near.push(Math.abs(ts[j] - t) <= step ? j : null);
+    }
+    out.start_s = from;
+    params.forEach(function (p) {
+        out.values[p[0]] = near.map(function (i) {
+            var v = i === null ? null : s[p[0]][i];
+            return v === null || !isFinite(v) ? null : Math.round(v / p[1]) * p[1];
+        });
+    });
+    return out;
+}
 function compact(d) {
-    var flight = summary(d.flight);
+    var flight = summary(d.flight), s = d.series, span = s.t_s.length ? s.t_s[s.t_s.length - 1] - s.t_s[0] : 0;
     flight.profile = d.flight.profile;
+    flight.points = d.flight.assessment ? d.flight.assessment.points : 0;
+    flight.findings = d.flight.assessment ? d.flight.assessment.findings : 0;
+    var detail = d.flight.assessment_detail || { parts: [], bands: [] };
+    flight.parts = detail.parts.filter(function (p) { return p.points > 0; }).map(function (p) {
+        return { title: p.title, level: p.level, points: p.points, count: p.count };
+    });
+    flight.bands = detail.bands;
     return {
-        flight: flight, touchdowns: d.touchdowns,
+        approaches: d.touchdowns.map(function (td) {
+            return grid(s, td.t_s - 180, td.t_s + 10, 2, [["aal_ft", 1], ["vs_fpm", 10], ["ias_kt", 1]]);
+        }),
+        profile: grid(s, -Infinity, Infinity, Math.max(1, Math.ceil(span / 150)), [["alt_ft", 10], ["ias_kt", 1]]),
+        flight: flight, touchdowns: d.touchdowns, phases: d.phases,
         events: d.events.map(function (e) {
             var o = {};
             EVENT_KEYS.forEach(function (k) { if (e[k] !== undefined) o[k] = e[k]; });

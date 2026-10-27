@@ -95,6 +95,8 @@ impl Ack {
 /// A command from a view (`FOQA_SIM_CMD`).
 #[derive(Debug, Clone, PartialEq)]
 pub enum ViewCommand {
+    /// Record a new flight while no flight is open.
+    StartFlight,
     EndFlight,
     DiscardFlight,
     Mark(String),
@@ -103,6 +105,7 @@ pub enum ViewCommand {
 impl ViewCommand {
     pub fn name(&self) -> &'static str {
         match self {
+            Self::StartFlight => "start_flight",
             Self::EndFlight => "end_flight",
             Self::DiscardFlight => "discard_flight",
             Self::Mark(_) => "mark",
@@ -149,6 +152,7 @@ impl Request {
             return Err(fail("unsupported version"));
         }
         Ok(Self::Command(match cmd {
+            "start_flight" => ViewCommand::StartFlight,
             "end_flight" => ViewCommand::EndFlight,
             "discard_flight" => ViewCommand::DiscardFlight,
             "mark" => {
@@ -196,7 +200,9 @@ pub(crate) fn tee(
             for data in link.send(board.due(now), board.sim_up(), now) {
                 match Request::parse(&data) {
                     Ok(Request::Query(query)) => history.ask(query),
-                    Ok(Request::Command(cmd)) if board.recording().is_some() => {
+                    Ok(Request::Command(cmd))
+                        if for_recorder(&cmd, board.recording().is_some()) =>
+                    {
                         let _ = commands.send(cmd);
                     }
                     Ok(Request::Command(cmd)) => {
@@ -209,6 +215,12 @@ pub(crate) fn tee(
         }
     });
     tx
+}
+
+/// Whether a view command goes to the recorder: with a flight open any
+/// does; without one only a start, the rest having nothing to act on.
+fn for_recorder(cmd: &ViewCommand, recording: bool) -> bool {
+    recording || *cmd == ViewCommand::StartFlight
 }
 
 /// `Status.flight`.
@@ -472,6 +484,7 @@ mod tests {
                 roll_deg: None,
                 ias_kt: None,
                 runway: None,
+                wind: None,
             },
             events: vec![],
         }
@@ -499,6 +512,7 @@ mod tests {
                 landings,
                 worst_level: None,
                 event_counts: BTreeMap::from([(Level::Advisory, 0)]),
+                assessment: debrief::Assessment::of(&[]),
             },
             events: vec![],
             landings: vec![notice(); landings],
@@ -678,6 +692,12 @@ mod tests {
             })
         };
         assert_eq!(parse(r#"{"v":2,"cmd":"end_flight"}"#), Ok(EndFlight));
+        assert_eq!(parse(r#"{"v":2,"cmd":"start_flight"}"#), Ok(StartFlight));
+        // After a flight is ended or discarded only a new start reaches the
+        // recorder, which opens the next flight on its next frame.
+        assert!(for_recorder(&StartFlight, false));
+        assert!(!for_recorder(&EndFlight, false));
+        assert!(for_recorder(&EndFlight, true) && for_recorder(&StartFlight, true));
         let terminated = "{\"v\":2,\"cmd\":\"discard_flight\"}\0\0";
         assert_eq!(parse(terminated), Ok(DiscardFlight));
         assert_eq!(parse(r#"{"v":2,"cmd":"mark"}"#), Ok(Mark(String::new())));

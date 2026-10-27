@@ -65,6 +65,7 @@
 .foqa .btn.wide { display: block; height: 32px; line-height: 30px; margin-top: 6px; font-size: 14px; color: var(--fg); }
 .foqa .btn.danger { color: var(--high); border-color: rgba(240, 96, 90, 0.5); }
 .foqa .btn.danger.armed { color: var(--ink); background: var(--high); border-color: var(--high); font-family: var(--bold); }
+.foqa .btn.primary { color: var(--ink); background: var(--accent); border-color: var(--accent); font-family: var(--bold); }
 
 /* New-event banner: plays its animation once, since a section is only redrawn when it changes. */
 @keyframes foqa-flash { 0% { background: var(--flash); } 100% { background: var(--surface-2); } }

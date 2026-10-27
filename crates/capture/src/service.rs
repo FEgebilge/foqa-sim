@@ -14,12 +14,13 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use debrief::{Analysis, FlightSummary, Index, LandingNotice, RecorderStatus, Station, flight_id};
-use fdm_core::Lfl;
+use fdm_core::{Airport, Lfl};
 use recorder::{Acquisition, TOUCHDOWN_WINDOW_US, Telemetry};
 
 use crate::history::History;
 use crate::monitor::Monitor;
 use crate::panel::{self, Ack, Msg, Snapshot, ViewCommand};
+use crate::place::{Ask, Start};
 use crate::{Command, LiveSource, Progress, Reply, record};
 
 /// First and longest wait between attempts to reach the simulator.
@@ -65,6 +66,37 @@ impl Stopper {
     }
 }
 
+/// Asks a running `Service` to act on the simulator, from any thread. Each
+/// call returns where its answer arrives: `Err` with the reason, or a
+/// disconnection if the sim quit or the service stopped first.
+#[derive(Debug, Clone)]
+pub struct SimRequests(Sender<Command>);
+
+impl SimRequests {
+    /// Puts the user aircraft at `start` and configures it, at the next sim
+    /// frame. `Ok` means the calls went out; a rejection by the sim is only
+    /// logged. Into an open flight the jump is recorded like any other.
+    pub fn place(&self, start: Start) -> Receiver<Result<(), String>> {
+        let (ask, answer) = Ask::new(start);
+        self.send(Command::Place(ask));
+        answer
+    }
+
+    /// The airport `icao` with its runways from the sim's facility database
+    /// (`analyzer::runway::thresholds` gives the threshold points). Also
+    /// recorded, like the airports captured for landings.
+    pub fn airport(&self, icao: &str) -> Receiver<Result<Airport, String>> {
+        let (ask, answer) = Ask::new(icao.to_owned());
+        self.send(Command::Airport(ask));
+        answer
+    }
+
+    fn send(&self, command: Command) {
+        // A stopped service drops the request, disconnecting its answer.
+        let _ = self.0.send(command);
+    }
+}
+
 pub struct Service {
     dir: PathBuf,
     station: Arc<Station>,
@@ -73,12 +105,16 @@ pub struct Service {
     raw: bool,
     /// An analysis for the panel is running.
     analysing: Arc<AtomicBool>,
+    requests: Sender<Command>,
+    /// The app's requests (`SimRequests`): only `Place` and `Airport`.
+    requested: Receiver<Command>,
 }
 
 impl Service {
     /// Records into `dir`, created if missing, grading with `station`.
     pub fn new(dir: PathBuf, station: Arc<Station>) -> io::Result<Self> {
         std::fs::create_dir_all(&dir)?;
+        let (requests, requested) = mpsc::channel();
         Ok(Self {
             index: Arc::new(Index::open(&dir)),
             dir,
@@ -86,6 +122,8 @@ impl Service {
             stopper: Stopper::default(),
             raw: false,
             analysing: Arc::default(),
+            requests,
+            requested,
         })
     }
 
@@ -98,6 +136,10 @@ impl Service {
 
     pub fn stopper(&self) -> Stopper {
         self.stopper.clone()
+    }
+
+    pub fn sim_requests(&self) -> SimRequests {
+        SimRequests(self.requests.clone())
     }
 
     /// The flights folder's index; share it rather than open another.
@@ -151,6 +193,9 @@ impl Service {
             }
             let until = Instant::now() + retry;
             while !self.stopper.stopped() && Instant::now() < until {
+                for request in self.requested.try_iter() {
+                    request.refuse("not connected to the simulator");
+                }
                 thread::sleep(STOP_POLL);
             }
             retry = (retry * 2).min(RETRY_MAX);
@@ -234,7 +279,10 @@ impl Service {
                     }
                 }
             }
+            Progress::Idle => command = link.idle_command(),
         }
+        // The app's requests wait for a frame without a panel command.
+        let command = command.or_else(|| self.requested.try_recv().ok());
         status.set(match &watch.flight {
             Some(flight) => RecorderStatus::Recording {
                 flight_id: flight.id.clone(),
@@ -328,11 +376,27 @@ impl Link<'_> {
         let _ = self.feed.send(Msg::Ack(Ack::new(cmd.name(), result)));
     }
 
+    /// The next view command while no flight is open: only a start, which
+    /// is answered at once.
+    fn idle_command(&self) -> Option<Command> {
+        let cmd = self.commands.try_recv().ok()?;
+        if cmd != ViewCommand::StartFlight {
+            self.ack(&cmd, Err("no flight open".into()));
+            return None;
+        }
+        self.ack(&cmd, Ok(()));
+        Some(Command::Start)
+    }
+
     /// The next view command for `record`, if any. Ending or discarding
     /// the flight is answered once it is saved, a mark at once.
     fn command(&self, flight: &mut OpenFlight) -> Option<Command> {
         let cmd = self.commands.try_recv().ok()?;
         match cmd {
+            ViewCommand::StartFlight => {
+                self.ack(&cmd, Err("a flight is already recording".into()));
+                None
+            }
             ViewCommand::Mark(note) => {
                 self.ack(&ViewCommand::Mark(String::new()), Ok(()));
                 Some(Command::Mark(note))

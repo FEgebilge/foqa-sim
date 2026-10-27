@@ -11,7 +11,8 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 
 use debrief::{
-    Aircraft, Debrief, Event, FlightSummary, Index, Level, PILOT_REPORT, Station, Touchdown,
+    Aircraft, AssessmentPart, Debrief, Event, FlightSummary, Grade, GradeBand, Index, Level,
+    PILOT_REPORT, PhaseSpan, Series, Station, Touchdown,
 };
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -28,6 +29,13 @@ const JSON_MAX: usize = CAP - 1;
 const FLIGHTS_SENT: usize = 30;
 /// A longer `req` plus `id` is refused, so every reply fits `JSON_MAX`.
 pub(crate) const REQUEST_MAX_BYTES: usize = 256;
+/// The approach chart of each landing: this long before touchdown to this
+/// long after, one point per step.
+const APPROACH_BEFORE_S: f64 = 180.0;
+const APPROACH_AFTER_S: f64 = 10.0;
+const APPROACH_STEP_S: f64 = 2.0;
+/// Points of the whole-flight profile.
+const PROFILE_POINTS: f64 = 150.0;
 
 /// A view's query, answered with its `req`.
 #[derive(Debug, Clone, PartialEq)]
@@ -231,9 +239,9 @@ struct FlightItem {
     arrival: Option<String>,
     duration_s: u64,
     landings: usize,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    worst_level: Option<Level>,
+    /// Levels with events only.
     event_counts: BTreeMap<Level, usize>,
+    grade: Grade,
 }
 
 impl From<FlightSummary> for FlightItem {
@@ -246,18 +254,77 @@ impl From<FlightSummary> for FlightItem {
             arrival: s.arrival,
             duration_s: s.duration_s.round() as u64,
             landings: s.landings,
-            worst_level: s.worst_level,
-            event_counts: s.event_counts,
+            event_counts: s.event_counts.into_iter().filter(|&(_, n)| n > 0).collect(),
+            grade: s.assessment.grade,
         }
     }
 }
 
-/// The debrief without series, phases or airports.
+/// The debrief without airports, its phases as spans with their triggers, its series cut to the EFB's
+/// charts: one approach per touchdown, in the same order, and the profile.
 #[derive(Debug, Serialize)]
 struct CompactDebrief {
     flight: CompactFlight,
     touchdowns: Vec<Touchdown>,
     events: Vec<CompactEvent>,
+    phases: Vec<PhaseSpan>,
+    approaches: Vec<Grid>,
+    profile: Grid,
+}
+
+/// Values on a uniform time grid, rounded for size; `null` where the
+/// series has no valid point within a step.
+#[derive(Debug, Default, Serialize)]
+struct Grid {
+    start_s: f64,
+    step_s: f64,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    values: BTreeMap<&'static str, Vec<Option<i32>>>,
+}
+
+impl Grid {
+    /// `(name, values, rounding)` of `series` from `from` to `to` seconds.
+    fn new(
+        series: &Series,
+        from: f64,
+        to: f64,
+        step: f64,
+        params: &[(&'static str, &[f64], f64)],
+    ) -> Self {
+        let ts = &series.t_s;
+        let (Some(&first), Some(&last)) = (ts.first(), ts.last()) else {
+            return Self::default();
+        };
+        let (from, to) = (from.max(first), to.min(last));
+        let points = ((to - from) / step).floor().max(-1.0) as i64 + 1;
+        // The nearest point to each grid time, if within a step.
+        let near: Vec<Option<usize>> = (0..points)
+            .map(|k| {
+                let t = from + k as f64 * step;
+                let i = ts.partition_point(|&x| x < t);
+                [i.checked_sub(1), (i < ts.len()).then_some(i)]
+                    .into_iter()
+                    .flatten()
+                    .min_by(|&a, &b| (ts[a] - t).abs().total_cmp(&(ts[b] - t).abs()))
+                    .filter(|&j| (ts[j] - t).abs() <= step)
+            })
+            .collect();
+        let values = params
+            .iter()
+            .map(|&(name, ys, q)| {
+                let at = |j: usize| Some(ys[j]).filter(|y| y.is_finite());
+                let row = near
+                    .iter()
+                    .map(|j| j.and_then(at).map(|y| ((y / q).round() * q) as i32));
+                (name, row.collect())
+            })
+            .collect();
+        Self {
+            start_s: from,
+            step_s: step,
+            values,
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -265,6 +332,31 @@ struct CompactFlight {
     #[serde(flatten)]
     item: FlightItem,
     profile: String,
+    points: u32,
+    findings: usize,
+    /// The rules that count (above 0 points), most first.
+    parts: Vec<CompactPart>,
+    bands: [GradeBand; 3],
+}
+
+/// `AssessmentPart`, trimmed.
+#[derive(Debug, Serialize)]
+struct CompactPart {
+    title: String,
+    level: Level,
+    points: u32,
+    count: usize,
+}
+
+impl From<AssessmentPart> for CompactPart {
+    fn from(p: AssessmentPart) -> Self {
+        Self {
+            title: p.title,
+            level: p.level,
+            points: p.points,
+            count: p.count,
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -314,13 +406,46 @@ impl From<Event> for CompactEvent {
 
 impl From<Debrief> for CompactDebrief {
     fn from(d: Debrief) -> Self {
+        let s = &d.series;
+        let approaches = d
+            .touchdowns
+            .iter()
+            .map(|td| {
+                let params = [
+                    ("aal_ft", &s.aal_ft[..], 1.0),
+                    ("vs_fpm", &s.vs_fpm, 10.0),
+                    ("ias_kt", &s.ias_kt, 1.0),
+                ];
+                Grid::new(
+                    s,
+                    td.t_s - APPROACH_BEFORE_S,
+                    td.t_s + APPROACH_AFTER_S,
+                    APPROACH_STEP_S,
+                    &params,
+                )
+            })
+            .collect();
+        let span = s.t_s.last().zip(s.t_s.first()).map_or(0.0, |(l, f)| l - f);
+        let step = (span / PROFILE_POINTS).ceil().max(1.0);
+        let params = [("alt_ft", &s.alt_ft[..], 10.0), ("ias_kt", &s.ias_kt, 1.0)];
+        let profile = Grid::new(s, f64::MIN, f64::MAX, step, &params);
         Self {
+            approaches,
+            profile,
             flight: CompactFlight {
+                points: d.flight.summary.assessment.points,
+                findings: d.flight.summary.assessment.findings,
+                parts: (d.flight.assessment_detail.parts.into_iter())
+                    .filter(|p| p.points > 0)
+                    .map(CompactPart::from)
+                    .collect(),
+                bands: d.flight.assessment_detail.bands,
                 item: d.flight.summary.into(),
                 profile: d.flight.profile,
             },
             touchdowns: d.touchdowns,
             events: d.events.into_iter().map(CompactEvent::from).collect(),
+            phases: d.phases,
         }
     }
 }
@@ -338,8 +463,8 @@ mod tests {
             arrival: Some("LTFM".into()),
             duration_s: 3600,
             landings: 1,
-            worst_level: None,
-            event_counts: Level::ALL.map(|l| (l, 0)).into(),
+            event_counts: BTreeMap::from([(Level::Medium, 1)]),
+            grade: Grade::Fair,
         }
     }
 
@@ -425,10 +550,68 @@ mod tests {
         let (back, _) = joined(&parts("h1", "c172", &doc));
         let d: Value = serde_json::from_str(&back).unwrap();
         let keys: Vec<_> = d.as_object().unwrap().keys().collect();
-        assert_eq!(keys, ["events", "flight", "touchdowns"]);
+        assert_eq!(
+            keys,
+            [
+                "approaches",
+                "events",
+                "flight",
+                "phases",
+                "profile",
+                "touchdowns"
+            ]
+        );
+        let phases = d["phases"].as_array().unwrap();
+        assert!(!phases.is_empty() && phases.iter().all(|p| p["trigger"].is_string()));
         assert_eq!(d["flight"]["id"], "c172-pattern");
         assert!(d["flight"]["profile"].is_string() && d["flight"]["duration_s"].is_u64());
         assert_eq!(d["touchdowns"].as_array().unwrap().len(), 1);
+        // The parts that count add up to the points, on the three bands.
+        let f = &d["flight"];
+        let total: u64 = (f["parts"].as_array().unwrap().iter())
+            .map(|p| p["points"].as_u64().unwrap())
+            .sum();
+        assert_eq!(total, f["points"].as_u64().unwrap());
+        assert!(
+            f["parts"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|p| p["points"].as_u64() > Some(0))
+        );
+        assert_eq!(f["bands"].as_array().unwrap().len(), 3);
+        // One approach of 3 min before to 10 s after touchdown, every 2 s.
+        let td = d["touchdowns"][0]["t_s"].as_f64().unwrap();
+        let a = &d["approaches"][0];
+        assert!((a["start_s"].as_f64().unwrap() - (td - 180.0)).abs() < 1e-6);
+        assert_eq!(a["values"]["vs_fpm"].as_array().unwrap().len(), 96);
+        let p = d["profile"]["values"]["alt_ft"].as_array().unwrap();
+        assert!(
+            (100..=151).contains(&p.len()) && p.iter().all(|v| v.is_i64()),
+            "{}",
+            p.len()
+        );
+        // Charts and all, a debrief stays a few messages.
+        assert!(doc.len() < 3 * JSON_MAX, "{}", doc.len());
+    }
+
+    #[test]
+    fn a_grid_takes_the_nearest_point_within_a_step() {
+        let series = Series {
+            t_s: vec![0.0, 0.5, 1.0, 5.0],
+            alt_ft: vec![100.0, 104.0, f64::NAN, 140.0],
+            ..Series::default()
+        };
+        let g = Grid::new(
+            &series,
+            -10.0,
+            4.0,
+            1.0,
+            &[("alt_ft", &series.alt_ft, 10.0)],
+        );
+        // Clipped to the data: 0..4 s; a NaN and a 2 s gap are null.
+        assert_eq!((g.start_s, g.step_s), (0.0, 1.0));
+        assert_eq!(g.values["alt_ft"], [Some(100), None, None, None, Some(140)]);
     }
 
     #[test]

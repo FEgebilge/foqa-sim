@@ -11,7 +11,7 @@ use debrief::Station;
 use fdm_core::{Lfl, SimTime, Ssm};
 use recorder::{Acquisition, Conditioned, SimEvent, Telemetry};
 use rules::expr::Values;
-use rules::{Aircraft, FLAP_TOLERANCE_DEG, Profile, ProfileField, Rule, Side, Var};
+use rules::{Aircraft, FLAP_TOLERANCE_DEG, Profile, ProfileField, Rule, Selection, Side, Var};
 use serde::Serialize;
 
 use crate::panel::VERSION;
@@ -115,17 +115,22 @@ impl Monitor {
     fn step(&mut self, frame: Conditioned) {
         let t0 = *self.t0.get_or_insert(frame.sim_time_s);
         let p = |name| param(&frame, name).unwrap_or(f64::NAN);
-        let point = self.track.step(&LiveInput {
-            t: SimTime::from_secs_f64(frame.sim_time_s - t0),
-            on_ground: param(&frame, "air_ground").map(|v| v >= 0.5),
-            alt_ft: p("alt.pressure"),
-            gs_kt: p("groundspeed"),
-            ra_ft: p("alt.radio"),
-            nz_g: p("accel.normal"),
-            pitch_deg: p("pitch"),
-            roll_deg: p("roll"),
-        });
         self.weight_lb = self.weight_lb.max(p("weight.gross"));
+        // The boundaries of the aircraft as known so far.
+        let phases = self.selection().phases;
+        let point = self.track.step(
+            &LiveInput {
+                t: SimTime::from_secs_f64(frame.sim_time_s - t0),
+                on_ground: param(&frame, "air_ground").map(|v| v >= 0.5),
+                alt_ft: p("alt.pressure"),
+                gs_kt: p("groundspeed"),
+                ra_ft: p("alt.radio"),
+                nz_g: p("accel.normal"),
+                pitch_deg: p("pitch"),
+                roll_deg: p("roll"),
+            },
+            &phases,
+        );
         self.frame = Some(frame);
         if !approach(&point) {
             self.passed = [None, None];
@@ -182,12 +187,17 @@ impl Monitor {
         })
     }
 
-    fn at<'a>(&'a self, frame: &'a Conditioned, point: LivePoint) -> At<'a> {
+    /// The aircraft as graded: its type profile, else the class by the
+    /// heaviest weight so far.
+    fn selection(&self) -> Selection<'_> {
         let weight = finite(self.weight_lb).map(Aircraft::by_weight);
-        let selection = self
-            .station
+        self.station
             .profiles()
-            .select_type(self.icao.clone(), || weight);
+            .select_type(self.icao.clone(), || weight)
+    }
+
+    fn at<'a>(&'a self, frame: &'a Conditioned, point: LivePoint) -> At<'a> {
+        let selection = self.selection();
         At {
             frame,
             point,

@@ -62,6 +62,12 @@ impl Session {
         }
     }
 
+    /// Leaves the menu state as a flight start does: the next frame opens
+    /// a flight.
+    pub fn start(&mut self) {
+        self.in_menu = false;
+    }
+
     fn held_or_recorded(&self) -> Action {
         if self.open {
             Action::Record
@@ -137,6 +143,17 @@ mod tests {
         assert_eq!(session.end(), Skip);
         assert_eq!(session.route(&frame()), Skip);
         assert_eq!(session.route(&flow(FlowEvent::FlightStart)), Hold);
+        assert_eq!(session.route(&frame()), Open);
+    }
+
+    #[test]
+    fn starting_after_an_end_opens_at_the_next_frame() {
+        use Action::*;
+        let mut session = Session::default();
+        assert_eq!(session.route(&frame()), Open);
+        assert_eq!(session.end(), Close);
+        assert_eq!(session.route(&frame()), Skip);
+        session.start();
         assert_eq!(session.route(&frame()), Open);
     }
 }

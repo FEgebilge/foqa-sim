@@ -10,6 +10,7 @@ mod history;
 mod live;
 mod monitor;
 mod panel;
+mod place;
 mod service;
 mod session;
 
@@ -17,13 +18,14 @@ use std::fs::File;
 use std::io::{self, BufWriter};
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-use fdm_core::Lfl;
+use fdm_core::{Airport, Lfl};
 use recorder::{Acquisition, Column, RawWriter, Recorder, SimEvent, Telemetry, TelemetrySource};
 
 pub use live::LiveSource;
-pub use service::{Happening, Service, Stopper};
+pub use place::{ASK_TIMEOUT, Ask, InitPosition, Start, flaps_set_data};
+pub use service::{Happening, Service, SimRequests, Stopper};
 use session::{Action, Session};
 
 /// What `record` reports as it goes.
@@ -39,16 +41,37 @@ pub enum Progress<'a> {
     },
     /// A flight closed; its journal (and raw capture) are complete.
     Saved(&'a Path),
+    /// A frame passed with no flight open: after one was ended, or in the menu.
+    Idle,
 }
 
 /// What the caller of `record` asks of it, in answer to a progress report.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum Command {
     /// Close the open flight now, as the return to the main menu does
     /// (reported as `Saved`); the next one opens at the next flight start.
     Close,
     /// Record a pilot report with this note into the open flight.
     Mark(String),
+    /// Open a flight at the next frame, as a flight start does: to fly on
+    /// after ending or discarding one without leaving to the menu.
+    Start,
+    /// Put the user aircraft at a start and configure it; answered once
+    /// the calls are sent.
+    Place(Ask<Start, ()>),
+    /// Fetch an airport by ICAO; answered when it arrives or fails.
+    Airport(Ask<String, Airport>),
+}
+
+impl Command {
+    /// Answers a request that will not be carried out.
+    fn refuse(self, reason: &str) {
+        match self {
+            Self::Place(ask) => ask.answer(Err(reason.into())),
+            Self::Airport(ask) => ask.answer(Err(reason.into())),
+            Self::Close | Self::Mark(_) | Self::Start => {}
+        }
+    }
 }
 
 /// `Break` stops recording; a command is carried out before the next item.
@@ -73,7 +96,23 @@ pub fn record(
         // A command goes through the session like the sim's own items.
         let item = match command.take() {
             Some(Command::Close) => None,
+            Some(Command::Start) => {
+                session.start();
+                continue;
+            }
             Some(Command::Mark(note)) => Some(Telemetry::Event(SimEvent::PilotReport(note))),
+            Some(Command::Place(ask)) => {
+                // Queued behind a long flight close: the app may have given up.
+                if let Some(ask) = ask.live(Instant::now()) {
+                    let placed = source.place(&ask.query).map_err(|e| e.to_string());
+                    ask.answer(placed);
+                }
+                continue;
+            }
+            Some(Command::Airport(ask)) => {
+                source.want_airport(ask);
+                continue;
+            }
             None => match source.recv()? {
                 Some(item) => Some(item),
                 None => break,
@@ -109,8 +148,14 @@ pub fn record(
             }
             _ => {}
         }
-        if let (Action::Open | Action::Record, Some(item)) = (action, &item) {
-            reply(on(Progress::Recorded { item, touchdown }));
+        match (action, &item) {
+            (Action::Open | Action::Record, Some(item)) => {
+                reply(on(Progress::Recorded { item, touchdown }))
+            }
+            (Action::Skip, Some(Telemetry::Frame(_))) if flight.is_none() => {
+                reply(on(Progress::Idle))
+            }
+            _ => {}
         }
     }
     if let Some(f) = flight {

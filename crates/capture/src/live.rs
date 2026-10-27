@@ -3,18 +3,20 @@ use std::io;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use fdm_core::AircraftId;
+use fdm_core::{AircraftId, Airport};
 use recorder::{
     Acquisition, Column, FlowEvent, SYSTEM_EVENTS, SimEvent, Telemetry, TelemetrySource,
 };
 use sim_link::facility::{AirportFetch, Fetched};
 use sim_link::{Recv, SimConnect};
 
+use crate::place::{AirportAsks, Ask, KEY_EVENT_BASE, KEY_EVENTS, Start, key_event_id};
 use crate::session::Action;
 
 const DEFINE: u32 = 1;
 const FACILITY_DEFINE: u32 = 2;
 const IDENTITY_DEFINE: u32 = 3;
+const INIT_DEFINE: u32 = 4;
 const REQUEST: u32 = 1;
 const IDENTITY_REQUEST: u32 = 2;
 /// The identification SimVars, in `AircraftId` field order.
@@ -29,27 +31,32 @@ const AIRPORT_RADIUS_M: f64 = 10_000.0;
 /// The live simulator as a telemetry source: one SimConnect data definition
 /// holding every acquisition column, streamed each sim frame, plus the sim's
 /// own runway data for the airports the flight uses and the aircraft's
-/// identity.
+/// identity. It also carries out the app's requests: place the aircraft
+/// at a start, fetch an airport by ICAO.
 pub struct LiveSource {
     sim: SimConnect,
-    /// SimVar named by the send id of its definition call, to report a
-    /// rejected one.
-    simvars_by_send_id: HashMap<u32, String>,
+    /// What each definition, mapping or placement call asked for, by send
+    /// id, to report a rejected one.
+    sent: HashMap<u32, String>,
     trigger: Trigger,
     airports: AirportFetch,
+    asks: AirportAsks,
     identity: Identity,
 }
 
 impl LiveSource {
     pub fn open(acquisition: &Acquisition) -> Result<Self, sim_link::Error> {
         let mut sim = SimConnect::open("FOQA-Sim recorder")?;
-        let mut simvars_by_send_id = HashMap::new();
+        let mut sent = HashMap::new();
         for column in acquisition.columns() {
             let send_id = sim.add_f64(DEFINE, column.simvar, column.unit)?;
-            simvars_by_send_id.insert(send_id, format!("{} [{}]", column.simvar, column.unit));
+            sent.insert(send_id, format!("{} [{}]", column.simvar, column.unit));
         }
         for simvar in IDENTITY {
-            simvars_by_send_id.insert(sim.add_text(IDENTITY_DEFINE, simvar)?, simvar.to_owned());
+            sent.insert(sim.add_text(IDENTITY_DEFINE, simvar)?, simvar.to_owned());
+        }
+        for (id, name) in (KEY_EVENT_BASE..).zip(KEY_EVENTS) {
+            sent.insert(sim.map_event(id, name)?, format!("key event {name}"));
         }
         for (id, name) in (1..).zip(SYSTEM_EVENTS) {
             sim.subscribe_system_event(id, name)?;
@@ -63,11 +70,35 @@ impl LiveSource {
         let airports = AirportFetch::new(&mut sim, FACILITY_DEFINE)?;
         Ok(Self {
             sim,
-            simvars_by_send_id,
+            sent,
             trigger: Trigger::new(acquisition.columns()),
             airports,
+            asks: AirportAsks::default(),
             identity: Identity::default(),
         })
+    }
+
+    /// Puts the user aircraft at `start`'s position, then sends its key
+    /// events (autopilot off, gear, flaps). Errors are calls that failed at
+    /// once; a rejection arrives later as an exception, which is logged.
+    pub fn place(&mut self, start: &Start) -> Result<(), sim_link::Error> {
+        let send_id = self.sim.set_init_position(INIT_DEFINE, &start.pos)?;
+        self.sent.insert(send_id, "the initial position".into());
+        for (name, data) in start.events() {
+            let id = key_event_id(name).expect("a start sends mapped key events only");
+            let send_id = self.sim.transmit_event(id, data)?;
+            self.sent.insert(send_id, format!("{name} {data}"));
+        }
+        Ok(())
+    }
+
+    /// Fetches the airport `ask` names, or answers it from those fetched on
+    /// this connection. Like any captured airport it is also recorded,
+    /// into the open flight or the next one.
+    pub fn want_airport(&mut self, ask: Ask<String, Airport>) {
+        if let Some(icao) = self.asks.ask(ask) {
+            self.airports.want(&icao);
+        }
     }
 
     /// Follows the session's routing of an item. Flights are delimited in one
@@ -79,6 +110,10 @@ impl LiveSource {
     pub fn track(&mut self, item: Option<&Telemetry>, action: Action) -> bool {
         if action == Action::Close {
             self.airports.reset();
+            // Asked airports outlive the flight: ask again.
+            for icao in self.asks.waiting() {
+                self.airports.want(icao);
+            }
         }
         self.identity.follow(action);
         let Some(contact) = item.and_then(|item| self.trigger.follow(item, action)) else {
@@ -99,6 +134,7 @@ impl LiveSource {
         Ok(match fetched {
             Some(Fetched::Airport(airport)) => {
                 eprintln!("airport captured: {}", airport.icao);
+                self.asks.fetched(&airport);
                 Some(Telemetry::Event(SimEvent::Airport(airport)))
             }
             Some(Fetched::Near(icaos)) if !icaos.is_empty() => {
@@ -107,6 +143,7 @@ impl LiveSource {
             }
             Some(Fetched::Failed { icao, reason }) => {
                 eprintln!("airport {icao}: {reason}");
+                self.asks.failed(&icao, reason.to_string());
                 None
             }
             Some(Fetched::Near(_)) | None => None,
@@ -151,7 +188,7 @@ impl TelemetrySource for LiveSource {
                     index,
                 } => {
                     let what = self
-                        .simvars_by_send_id
+                        .sent
                         .get(&send_id)
                         .map(String::as_str)
                         .or_else(|| self.airports.describe(send_id));

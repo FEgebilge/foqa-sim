@@ -68,3 +68,22 @@
 .foqa.history .event.open { background: var(--surface-2); }
 .foqa.history .why { margin-top: 6px; font-size: 16px; color: var(--secondary); }
 .foqa.history .why b { display: block; font-weight: normal; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+.foqa.history .chart { display: block; margin-top: 8px; }
+.foqa.history .grade {
+    flex-shrink: 0; margin-left: 10px; padding: 2px 10px; border-radius: 12px;
+    font-size: 14px; font-family: var(--bold); color: var(--ink); background: var(--ok);
+}
+.foqa.history .grade.g-fair { background: var(--medium); }
+.foqa.history .grade.g-poor { background: var(--high); }
+.foqa.history .assess { display: flex; align-items: center; margin-top: 8px; }
+.foqa.history .assess .grade { margin-left: 0; padding: 4px 14px; font-size: 18px; }
+.foqa.history .assess .why { margin-left: 10px; font-size: 15px; color: var(--secondary); }
+.foqa.history .parts-toggle { display: inline-block; margin-top: 8px; padding: 6px 0; font-size: 14px; color: var(--muted); text-decoration: underline; }
+.foqa.history .parts { margin-top: 2px; font-size: 15px; line-height: 1.4; color: var(--secondary); }
+.foqa.history .parts .bands { margin-top: 4px; font-size: 13px; color: var(--muted); }
+.foqa.history .phases { margin: 2px 0 8px; font-size: 15px; line-height: 1.35; }
+.foqa.history .phrow { display: grid; grid-template-columns: 52px 1fr; column-gap: 8px; padding: 5px 0; border-top: 1px solid #1f2c3f; }
+.foqa.history .phrow .time { font-family: var(--mono); color: var(--muted); }
+.foqa.history .phrow .name { color: #e8f0f6; }
+.foqa.history .phrow .trigger { grid-column: 2; font-size: 13px; color: var(--muted); }
+.foqa.history .bounces { margin-top: 6px; font-size: 15px; font-family: var(--mono); color: var(--medium); }

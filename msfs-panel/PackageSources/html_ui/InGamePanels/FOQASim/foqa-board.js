@@ -22,6 +22,7 @@ var FoqaSim = (function () {
     var APPROACH = { Approach: true, Landing: true };
     var TABS = [["now", "Now"], ["events", "Events"], ["landings", "Landings"], ["flight", "Flight"]];
     var CMD_TEXT = {
+        start_flight: { busy: "Starting…", ok: "Recording a new flight", fail: "Could not start a flight" },
         end_flight: { busy: "Saving…", ok: "Flight saved", fail: "Could not save the flight" },
         discard_flight: { busy: "Discarding…", ok: "Flight discarded", fail: "Could not discard the flight" },
         mark: { busy: "Marking…", ok: "Marked: it is in the debrief", fail: "Could not mark" }
@@ -143,6 +144,11 @@ var FoqaSim = (function () {
         return !this.stale() && this.status.status.state === "recording";
     };
 
+    // Connected to the sim with no flight open: one can be started.
+    Board.prototype.ready = function () {
+        return !this.stale() && this.status.status.state === "connected";
+    };
+
     Board.prototype.stale = function () {
         return !this.status || this.now() - this.statusAt > STATUS_STALE_MS;
     };
@@ -156,7 +162,13 @@ var FoqaSim = (function () {
         this.status = msg;
         this.statusAt = this.now();
         if (msg.ack) {
-            var t = CMD_TEXT[msg.ack.cmd] || { ok: "Done", fail: "Failed" };
+            var t = CMD_TEXT[msg.ack.cmd] || { ok: "Done", fail: "Failed" }, gone = this.pending && this.pending.flight;
+            // A discarded flight leaves nothing behind on the board either.
+            if (msg.ack.cmd === "discard_flight" && msg.ack.ok && gone) {
+                this.landings = this.landings.filter(function (l) { return l.flight !== gone; });
+                this.events = null;
+                this.flashes = [];
+            }
             this.toast = { ok: msg.ack.ok, text: msg.ack.message || (msg.ack.ok ? t.ok : t.fail), at: this.now() };
             this.pending = null;
         }
@@ -213,14 +225,16 @@ var FoqaSim = (function () {
     };
 
     Board.prototype.send = function (cmd) {
-        if (!this.bus.send || !this.recording() || this.pending) return;
+        var rec = this.recording();
+        if (!this.bus.send || this.pending || !(cmd === "start_flight" ? this.ready() : rec)) return;
         this.bus.send(MSG.cmd, JSON.stringify({ v: 2, cmd: cmd }));
-        this.pending = { cmd: cmd, at: this.now() };
+        this.pending = { cmd: cmd, at: this.now(), flight: rec ? this.status.status.flight_id : null };
     };
 
     Board.prototype.act = function (act) {
         if (act.indexOf("tab:") === 0) { this.tab = act.slice(4); this.backTab = null; }
         else if (act === "back") { this.tab = this.backTab || "now"; this.backTab = null; }
+        else if (act === "start") this.send("start_flight");
         else if (act === "mark") this.send("mark");
         else if (act === "end") this.send("end_flight");
         else if (act === "discard") {
@@ -330,7 +344,7 @@ var FoqaSim = (function () {
         if (this.stale()) return "The FOQA-Sim app is not connected. Start it on this PC; the panel finds it within a few seconds.";
         var s = this.status.status;
         if (s.state === "recording") return "Recording. Live values appear once the app sends them.";
-        if (s.state === "connected") return "Ready. Recording starts when you load into a flight.";
+        if (s.state === "connected") return "Ready. Recording starts when you load into a flight, or from Start new flight on the Flight tab.";
         if (s.state === "waiting_for_sim") return "The app is waiting for the sim.";
         return "Recorder error" + (s.message ? ": " + esc(s.message) : ".");
     };
@@ -384,7 +398,12 @@ var FoqaSim = (function () {
         }
         var busy = this.pending ? this.pending.cmd : null, off = !rec || busy ? " off" : "";
         var confirming = this.now() - this.confirmAt <= CONFIRM_MS;
-        html += '<div class="actions">' +
+        html += '<div class="actions">';
+        if (this.ready()) {
+            html += '<span class="btn wide primary' + (busy ? " off" : "") + '" data-act="start">' +
+                (busy === "start_flight" ? CMD_TEXT.start_flight.busy : "Start new flight") + "</span>";
+        }
+        html +=
             '<span class="btn wide' + off + '" data-act="mark">' + (busy === "mark" ? CMD_TEXT.mark.busy : "Mark event") + "</span>" +
             '<span class="btn wide' + off + '" data-act="end">' + (busy === "end_flight" ? CMD_TEXT.end_flight.busy : "End flight &amp; save") + "</span>";
         if (confirming && rec && !busy) {
@@ -397,7 +416,9 @@ var FoqaSim = (function () {
         html += "</div>";
         html += '<div class="hint">' + (confirming && rec
             ? "Discard deletes this recording for good. Click Delete again to confirm."
-            : "Mark puts a pilot report at this moment. End saves the flight now, as leaving to the menu does.") + "</div>";
+            : this.ready()
+                ? "No flight is recording. Start records from here on, without leaving to the menu."
+                : "Mark puts a pilot report at this moment. End saves the flight now, as leaving to the menu does.") + "</div>";
         return html;
     };
 

@@ -15,11 +15,13 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use std::io::{self, BufReader};
 use std::path::{Path, PathBuf};
 
-use analyzer::{Flight, Phase, Span, Track, phases, thresholds, touchdowns};
+use analyzer::{Basis, Cause, Flight, Phase, Span, Track, phases, thresholds, touchdowns};
 use fdm_core::geo::distance_m;
 use fdm_core::{Lfl, SimTime};
 use recorder::{COMPACT_EXT, Recorder, ReplaySource, SimEvent, TOUCHDOWN_WINDOW_US};
-use rules::{LoadError, ProfileError, ProfileField, ProfileSet, Rule, Selection, Sourced};
+use rules::{
+    LoadError, PhaseField, ProfileError, ProfileField, ProfileSet, Rule, Selection, Sourced,
+};
 
 pub use index::{INDEX_FILE, Index};
 pub use wire::*;
@@ -210,7 +212,7 @@ impl Station {
         Some(Analysis {
             events: rules::evaluate(&self.rules, &selection, &flight, &track),
             touchdowns: touchdowns(&flight, &track),
-            phases: phases(&track),
+            phases: phases(&track, &selection.phases),
             id,
             rules: &self.rules,
             selection,
@@ -267,6 +269,7 @@ impl Analysis<'_> {
             landings: self.touchdowns.iter().filter(|td| !td.bounce).count(),
             worst_level: events.iter().map(|e| e.level).max(),
             event_counts,
+            assessment: Assessment::of(&events),
         }
     }
 
@@ -278,6 +281,10 @@ impl Analysis<'_> {
                 profile: self.selection.to_string(),
                 class: self.selection.class.map(|c| c.to_string()),
                 profile_limits: self.profile_limits(),
+                phase_values: PhaseField::ALL
+                    .map(|f| (f.name(), self.selection.phase_value(f)))
+                    .into(),
+                assessment_detail: AssessmentDetail::of(&self.events()),
                 damaged_at: self.flight.damaged_at,
             },
             phases: self
@@ -287,9 +294,14 @@ impl Analysis<'_> {
                     phase: s.phase.name(),
                     start_s: secs(s.start),
                     end_s: secs(s.end),
+                    trigger: phase_trigger(&s.cause),
                 })
                 .collect(),
-            touchdowns: self.touchdowns.iter().map(Touchdown::from).collect(),
+            touchdowns: self
+                .touchdowns
+                .iter()
+                .map(|td| Touchdown::new(td, &self.flight))
+                .collect(),
             events: self.events(),
             series: self.series(),
             airports: self.airports(),
@@ -332,7 +344,7 @@ impl Analysis<'_> {
             let window = secs(from)..=secs(td.t.add_us(TOUCHDOWN_WINDOW_US));
             LandingNotice {
                 flight_id: self.id.clone(),
-                touchdown: td.into(),
+                touchdown: Touchdown::new(td, &self.flight),
                 events: events
                     .iter()
                     .filter(|e| window.contains(&e.start_s))
@@ -503,6 +515,40 @@ fn secs(t: SimTime) -> f64 {
     t.as_secs_f64()
 }
 
+/// What opened a phase span, in words with its value there, e.g. "on the
+/// ground above 30 kt (34 kt)"; a value that would read as its threshold
+/// gets a decimal.
+pub fn phase_trigger(c: &Cause) -> String {
+    use analyzer::Trigger::*;
+    let th = format!("{:.0}", c.threshold);
+    let what = match c.trigger {
+        Stopped => format!("stopped, under {th} kt on the ground"),
+        Moving => format!("moving on the ground under {th} kt"),
+        Roll => format!("on the ground above {th} kt"),
+        TouchAndGo => "lowest speed of the touch-and-go roll, takeoff power applied".to_owned(),
+        Liftoff => format!("{th} ft above the runway"),
+        ClimbEnd => format!("climbing through {th} ft above the aerodrome"),
+        TopOfClimb => format!("top of climb, under {th} ft above the aerodrome"),
+        Descent => format!("descending through {th} ft above the aerodrome"),
+        Flare => format!("flare, below {th} ft above the runway"),
+        Touchdown => "touchdown".to_owned(),
+        GoAround => format!("lowest point of the approach, then a climb of {th} ft"),
+        Airborne => return "airborne when the recording starts".to_owned(),
+    };
+    let unit = match c.basis {
+        Basis::GroundSpeed => "kt",
+        Basis::Ra => "ft RA",
+        Basis::Aal => "ft AAL",
+    };
+    let v = Some(format!("{:.0}", c.value))
+        .filter(|v| *v != th)
+        .unwrap_or_else(|| format!("{:.1}", c.value));
+    match c.value.is_finite() {
+        true => format!("{what} ({v} {unit})"),
+        false => what,
+    }
+}
+
 /// A rule text as shown: trimmed, `None` when empty.
 fn text(s: Option<&str>) -> Option<String> {
     s.map(str::trim)
@@ -587,6 +633,23 @@ mod tests {
             panic!("{:?}", d.touchdowns)
         };
         assert!((td.sink_fpm - 103.0).abs() < 5.0, "{}", td.sink_fpm);
+        // The wind, when recorded, is the sampled wind resolved on the runway.
+        let source = &c172().touchdowns[0];
+        let speed = c172().flight.at("wind.speed", source.t);
+        let from = c172().flight.at("wind.dir", source.t);
+        match (&td.wind, &source.runway, speed, from) {
+            (Some(w), Some(r), Some(speed), Some(from)) => {
+                let (head, cross) = analyzer::wind_components(speed, from, r.heading_deg);
+                assert_eq!(
+                    (w.speed_kt, w.from_deg, w.headwind_kt, w.crosswind_kt),
+                    (speed, from, head, cross)
+                );
+            }
+            (None, runway, speed, from) => {
+                assert!(runway.is_none() || speed.is_none() || from.is_none());
+            }
+            other => panic!("{other:?}"),
+        }
 
         let s = &d.series;
         let n = s.t_s.len();
@@ -636,6 +699,14 @@ mod tests {
                 && flight.get("damaged_at").is_none()
         );
         assert_eq!(v["phases"][0]["phase"], "Standing");
+        let takeoff = &v["phases"][2];
+        assert_eq!(takeoff["phase"], "Takeoff");
+        let roll = takeoff["trigger"].as_str().unwrap();
+        assert!(roll.starts_with("on the ground above 30 kt ("), "{roll}");
+        // No class: the transport boundaries.
+        let flare = &flight["phase_values"]["flare_ft"];
+        assert_eq!(flare["value"], 50.0);
+        assert_eq!(flare["source"], "transport class default (unknown class)");
         assert_eq!(v["events"][0]["level"], "high");
     }
 
