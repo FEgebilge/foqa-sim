@@ -4,9 +4,10 @@ import { Button } from "@ui/components/button/button";
 import { Tooltip } from "@ui/components/tooltip/tooltip";
 import { bySeverity, eventsIn, landingWindow } from "../../lib/explain";
 import { clock, LEVEL_LABEL, levelRank, M_PER_FT, number } from "../../lib/format";
+import { contactLabel, type Landing } from "../../lib/landings";
 import { levelVar } from "../../lib/palette";
 import { distanceScale, gScale, LIGHT_PITCH, pitchScale, sinkScale, type Scale } from "../../lib/references";
-import type { Debrief, FlightEvent, Level, Touchdown } from "../../types";
+import type { Debrief, FlightEvent, Level, TouchdownWind } from "../../types";
 import { LevelBadge } from "../level";
 import { RunwayDiagram } from "./RunwayDiagram";
 
@@ -15,8 +16,9 @@ const MEASURE_OF: Record<string, string> = { "td.sink": "sink", "td.peak_g": "g"
 
 interface Props {
   index: number;
-  touchdown: Touchdown;
-  /** Events at the touchdown itself; they flag the measure they judged. */
+  /** The first contact is graded; the bounces are listed. */
+  landing: Landing;
+  /** Events at the landing's contacts; they flag the measure they judged. */
   events: FlightEvent[];
   runwayWidth?: number;
   /** The whole debrief: the approach's events, the class and the type profile's references. */
@@ -24,7 +26,7 @@ interface Props {
   onShow: (t: number) => void;
 }
 
-export function LandingCard({ index, touchdown: td, events, runwayWidth, debrief, onShow }: Props) {
+export function LandingCard({ index, landing: { touchdown: td, bounces }, events, runwayWidth, debrief, onShow }: Props) {
   // A measure is flagged with the most severe event that judged it.
   const flags = new Map<string, Level>();
   for (const event of events) {
@@ -44,6 +46,7 @@ export function LandingCard({ index, touchdown: td, events, runwayWidth, debrief
       <header className="flex flex-wrap items-center gap-2">
         <h3 id={`landing-${index}`} className="font-display text-base font-semibold">Landing {index + 1}</h3>
         <span className="readout text-xs text-fg-3">T+{clock(td.t_s)}</span>
+        {bounces.length ? <span className="readout rounded-sm bg-muted px-1.5 text-xs" style={flags.has("bounce") ? { color: levelVar(flags.get("bounce")!) } : undefined}>Bounced ×{bounces.length}</span> : null}
         {fix ? <span className="readout rounded-sm bg-muted px-1.5 text-xs">{fix.icao} {fix.runway}</span> : null}
         <span className="ml-auto"><LevelBadge level={worst} /></span>
       </header>
@@ -79,8 +82,23 @@ export function LandingCard({ index, touchdown: td, events, runwayWidth, debrief
         <Metric label="Speed" value={td.ias_kt !== undefined ? `${number(td.ias_kt)} kt` : "–"} sub="indicated">
           <Note text="Compare with your reference speed (Vref); it is not recorded." />
         </Metric>
-        <Metric label="Bounce" value={td.bounce ? "Yes" : "No"} flag={flags.get("bounce")}>
-          <p className="text-[11px] text-fg-2">{td.bounce ? "Left the ground again after the first contact" : "Stayed on the ground after the first contact"}</p>
+        {td.wind ? (
+          <Metric label="Wind" value={windValue(td.wind)} sub="at touchdown">
+            <Note text={windComponents(td.wind)} />
+          </Metric>
+        ) : null}
+        <Metric label="Bounce" value={bounces.length ? `Yes, ×${bounces.length}` : "No"} flag={flags.get("bounce")}>
+          <p className="text-[11px] text-fg-2">{bounces.length ? "One landing: the aircraft left the ground again after the first contact. The values above are the first contact's." : "Stayed on the ground after the first contact"}</p>
+          {bounces.length ? (
+            <ul className="mt-1 flex flex-col gap-0.5">
+              {bounces.map((b, k) => (
+                <li key={b.t_s} className="readout flex flex-wrap items-baseline gap-x-3 text-[11px] text-fg-2">
+                  <span className="font-semibold text-fg">{contactLabel(index, k + 1)}</span>
+                  <span>T+{clock(b.t_s)}</span><span>{number(b.sink_fpm)} fpm</span><span>{number(b.peak_g, 2)} g</span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
         </Metric>
       </dl>
 
@@ -107,6 +125,18 @@ export function LandingCard({ index, touchdown: td, events, runwayWidth, debrief
       </div>
     </article>
   );
+}
+
+/** "290° 17 kt · 3 kt tail · 17 kt from the right", on the runway. */
+/** "270° 3 kt": where it blew from at contact. */
+function windValue({ from_deg, speed_kt }: TouchdownWind) {
+  return `${String(Math.round(from_deg) % 360).padStart(3, "0")}° ${number(speed_kt)} kt`;
+}
+
+/** The wind on the runway: "0 kt head, 3 kt crosswind from the right". */
+function windComponents({ headwind_kt, crosswind_kt }: TouchdownWind) {
+  const head = Math.round(headwind_kt), cross = Math.round(crosswind_kt);
+  return `On the runway: ${Math.abs(head)} kt ${head < 0 ? "tailwind" : "headwind"}, ${Math.abs(cross)} kt crosswind${cross > 0 ? " from the right" : cross < 0 ? " from the left" : ""}.`;
 }
 
 function Metric({ label, value, sub, flag, children }: { label: string; value: string; sub?: string; flag?: Level; children?: ReactNode }) {

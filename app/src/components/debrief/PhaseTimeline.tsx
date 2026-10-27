@@ -1,14 +1,18 @@
 import { useCallback, useRef, type MouseEvent, type ReactNode } from "react";
 import { Tooltip } from "@ui/components/tooltip/tooltip";
 import { clock, LEVEL_LABEL, phaseName } from "../../lib/format";
+import { contacts, groupLandings } from "../../lib/landings";
 import { levelVar } from "../../lib/palette";
 import { tickStep, useElementWidth, useHover, type TimeBus, type TimeRange } from "../../lib/time";
-import type { FlightEvent, PhaseSpan, Touchdown } from "../../types";
+import type { Debrief, FlightEvent, PhaseSpan, Touchdown } from "../../types";
+import { PhasesPanel } from "./PhasesPanel";
 
 const CODES: Record<string, string> = { Standing: "STD", Taxi: "TXI", Takeoff: "TOF", InitialClimb: "ICL", EnRoute: "ENR", Approach: "APR", Landing: "LDG", GoAround: "GA" };
 
 interface Props {
   phases: PhaseSpan[];
+  /** The boundary values in effect, for the explanation panel. */
+  phaseValues: Debrief["flight"]["phase_values"];
   events: FlightEvent[];
   touchdowns: Touchdown[];
   range: TimeRange;
@@ -27,7 +31,7 @@ interface Props {
  * The flight at a glance: contiguous CICTT phases on one bar, events above it, touchdowns below.
  * Click the bar to put the cursor at a time; click a phase name to zoom the charts to it.
  */
-export function PhaseTimeline({ phases, events, touchdowns, range, focus, view, selected, bus, onFocus, onZoom, onSelectEvent, controls }: Props) {
+export function PhaseTimeline({ phases, phaseValues, events, touchdowns, range, focus, view, selected, bus, onFocus, onZoom, onSelectEvent, controls }: Props) {
   const [barRef, width] = useElementWidth<HTMLDivElement>();
   const hoverRef = useRef<HTMLDivElement>(null);
   const [t0, t1] = range;
@@ -97,10 +101,13 @@ export function PhaseTimeline({ phases, events, touchdowns, range, focus, view, 
         {phases.map((phase, index) => {
           const w = px(phase.end_s - phase.start_s);
           return (
-            <div key={index} className="absolute inset-y-0 flex items-center overflow-hidden border-r border-[var(--surface)] px-1.5"
-              style={{ left: pct(phase.start_s), width: share(phase.end_s - phase.start_s), background: `color-mix(in oklab, var(--phase-${phase.phase}, var(--phase-unknown)) 78%, var(--surface))` }}>
-              <span className="readout truncate text-[11px] font-semibold text-[oklch(18%_.03_258)]">{w > 90 ? phaseName(phase.phase) : w > 30 ? CODES[phase.phase] ?? "" : ""}</span>
-            </div>
+            <Tooltip key={index} content={<PhaseTip phase={phase} />}>
+              <div tabIndex={0} aria-label={`${phaseName(phase.phase)}, ${clock(phase.start_s)} to ${clock(phase.end_s)}. Started: ${phase.trigger}`}
+                className="absolute inset-y-0 flex items-center overflow-hidden border-r border-[var(--surface)] px-1.5 outline-offset-[-2px] focus-visible:outline-2 focus-visible:outline-[var(--foreground)]"
+                style={{ left: pct(phase.start_s), width: share(phase.end_s - phase.start_s), background: `color-mix(in oklab, var(--phase-${phase.phase}, var(--phase-unknown)) 78%, var(--surface))` }}>
+                <span className="readout truncate text-[11px] font-semibold text-[oklch(18%_.03_258)]">{w > 90 ? phaseName(phase.phase) : w > 30 ? CODES[phase.phase] ?? "" : ""}</span>
+              </div>
+            </Tooltip>
           );
         })}
         {view ? <div className="pointer-events-none absolute inset-y-0 border-x-2 border-[var(--foreground)] bg-[color-mix(in_oklab,var(--foreground)_10%,transparent)]" style={{ left: pct(view[0]), width: share(view[1] - view[0]) }} /> : null}
@@ -116,15 +123,16 @@ export function PhaseTimeline({ phases, events, touchdowns, range, focus, view, 
         {ticks.map((t) => (
           <span key={t} className="readout absolute top-4 -translate-x-1/2 text-[10px] text-fg-3" style={{ left: pct(t) }}>{clock(t)}</span>
         ))}
-        {touchdowns.map((td, index) => (
-          <button key={td.t_s} type="button" onClick={() => onFocus(td.t_s)} className="absolute top-0 -translate-x-1/2 cursor-pointer" style={{ left: pct(td.t_s) }} aria-label={`Touchdown ${index + 1} at ${clock(td.t_s)}`}>
-            <span className="readout flex items-center gap-0.5 rounded-sm bg-fg px-1 text-[10px] leading-4 font-semibold text-bg">TD{index + 1}</span>
+        {contacts(groupLandings(touchdowns)).map(({ td, label }) => (
+          <button key={td.t_s} type="button" onClick={() => onFocus(td.t_s)} className="absolute top-0 -translate-x-1/2 cursor-pointer" style={{ left: pct(td.t_s) }} aria-label={`${td.bounce ? "Bounce" : "Touchdown"} ${label} at ${clock(td.t_s)}`}>
+            {/* A bounce lands seconds after its landing's label: a tick, so it never hides it. */}
+            {td.bounce ? <span className="block h-4 w-0.5 bg-fg" title={label} /> : <span className="readout flex items-center gap-0.5 rounded-sm bg-fg px-1 text-[10px] leading-4 font-semibold text-bg">{label}</span>}
           </button>
         ))}
       </div>
 
       {/* Phase legend doubles as zoom buttons */}
-      <div className="flex flex-wrap gap-1.5 border-t border-line-subtle pt-2">
+      <div className="flex flex-wrap items-center gap-1.5 border-t border-line-subtle pt-2">
         {phases.map((phase, index) => (
           <button key={index} type="button" onClick={() => onZoom([phase.start_s, phase.end_s])}
             className="inline-flex items-center gap-1.5 rounded-full border border-line px-2 py-0.5 text-xs text-fg-2 hover:border-line-strong hover:text-fg"
@@ -135,6 +143,18 @@ export function PhaseTimeline({ phases, events, touchdowns, range, focus, view, 
           </button>
         ))}
       </div>
+      <div className="mt-2"><PhasesPanel phases={phases} values={phaseValues} /></div>
     </section>
+  );
+}
+
+/** What the hover on a phase says: its name and span, and what opened it. */
+function PhaseTip({ phase }: { phase: PhaseSpan }) {
+  return (
+    <span className="flex flex-col gap-0.5">
+      <span className="font-medium">{phaseName(phase.phase)}</span>
+      <span className="readout opacity-80">{clock(phase.start_s)}–{clock(phase.end_s)} · {clock(phase.end_s - phase.start_s)}</span>
+      <span>Started: {phase.trigger}</span>
+    </span>
   );
 }

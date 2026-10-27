@@ -18,6 +18,8 @@ export interface Api {
   readonly live: boolean;
   listFlights(): Promise<FlightSummary[]>;
   debrief(id: string): Promise<Debrief>;
+  /** Removes the flight's recording files for good; the flight being recorded is refused. */
+  deleteFlight(id: string): Promise<void>;
   recorderStatus(): Promise<RecorderStatus>;
   openFlightsFolder(): Promise<void>;
   storageUsage(): Promise<StorageUsage>;
@@ -34,6 +36,7 @@ const tauriApi: Api = {
   live: true,
   listFlights: () => invoke<FlightSummary[]>("list_flights"),
   debrief: (id) => invoke<Debrief>("debrief", { id }),
+  deleteFlight: (id) => invoke<void>("delete_flight", { id }),
   recorderStatus: () => invoke<RecorderStatus>("recorder_status"),
   openFlightsFolder: () => invoke<void>("open_flights_folder"),
   storageUsage: () => invoke<StorageUsage>("storage_usage"),
@@ -62,18 +65,23 @@ const mockFiles = (name: string) => (params.has("samples") ? [`/mock/sample-${na
 /** `?many=150` repeats the mock list to that length, to try search and sort at scale. Copies open their original's debrief. */
 const many = Number(params.get("many") ?? 0);
 const COPY = "~";
+/** Mock flights "deleted" in this page session. */
+const deleted = new Set<string>();
 
 const mockApi: Api = {
   live: false,
   async listFlights() {
     const flights = await firstJson<FlightSummary[]>(mockFiles("flights.json"));
-    if (!(many > flights.length)) return flights;
+    if (!(many > flights.length)) return flights.filter((f) => !deleted.has(f.id));
     return Array.from({ length: many }, (_, index) => {
       const base = flights[index % flights.length]!;
       if (index < flights.length) return base;
       const started = base.started_utc ? new Date(Date.parse(base.started_utc) - index * 86_400_000 * 0.7).toISOString() : undefined;
       return { ...base, id: `${base.id}${COPY}${index}`, started_utc: started };
-    });
+    }).filter((f) => !deleted.has(f.id));
+  },
+  async deleteFlight(id) {
+    deleted.add(id);
   },
   debrief: (id) => firstJson<Debrief>(mockFiles(`debrief-${id.split(COPY)[0]}.json`)),
   async recorderStatus() {

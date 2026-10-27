@@ -2,6 +2,7 @@
 // (`detail`) come from its rule.
 import type { Debrief, FlightEvent, PhaseSpan } from "../types";
 import { LEVEL_LABEL, LEVELS, number } from "./format";
+import { groupLandings } from "./landings";
 
 /** The events, the most severe first, then the earliest. */
 export const bySeverity = (events: FlightEvent[]) => LEVELS.flatMap((level) => events.filter((e) => e.level === level));
@@ -17,11 +18,12 @@ export const eventsIn = (events: FlightEvent[], [start, end]: [number, number]) 
 /** One sentence: the worst level, the key issue and where the aircraft landed. */
 export function verdict({ flight, events, touchdowns }: Debrief) {
   const key = bySeverity(events)[0];
-  const runway = touchdowns.at(-1)?.runway;
-  const landed = !touchdowns.length ? "no landing recorded"
+  const landingList = groupLandings(touchdowns);
+  const runway = landingList.at(-1)?.touchdown.runway;
+  const landed = !landingList.length ? "no landing recorded"
     : runway ? `landed on runway ${runway.runway} at ${runway.icao}`
       : `landed${flight.arrival ? ` at ${flight.arrival}` : ""}, runway not identified`;
-  const landings = touchdowns.length > 1 ? ` (${touchdowns.length} touchdowns)` : "";
+  const landings = landingList.length > 1 ? ` (${landingList.length} landings)` : "";
   if (!key) return `Clean flight: no rule exceeded; ${landed}${landings}.`;
   const same = events.filter((e) => e.level === key.level).length - 1;
   const more = same ? `, plus ${number(same)} more ${LEVEL_LABEL[key.level].toLowerCase()} event${same > 1 ? "s" : ""}` : "";

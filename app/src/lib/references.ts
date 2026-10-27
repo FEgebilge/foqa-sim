@@ -1,6 +1,6 @@
 // Sourced context for the landing card and charts, display only (events come from the rules, type limits from the profile).
 // A "reference" is published (manufacturer, regulator, ICAO/FAA); a "sim comfort band" is a flight-sim community convention.
-import type { Debrief, RunwayFix } from "../types";
+import type { Debrief, RunwayFix, Sourced } from "../types";
 import { M_PER_FT, number } from "./format";
 
 type Flight = Debrief["flight"];
@@ -25,6 +25,10 @@ const SRC = {
   poh: "Cessna 172S POH: land on the main wheels first, then lower the nosewheel gently",
 } as const;
 
+/** "(type profile)", or "(≈ type profile)" for an approximate value. */
+const fromProfile = (s: Sourced) => s.approximate ? "(≈ type profile)" : "(type profile)";
+const sourceOf = (s: Sourced) => s.approximate && s.note ? `${s.source}. Approximate: ${s.note}` : s.source;
+
 const comfort = (source: string, ...bands: [label: string, to: number][]): Comfort =>
   ({ source, bands: bands.map(([label, to]) => ({ label, to })) });
 
@@ -41,7 +45,7 @@ export function sinkScale(flight: Flight): Scale | null {
 /** The type's hard-landing inspection load, from its profile. */
 export function hardLanding(flight: Flight): Mark | null {
   const hard = flight.profile_limits?.hard_landing_g;
-  return hard ? { at: hard.value, label: `${hard.value} g: hard-landing inspection (type profile)`, source: hard.source } : null;
+  return hard ? { at: hard.value, label: `${hard.value} g: hard-landing inspection ${fromProfile(hard)}`, source: sourceOf(hard) } : null;
 }
 
 /** Peak normal load at touchdown, total g (1 g in level flight): the type's hard-landing load and the class's sim comfort bands. */
@@ -56,7 +60,7 @@ export function gScale(flight: Flight): Scale | null {
 export function pitchScale(flight: Flight): Scale | null {
   const tail = flight.profile_limits?.tail_landing_pitch, marks: Mark[] = [];
   if (flight.class === "transport") marks.push({ at: 4, to: 7, label: "Boeing 4-7° nose up at touchdown", source: SRC.fctmPitch });
-  if (tail) marks.push({ at: tail.value, label: `Tail contact at ${tail.value}° (type profile)`, source: tail.source });
+  if (tail) marks.push({ at: tail.value, label: `Tail contact at ${tail.value}° ${fromProfile(tail)}`, source: sourceOf(tail) });
   return marks.length ? { min: 0, max: Math.max(10, (tail?.value ?? 0) + 1), marks } : null;
 }
 export const LIGHT_PITCH = { text: "Target: main wheels first, nosewheel held off", source: SRC.poh };

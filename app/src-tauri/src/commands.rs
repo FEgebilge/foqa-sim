@@ -4,11 +4,13 @@
 use std::io;
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 
 use ::debrief::{Debrief, FlightSummary, Index, RecorderStatus, Station, StorageUsage};
-use capture::Stopper;
+use capture::{ASK_TIMEOUT, InitPosition, SimRequests, Start, Stopper};
+use challenge::{Challenge, Mode, StartState};
 use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
 
@@ -26,6 +28,8 @@ pub struct Shared {
     pub setup: Setup,
     /// The flight list, analysed once per flight file; the recorder's.
     index: Arc<Index>,
+    /// Requests to the sim through the recorder's connection.
+    sim: SimRequests,
 }
 
 impl Shared {
@@ -36,8 +40,10 @@ impl Shared {
         index: Arc<Index>,
         recorder: JoinHandle<()>,
         setup: Setup,
+        sim: SimRequests,
     ) -> Self {
         Self {
+            sim,
             station,
             status: Mutex::new(RecorderStatus::WaitingForSim),
             stopper,
@@ -56,6 +62,18 @@ impl Shared {
     /// Every stored flight in the folder, the most recently written first.
     pub fn summaries(&self) -> Vec<FlightSummary> {
         self.index.summaries(&self.station)
+    }
+
+    /// Deletes a stored flight's files for good, unless it is the one being
+    /// recorded.
+    fn delete(&self, id: &str) -> Result<(), String> {
+        self.flight(id)?;
+        if matches!(&*lock(&self.status), RecorderStatus::Recording { flight_id, .. } if flight_id == id)
+        {
+            return Err(format!("{id} is being recorded"));
+        }
+        ::debrief::delete_flight(&self.dir, id).map_err(|e| format!("{id}: {e}"))?;
+        Ok(())
     }
 
     fn setup_status(&self) -> SetupStatus {
@@ -103,6 +121,56 @@ pub async fn debrief(id: String, shared: State<'_, Arc<Shared>>) -> Result<Debri
         Ok(analysis.map_err(|e| format!("{id}: {e}"))?.debrief())
     })
     .await
+}
+
+#[tauri::command]
+pub async fn delete_flight(id: String, shared: State<'_, Arc<Shared>>) -> Result<(), String> {
+    let shared = Arc::clone(&shared);
+    blocking(move || shared.delete(&id)).await
+}
+
+/// Places the aircraft at a landing challenge's start (docs/challenges.md):
+/// the airport from the sim, the start on its extended centreline.
+#[tauri::command]
+pub async fn place_challenge(
+    definition: String,
+    shared: State<'_, Arc<Shared>>,
+) -> Result<StartState, String> {
+    let shared = Arc::clone(&shared);
+    blocking(move || {
+        let challenge = Challenge::parse(&definition)?;
+        if challenge.start.mode != Mode::Teleport {
+            return Err("this challenge starts wherever you fly it from".into());
+        }
+        let airport = answer(shared.sim.airport(&challenge.airport))?;
+        let s = challenge::start_state(&challenge, &airport)
+            .ok_or_else(|| format!("{} has no runway {}", challenge.airport, challenge.runway))?;
+        let pos = InitPosition {
+            latitude_deg: s.lat_deg,
+            longitude_deg: s.lon_deg,
+            altitude_ft: s.alt_ft,
+            pitch_deg: 0.0,
+            bank_deg: 0.0,
+            heading_deg: s.heading_deg,
+            on_ground: 0,
+            airspeed_kt: s.ias_kt.round() as u32,
+        };
+        let start = Start {
+            pos,
+            gear_down: challenge.start.gear_down,
+            flaps: Some(challenge.start.flaps),
+        };
+        answer(shared.sim.place(start))?;
+        Ok(s)
+    })
+    .await
+}
+
+/// The sim's answer to a request; an error without one in `ASK_TIMEOUT`,
+/// after which the service refuses the request too.
+fn answer<T>(answer: Receiver<Result<T, String>>) -> Result<T, String> {
+    let wait = answer.recv_timeout(ASK_TIMEOUT);
+    wait.map_err(|_| "no answer from the sim: is it running?".to_owned())?
 }
 
 #[tauri::command]

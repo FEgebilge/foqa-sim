@@ -1,7 +1,7 @@
 // Writes a synthetic sample flight list and debriefs to public/mock/sample-*.json in the shape `fdm debrief --json` writes
 // (docs/debrief-api.md); event texts and details come from rules/core.yaml. Only for developing the UI in a browser before
 // real data exists; the API layer prefers flights.json / debrief-<id>.json.
-// A C172 flies two left-hand circuits on LTFA runway 35: a bounced touch-and-go, then a long full-stop landing.
+// A C172 flies two left-hand circuits on LTFA runway 35: a touch-and-go that bounces once (two contacts, one landing), then a long full-stop landing.
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
@@ -23,6 +23,12 @@ function detail(rule, value, threshold, unit, vars = {}) {
   return template?.replace(/\{([^}]+)\}/g, (_, name) => (name === "value" ? show(value, unit, extra) : name === "threshold" ? show(threshold, unit) : show(...vars[name])))
 }
 const KT = 0.514444, FT = 0.3048, G = 9.80665, DEG = Math.PI / 180
+/** Wind at contact on the runway as the debrief states it: headwind (tail negative), crosswind (from the right positive). */
+const WIND_KT = 14, WIND_FROM = 15
+const runwayWind = (speed_kt, from_deg) => {
+  const a = (from_deg - 350) * Math.PI / 180
+  return { from_deg, speed_kt, headwind_kt: Math.round(speed_kt * Math.cos(a) * 10) / 10, crosswind_kt: Math.round(speed_kt * Math.sin(a) * 10) / 10 }
+}
 const THR35 = { lat: 38.4985, lon: 27.0128 }, HDG = 350, LDA = 2950, ELEV_FT = 15
 const TDZ = Math.min(3000 * FT, LDA / 3)
 
@@ -127,26 +133,49 @@ function generate({ bounce = true, overspeed = true, secondAlong = 1150, radius 
     x.nz = 1 / Math.cos(x.roll * DEG) + 0.01 * Math.sin(x.t * 7.3)
     tds.forEach((i) => { const k = (x.t - raw[i].t) / 0.15; x.nz += (i === mains[1] ? peaks[1] - 1 : peaks[0] - 1) * Math.exp(-k * k) * (i === tds[1] && bounce && tds.length > 2 ? 0.4 : 1) })
   }
-  return { raw, mains, peaks, keys, N, td1, td2 }
+  return { raw, tds, mains, peaks, keys, N, td1, td2 }
 }
 
-function phaseOf(x, ctx) {
+/** The phase at sample `x`, the flare from `flareFt` above the runway. */
+function phaseOf(x, ctx, flareFt) {
   if (x.t < 40) return "Standing"
   if (x.s < ctx.N[1]) return "Taxi"
   if (x.gsKt === 0) return "Standing"
+  if (x.h <= 0.05 && x.s < ctx.td1 && x.gsKt < 30) return "Taxi"
   if (x.s > ctx.td2 && x.gsKt < 30) return "Taxi"
   if (x.h <= 0.05) return x.s > ctx.td1 + 280 && x.s < ctx.td2 - 300 ? "Takeoff" : x.s >= ctx.td1 - 200 ? "Landing" : "Takeoff"
-  if (x.s > ctx.td1 - 200 && x.s < ctx.td1 + 280) return "Landing"
+  if (x.s > ctx.td1 - 200 && x.s < ctx.td1 + 280 && (x.s > ctx.td1 || x.h < flareFt * FT)) return "Landing"
   if (x.h < 35 * FT && x.vs > 0) return "Takeoff"
-  if (x.h < 15 && x.vs <= 0) return "Landing"
+  if (x.h < flareFt * FT && x.vs <= 0) return "Landing"
   if (x.vs > 150 && x.h < 1000 * FT - 1) return "InitialClimb"
   if (x.vs < -150 || x.h < 1000 * FT - 3) return x.vs > 150 ? "InitialClimb" : "Approach"
   return "EnRoute"
 }
 
+/** The phase boundaries in effect (`phase_values`): none of these profiles moves its class's defaults (docs/phases.md). */
+function phaseValues(cls) {
+  const values = { approach_ft: 1000, climb_end_ft: 1000, flare_ft: cls === "light" ? 20 : 50, go_around_drop_ft: 50, go_around_rise_ft: 200, roll_kt: 30 }
+  return Object.fromEntries(Object.entries(values).map(([k, value]) => [k, { value, source: `${cls} class default` }]))
+}
+
+/** What opened a phase at sample `x`, worded as crates/debrief/src/lib.rs `phase_trigger`: a value that would read as its threshold gets a decimal. */
+function trigger(phase, prev, x, values) {
+  const n = (v, th) => (v.toFixed(0) === String(th) ? v.toFixed(1) : v.toFixed(0))
+  const ft = x.h / FT, kt = x.gsKt, flare = values.flare_ft.value
+  return {
+    Standing: `stopped, under 2 kt on the ground (${n(kt, 2)} kt)`,
+    Taxi: `moving on the ground under 30 kt (${n(kt, 30)} kt)`,
+    Takeoff: prev === "Landing" ? `lowest speed of the touch-and-go roll, takeoff power applied (${n(kt)} kt)` : `on the ground above 30 kt (${n(kt, 30)} kt)`,
+    InitialClimb: `35 ft above the runway (${n(ft, 35)} ft RA)`,
+    EnRoute: `climbing through 1000 ft above the aerodrome (${n(ft, 1000)} ft AAL)`,
+    Approach: `descending through 1000 ft above the aerodrome (${n(ft, 1000)} ft AAL)`,
+    Landing: `flare, below ${flare} ft above the runway (${n(ft, flare)} ft RA)`,
+  }[phase]
+}
+
 function build(id, opts = {}) {
   const ctx = generate(opts)
-  const { raw, mains, peaks } = ctx
+  const { raw, tds, mains, peaks } = ctx
   const near = (t) => mains.some((i) => Math.abs(t - raw[i].t) <= 10)
   const keep = raw.filter((x) => Math.abs(x.t * 2 - Math.round(x.t * 2)) < 1e-6 || near(x.t))
   const cut = opts.damagedAt ? keep.findIndex((x) => x.t > opts.cutAt) : -1
@@ -172,22 +201,25 @@ function build(id, opts = {}) {
   }
   if (opts.noPosition) series.lat = series.lat.map((v, i) => (i % 400 < 10 ? null : v))
 
+  const phase_values = phaseValues(opts.class)
   const phases = []
   for (const x of samples) {
-    const phase = phaseOf(x, ctx)
+    const phase = phaseOf(x, ctx, phase_values.flare_ft.value)
     const last = phases.at(-1)
     if (last?.phase === phase) last.end_s = r1(x.t, 3)
-    else { if (last) last.end_s = r1(x.t, 3); phases.push({ phase, start_s: r1(x.t, 3), end_s: r1(x.t, 3) }) }
+    else { if (last) last.end_s = r1(x.t, 3); phases.push({ phase, start_s: r1(x.t, 3), end_s: r1(x.t, 3), trigger: trigger(phase, last?.phase, x, phase_values) }) }
   }
 
   const lastT = samples.at(-1).t
   const withRunway = !opts.noRunway
-  const touchdowns = mains.filter((i) => raw[i].t <= lastT).map((i, k) => {
-    const x = raw[i], before = raw[i - 5]
+  // Every ground contact; with a bounce, the one between the two mains is the first landing's second contact.
+  const touchdowns = tds.filter((i) => raw[i].t <= lastT).map((i) => {
+    const x = raw[i], before = raw[i - 5], isBounce = !mains.includes(i), k = i === mains[0] ? 0 : 1
     const sink = Math.round(-before.vs)
     return {
-      t_s: r1(x.t, 3), bounce: k === 0 && opts.bounce !== false, sink_fpm: sink, sim_sink_fpm: Math.round(sink * 0.93),
-      peak_g: peaks[k], pitch_deg: r1(before.pitch), roll_deg: r1(before.roll), ias_kt: r1(x.ias),
+      t_s: r1(x.t, 3), bounce: isBounce, sink_fpm: sink, sim_sink_fpm: Math.round(sink * 0.93),
+      peak_g: isBounce ? 1.45 : peaks[k], pitch_deg: r1(before.pitch), roll_deg: r1(before.roll), ias_kt: r1(x.ias),
+      wind: withRunway ? runwayWind(WIND_KT, WIND_FROM + k * 10) : undefined,
       runway: withRunway ? (() => {
         const cross = k === 0 ? -2.8 : opts.secondCross ?? 9.5
         return { icao: "LTFA", runway: "35", along_m: Math.round(x.a), cross_m: cross, lda_m: LDA, tdz_m: Math.round(TDZ), aiming_point_m: 400, in_tdz: x.a >= 0 && x.a <= TDZ, long_landing: x.a > TDZ, short_landing: x.a < 0, zone: x.a < 0 ? "Short" : x.a > TDZ ? "Long" : "In TDZ" }
@@ -219,8 +251,8 @@ function build(id, opts = {}) {
   }
   for (const td of touchdowns) {
     const at = { start: td.t_s }
+    if (td.bounce) { add({ rule: "bounced-landing", ...at, level: "medium", measure: "td.bounce" }); continue }
     if (td.peak_g > 1.8) add({ rule: "hard-landing-light", ...at, measure: "td.peak_g", value: td.peak_g, levels: { low: 1.8, medium: 2.2, high: 2.6 }, unit: "g" })
-    if (td.bounce) add({ rule: "bounced-landing", ...at, level: "medium", measure: "td.bounce" })
     if (td.runway?.long_landing) add({ rule: "long-landing", ...at, level: "medium", measure: "td.long_landing" })
     const crossFt = td.runway ? r1(Math.abs(td.runway.cross_m) / FT) : 0
     if (crossFt > 25) add({ rule: "off-centreline-touchdown", ...at, measure: "abs(td.cross)", value: crossFt, levels: { low: 25, medium: 40, high: 60 }, unit: "ft" })
@@ -231,14 +263,28 @@ function build(id, opts = {}) {
   const counts = { advisory: 0, low: 0, medium: 0, high: 0 }
   ordered.forEach((e) => counts[e.level]++)
   const worst = ["high", "medium", "low", "advisory"].find((l) => counts[l] > 0)
+  // Each rule counts once, at its worst level: high 4 points, medium 2, low 1, advisory 0 (crates/debrief/src/wire.rs).
+  const POINTS = { high: 4, medium: 2, low: 1, advisory: 0 }
+  const worstOf = {}
+  for (const e of ordered) {
+    const part = worstOf[e.rule] ??= { rule: e.rule, title: e.title, level: e.level, points: 0, count: 0 }
+    if (POINTS[e.level] > POINTS[part.level]) part.level = e.level
+    part.count++
+    part.points = POINTS[part.level]
+  }
+  // As Assessment::parts: by rule name, then most points first (stable); the bands are Grade::BANDS.
+  const parts = Object.values(worstOf).sort((a, b) => (a.rule < b.rule ? -1 : a.rule > b.rule ? 1 : 0)).sort((a, b) => b.points - a.points)
+  const points = parts.reduce((a, p) => a + p.points, 0)
+  const assessment = { grade: points <= 1 ? "good" : points <= 5 ? "fair" : "poor", points, findings: parts.filter((p) => p.points > 0).length }
+  const assessment_detail = { parts, bands: [{ grade: "good", up_to: 1 }, { grade: "fair", up_to: 5 }, { grade: "poor" }] }
   const summary = {
     id, started_utc: opts.started, duration_s: r1(lastT), aircraft: opts.aircraft,
     departure: "LTFA", arrival: withRunway && touchdowns.length ? "LTFA" : undefined,
-    landings: touchdowns.length, worst_level: worst, event_counts: counts,
+    landings: touchdowns.filter((td) => !td.bounce).length, worst_level: worst, event_counts: counts, assessment,
   }
   const thr17 = toLatLon(LDA, 0)
   const debrief = {
-    flight: { ...summary, lfl_version: 1, profile: opts.profile, class: opts.class, damaged_at: opts.damagedAt },
+    flight: { ...summary, lfl_version: 1, profile: opts.profile, class: opts.class, phase_values, assessment_detail, damaged_at: opts.damagedAt },
     phases, touchdowns, events: ordered, series,
     airports: withRunway ? [{ icao: "LTFA", runways: [{ width_m: 45, ends: [
       { runway: "35", lat: THR35.lat, lon: THR35.lon, heading_deg: HDG, lda_m: LDA, tdz_m: Math.round(TDZ) },

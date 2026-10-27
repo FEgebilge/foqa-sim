@@ -13,6 +13,38 @@ export interface Aircraft {
   title: string;
 }
 
+export type Grade = "good" | "fair" | "poor";
+
+/** The flight graded as a whole: each rule broken counts once at its worst level (high 4 points, medium 2, low 1, advisory 0). */
+export interface Assessment {
+  grade: Grade;
+  points: number;
+  /** Rules broken at low or above. */
+  findings: number;
+}
+
+/** One rule's share of the assessment: its worst level in the flight alone counts. */
+export interface AssessmentPart {
+  rule: string;
+  title: string;
+  level: Level;
+  points: number;
+  /** How many times it fired. */
+  count: number;
+}
+
+/** A grade's reach on the points scale: up to `up_to` inclusive, the last (no `up_to`) any more. */
+export interface GradeBand {
+  grade: Grade;
+  up_to?: number;
+}
+
+/** How the assessment was reached: the parts, most points first, and the scale they are read on. */
+export interface AssessmentDetail {
+  parts: AssessmentPart[];
+  bands: GradeBand[];
+}
+
 export interface FlightSummary {
   id: string;
   started_utc?: string;
@@ -23,12 +55,15 @@ export interface FlightSummary {
   landings: number;
   worst_level?: Level;
   event_counts: Record<Level, number>;
+  assessment: Assessment;
 }
 
 export interface PhaseSpan {
   phase: string;
   start_s: number;
   end_s: number;
+  /** What opened it, with the value there, e.g. "descending through 1000 ft above the aerodrome (998 ft AAL)". */
+  trigger: string;
 }
 
 export interface RunwayFix {
@@ -46,6 +81,9 @@ export interface RunwayFix {
   zone: string;
 }
 
+/** Along the runway (negative headwind = tailwind) and across it (positive = from the right). */
+export interface TouchdownWind { from_deg: number; speed_kt: number; headwind_kt: number; crosswind_kt: number }
+
 export interface Touchdown {
   t_s: number;
   bounce: boolean;
@@ -55,6 +93,8 @@ export interface Touchdown {
   pitch_deg?: number;
   roll_deg?: number;
   ias_kt?: number;
+  /** Wind at contact on the runway; absent without a runway fix or wind data. */
+  wind?: TouchdownWind;
   runway?: RunwayFix;
 }
 
@@ -116,6 +156,8 @@ export interface Airport {
 export interface Sourced {
   value: number;
   source: string;
+  /** The closest value found, not the type's own published one; `note` says how. */
+  approximate?: boolean;
   note?: string;
 }
 
@@ -126,7 +168,13 @@ export interface Debrief {
     class?: "light" | "transport";
     /** The profile's values by rule name, e.g. `hard_landing_g`, `tail_landing_pitch`. */
     profile_limits?: Record<string, Sourced>;
+    /**
+     * The phase boundaries in effect (docs/phases.md), e.g. `flare_ft`, `approach_ft`; `source` is the profile and
+     * its document ("PC12 profile, FAA AIM 4-3-3 …") or the class default ("light class default").
+     */
+    phase_values: Record<string, Sourced>;
     damaged_at?: number;
+    assessment_detail: AssessmentDetail;
   };
   phases: PhaseSpan[];
   touchdowns: Touchdown[];

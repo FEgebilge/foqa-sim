@@ -5,6 +5,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
 import { EmptyState } from "@ui/components/empty-state/empty-state";
 import { phaseName } from "../../lib/format";
+import { contacts, groupLandings } from "../../lib/landings";
 import { levelColor, phaseColor, type Theme } from "../../lib/palette";
 import { indexAt, type TimeBus } from "../../lib/time";
 import type { Debrief, FlightEvent, RunwayEnd } from "../../types";
@@ -197,9 +198,9 @@ export default function FlightMap({ debrief, theme, focus, selected, bus, onFocu
         return new Marker({ element: el }).setLngLat(offset(end, -Math.sin(back) * 90, -Math.cos(back) * 90)).addTo(map);
       }))),
       ...arrows(track, 18).map(({ at, deg }) => new Marker({ element: marker("pointer-events-none text-fg", '<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1 L11 10 L6 7.5 L1 10 Z" fill="currentColor" stroke="var(--surface)" stroke-width="1"/></svg>'), rotation: deg, rotationAlignment: "map" }).setLngLat(at).addTo(map)),
-      ...debrief.touchdowns.flatMap((td, index) => {
+      ...contacts(groupLandings(debrief.touchdowns)).flatMap(({ td, label }) => {
         const p = positionAt(debrief, td.t_s);
-        return p ? [new Marker({ element: marker("readout pointer-events-none rounded-sm bg-fg px-1 text-[10px] leading-4 font-semibold text-bg", `TD${index + 1}`), anchor: "bottom", offset: [0, -8] }).setLngLat(p).addTo(map)] : [];
+        return p ? [new Marker({ element: marker("readout pointer-events-none rounded-sm bg-fg px-1 text-[10px] leading-4 font-semibold text-bg", label), anchor: "bottom", offset: [0, -8] }).setLngLat(p).addTo(map)] : [];
       }),
     ];
 

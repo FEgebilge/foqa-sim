@@ -1,4 +1,4 @@
-import type { Aircraft, FlightEvent, Level } from "../types";
+import type { Aircraft, Assessment, FlightEvent, Grade, Level } from "../types";
 
 /** Most severe first. */
 export const LEVELS: Level[] = ["high", "medium", "low", "advisory"];
@@ -10,6 +10,12 @@ export const LEVEL_MEANING: Record<Level, string> = {
   low: "A minor deviation, just past the first threshold.",
   advisory: "Recorded for context, not a fault.",
 };
+/** Best first. */
+export const GRADES: Grade[] = ["good", "fair", "poor"];
+export const GRADE_LABEL: Record<Grade, string> = { good: "Good", fair: "Fair", poor: "Poor" };
+/** "Fair · 4 pts from 2 findings"; the points count each broken rule once, at its worst level. */
+export const assessmentText = ({ grade, points, findings }: Assessment) =>
+  `${GRADE_LABEL[grade]} · ${points} pt${points === 1 ? "" : "s"} from ${findings} finding${findings === 1 ? "" : "s"}`;
 /** Higher is more severe; for sorting. */
 export const levelRank = (level?: Level) => (level ? 4 - LEVELS.indexOf(level) : 0);
 

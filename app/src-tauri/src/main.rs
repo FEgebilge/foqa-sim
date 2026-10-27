@@ -45,6 +45,8 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             commands::list_flights,
             commands::debrief,
+            commands::delete_flight,
+            commands::place_challenge,
             commands::recorder_status,
             commands::open_flights_folder,
             commands::storage_usage,
@@ -60,14 +62,27 @@ fn main() {
             // FOQA_RAW=1 also keeps raw captures, to replay through a changed chain.
             let service = Service::new(dir.clone(), Arc::clone(&station))?
                 .raw(std::env::var_os("FOQA_RAW").is_some());
-            let (stopper, index) = (service.stopper(), service.index());
+            let (stopper, index, sim) =
+                (service.stopper(), service.index(), service.sim_requests());
             let (tx, rx) = mpsc::channel();
             let recorder = thread::Builder::new()
                 .name("recorder".into())
                 .spawn(move || service.run(tx))?;
             let setup = Setup::new(app.path().app_config_dir()?, app.path().resource_dir().ok());
-            let shared = Arc::new(Shared::new(station, dir, stopper, index, recorder, setup));
+            let shared = Arc::new(Shared::new(
+                station, dir, stopper, index, recorder, setup, sim,
+            ));
             app.manage(Arc::clone(&shared));
+            // After an update, the in-sim packages follow the app's version.
+            let refresh = Arc::clone(&shared);
+            thread::spawn(move || {
+                for (name, result) in refresh.setup.refresh() {
+                    match result {
+                        Ok(()) => eprintln!("{name}: brought up to date"),
+                        Err(e) => eprintln!("{name}: could not be brought up to date: {e}"),
+                    }
+                }
+            });
             // Brings the flight list's index up to date before it is asked for.
             let warm = Arc::clone(&shared);
             thread::spawn(move || warm.summaries());

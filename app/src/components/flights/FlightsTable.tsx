@@ -1,13 +1,16 @@
-import { ArrowRight } from "lucide-react";
+import { useMemo } from "react";
+import { ArrowRight, Trash2 } from "lucide-react";
+import { Button } from "@ui/components/button/button";
+import { Tooltip } from "@ui/components/tooltip/tooltip";
 import { SortableDataTable, type DataColumn, type SortState } from "@ui/components/sortable-data-table/sortable-data-table";
 import { duration, flightDate, flightTimeUtc } from "../../lib/format";
 import { flightHref, openFlight } from "../../lib/route";
 import type { FlightRow } from "./flight-row";
-import { EventCounts, LevelBadge } from "../level";
+import { EventCounts, GradeBadge } from "../level";
 
 const Airport = ({ icao }: { icao?: string }) => <span className={icao ? "readout" : "text-fg-3"}>{icao ?? "----"}</span>;
 
-const columns: DataColumn<FlightRow>[] = [
+const columnsFor = (onDelete: (row: FlightRow) => void, recordingId?: string): DataColumn<FlightRow>[] => [
   {
     key: "date", label: "Date", width: 150, numeric: false,
     render: (_, row) => (
@@ -36,13 +39,28 @@ const columns: DataColumn<FlightRow>[] = [
       </span>
     ),
   },
-  { key: "worst", label: "Worst level", width: 130, render: (_, row) => <LevelBadge level={row.flight.worst_level} /> },
+  { key: "assessment", label: "Assessment", width: 150, render: (_, row) => <GradeBadge assessment={row.flight.assessment} /> },
   { key: "duration", label: "Duration", width: 110, numeric: true, render: (_, row) => <span className="readout">{duration(row.duration)}</span> },
   { key: "landings", label: "Landings", width: 115, numeric: true, render: (_, row) => <span className="readout">{row.landings}</span> },
   { key: "events", label: "Events", width: 160, render: (_, row) => <EventCounts counts={row.flight.event_counts} /> },
+  {
+    key: "actions", label: "Actions", width: 64, sortable: false, compact: "actions",
+    render: (_, row) => {
+      const recording = row.id === recordingId;
+      const label = recording ? "This flight is being recorded" : `Delete flight ${flightDate(row.flight.started_utc)} ${row.aircraft}`;
+      return (
+        <Tooltip content={recording ? label : "Delete flight"}>
+          <Button variant="ghost" size="sm" iconOnly label={label} disabled={recording} onClick={() => onDelete(row)}><Trash2 size={15} aria-hidden="true" /></Button>
+        </Tooltip>
+      );
+    },
+  },
 ];
 
-export function FlightsTable({ rows, sort, onSortChange }: { rows: FlightRow[]; sort: SortState; onSortChange: (sort: SortState) => void }) {
+interface Props { rows: FlightRow[]; sort: SortState; onSortChange: (sort: SortState) => void; onDelete: (row: FlightRow) => void; recordingId?: string }
+
+export function FlightsTable({ rows, sort, onSortChange, onDelete, recordingId }: Props) {
+  const columns = useMemo(() => columnsFor(onDelete, recordingId), [onDelete, recordingId]);
   return (
     <div className="flights-table">
       <SortableDataTable<FlightRow>

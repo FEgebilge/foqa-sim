@@ -1,10 +1,11 @@
 import type { ReactNode } from "react";
 import { ArrowLeft, ArrowRight, FolderOpen, RefreshCw } from "lucide-react";
 import { Button } from "@ui/components/button/button";
-import { aircraftName, duration, flightDate, flightTimeUtc } from "../../lib/format";
+import { aircraftName, assessmentText, duration, flightDate, flightTimeUtc } from "../../lib/format";
 import { openFlights } from "../../lib/route";
 import type { Debrief } from "../../types";
-import { EventCounts, LevelBadge } from "../level";
+import { AssessmentBreakdown } from "./AssessmentBreakdown";
+import { EventCounts, GradeBadge } from "../level";
 
 interface Props { flight: Debrief["flight"]; refreshing: boolean; onRefresh: () => void; onOpenFolder: () => void }
 
@@ -37,11 +38,15 @@ export function DebriefHeader({ flight, refreshing, onRefresh, onOpenFolder }: P
           </h1>
           {flight.aircraft?.icao ? <p className="mt-0.5 text-sm text-fg-2">{flight.aircraft.title}</p> : null}
         </div>
-        <div className="flex items-center gap-3">
-          <LevelBadge level={flight.worst_level} size="md" />
-          <EventCounts counts={flight.event_counts} />
+        <div className="flex flex-col items-start gap-1 sm:items-end">
+          <div className="flex items-center gap-3">
+            <GradeBadge assessment={flight.assessment} size="md" />
+            <EventCounts counts={flight.event_counts} />
+          </div>
+          <p className="text-xs text-fg-3">{assessmentText(flight.assessment)}; each rule counts once, at its worst level.</p>
         </div>
       </div>
+      <AssessmentBreakdown detail={flight.assessment_detail} points={flight.assessment.points} />
       <dl className="flex flex-wrap gap-x-8 gap-y-2 border-y border-line-subtle py-2.5">
         {facts.map(([label, value]) => (
           <div key={label} className="flex items-baseline gap-2">

@@ -7,6 +7,7 @@ import { clock, number, phaseName } from "../../lib/format";
 import { levelVar } from "../../lib/palette";
 import { openFlights } from "../../lib/route";
 import { useTheme } from "../../lib/context";
+import { groupLandings } from "../../lib/landings";
 import { indexAt, TimeBus, useHover, type TimeRange } from "../../lib/time";
 import { useDebrief } from "../../lib/use-backend";
 import type { Debrief, Series } from "../../types";
@@ -61,6 +62,7 @@ function DebriefView({ debrief, refreshing, onRefresh, onOpenFolder }: { debrief
   const { flight, phases, touchdowns, events, series } = debrief;
   const range = useMemo<TimeRange>(() => [Math.min(series.t_s[0] ?? 0, phases[0]?.start_s ?? Infinity), Math.max(series.t_s.at(-1) ?? 0, phases.at(-1)?.end_s ?? 0)], [series, phases]);
   const flown = useMemo(() => airborne(phases), [phases]);
+  const landings = useMemo(() => groupLandings(touchdowns), [touchdowns]);
   const [selected, setSelected] = useState<number | null>(null);
   const [focus, setFocus] = useState<number | null>(null);
   const [view, setView] = useState<TimeRange | null>(flown);
@@ -153,7 +155,7 @@ function DebriefView({ debrief, refreshing, onRefresh, onOpenFolder }: { debrief
 
       {/* Replay workspace: on wide screens it fills the window, the timeline on top, findings | charts | map side by side. */}
       <section aria-label="Replay" className="flex flex-col gap-3 xl:h-[calc(100dvh-4.5rem)] xl:min-h-[620px]">
-        <PhaseTimeline phases={phases} events={events} touchdowns={touchdowns} range={range} focus={focus} view={view} selected={selected} bus={bus} onFocus={place} onZoom={setView} onSelectEvent={selectEvent} controls={controls} />
+        <PhaseTimeline phases={phases} phaseValues={flight.phase_values ?? {}} events={events} touchdowns={touchdowns} range={range} focus={focus} view={view} selected={selected} bus={bus} onFocus={place} onZoom={setView} onSelectEvent={selectEvent} controls={controls} />
 
         <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(290px,330px)_minmax(0,1fr)] lg:[grid-template-areas:'rail_map'_'rail_charts'] xl:grid-cols-[minmax(290px,340px)_minmax(0,1fr)_clamp(340px,30vw,800px)] xl:[grid-template-areas:'rail_charts_map']">
           <aside aria-labelledby="events-title" className="flex min-h-0 flex-col gap-2 lg:[grid-area:rail] xl:overflow-y-auto xl:pr-1">
@@ -173,11 +175,11 @@ function DebriefView({ debrief, refreshing, onRefresh, onOpenFolder }: { debrief
               </Suspense>
             </section>
             <section aria-labelledby="landings-title">
-              <h2 id="landings-title" className="eyebrow mb-2">Landings <span className="readout">{touchdowns.length}</span></h2>
-              {touchdowns.length ? (
+              <h2 id="landings-title" className="eyebrow mb-2">Landings <span className="readout">{landings.length}</span></h2>
+              {landings.length ? (
                 <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(min(100%,400px),1fr))]">
-                  {touchdowns.map((td, index) => (
-                    <LandingCard key={td.t_s} index={index} touchdown={td} events={eventsAt(td.t_s)} debrief={debrief} runwayWidth={td.runway ? runwayWidth(td.runway.icao, td.runway.runway) : undefined} onShow={showTime} />
+                  {landings.map((landing, index) => (
+                    <LandingCard key={landing.touchdown.t_s} index={index} landing={landing} events={[landing.touchdown, ...landing.bounces].flatMap((td) => eventsAt(td.t_s))} debrief={debrief} runwayWidth={landing.touchdown.runway ? runwayWidth(landing.touchdown.runway.icao, landing.touchdown.runway.runway) : undefined} onShow={showTime} />
                   ))}
                 </div>
               ) : (

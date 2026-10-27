@@ -17,65 +17,156 @@
       "medium": 0,
       "high": 3
     },
+    "assessment": {
+      "grade": "poor",
+      "points": 12,
+      "findings": 3
+    },
     "lfl_version": 1,
     "profile": "C172 profile",
-    "class": "light"
+    "class": "light",
+    "profile_limits": {
+      "max_crosswind": {
+        "value": 15.0,
+        "source": "Max demonstrated crosswind, Cessna 172 (Boldmethod list https://www.boldmethod.com/learn-to-fly/maneuvers/maximum-demonstrated-crosswind/; matches 172S POH)"
+      },
+      "vmo": {
+        "value": 163.0,
+        "source": "FAA TCDS 3A12 / EASA TCDS IM.A.051 Issue 11 (172S): Never Exceed 163 KIAS (160 KCAS), https://www.easa.europa.eu/en/downloads/7423/en",
+        "note": "VNE (never exceed); Va 105 KIAS"
+      }
+    },
+    "phase_values": {
+      "approach_ft": {
+        "value": 1000.0,
+        "source": "light class default"
+      },
+      "climb_end_ft": {
+        "value": 1000.0,
+        "source": "light class default"
+      },
+      "flare_ft": {
+        "value": 20.0,
+        "source": "light class default"
+      },
+      "go_around_drop_ft": {
+        "value": 50.0,
+        "source": "light class default"
+      },
+      "go_around_rise_ft": {
+        "value": 200.0,
+        "source": "light class default"
+      },
+      "roll_kt": {
+        "value": 30.0,
+        "source": "light class default"
+      }
+    },
+    "assessment_detail": {
+      "parts": [
+        {
+          "rule": "flap-overspeed",
+          "title": "Flap overspeed",
+          "level": "high",
+          "points": 4,
+          "count": 1
+        },
+        {
+          "rule": "high-sink-below-1000",
+          "title": "High descent rate below 1000 ft",
+          "level": "high",
+          "points": 4,
+          "count": 1
+        },
+        {
+          "rule": "unstable-sink-500",
+          "title": "High descent rate at 500 ft",
+          "level": "high",
+          "points": 4,
+          "count": 1
+        }
+      ],
+      "bands": [
+        {
+          "grade": "good",
+          "up_to": 1
+        },
+        {
+          "grade": "fair",
+          "up_to": 5
+        },
+        {
+          "grade": "poor"
+        }
+      ]
+    }
   },
   "phases": [
     {
       "phase": "Standing",
       "start_s": 0.0,
-      "end_s": 29.625
+      "end_s": 29.625,
+      "trigger": "stopped, under 2 kt on the ground (0 kt)"
     },
     {
       "phase": "Taxi",
       "start_s": 29.625,
-      "end_s": 37.125
+      "end_s": 37.125,
+      "trigger": "moving on the ground under 30 kt (2 kt)"
     },
     {
       "phase": "Takeoff",
       "start_s": 37.125,
-      "end_s": 55.375
+      "end_s": 55.375,
+      "trigger": "on the ground above 30 kt (30.3 kt)"
     },
     {
       "phase": "InitialClimb",
       "start_s": 55.375,
-      "end_s": 129.5
+      "end_s": 129.5,
+      "trigger": "35 ft above the runway (36 ft RA)"
     },
     {
       "phase": "EnRoute",
       "start_s": 129.5,
-      "end_s": 207.25
+      "end_s": 207.25,
+      "trigger": "climbing through 1000 ft above the aerodrome (1000.5 ft AAL)"
     },
     {
       "phase": "Approach",
       "start_s": 207.25,
-      "end_s": 248.375
+      "end_s": 252.625,
+      "trigger": "descending through 1000 ft above the aerodrome (999 ft AAL)"
     },
     {
       "phase": "Landing",
-      "start_s": 248.375,
-      "end_s": 266.25
+      "start_s": 252.625,
+      "end_s": 266.25,
+      "trigger": "flare, below 20 ft above the runway (19.7 ft RA)"
     },
     {
       "phase": "Taxi",
       "start_s": 266.25,
-      "end_s": 273.375
+      "end_s": 273.375,
+      "trigger": "moving on the ground under 30 kt (29.7 kt)"
     },
     {
       "phase": "Standing",
       "start_s": 273.375,
-      "end_s": 358.25
+      "end_s": 358.25,
+      "trigger": "stopped, under 2 kt on the ground (1.9 kt)"
     },
     {
       "phase": "Taxi",
       "start_s": 358.25,
-      "end_s": 502.75
+      "end_s": 502.75,
+      "trigger": "moving on the ground under 30 kt (2 kt)"
     },
     {
       "phase": "Standing",
       "start_s": 502.75,
-      "end_s": 655.25
+      "end_s": 655.25,
+      "trigger": "stopped, under 2 kt on the ground (1.6 kt)"
     }
   ],
   "touchdowns": [
@@ -100,6 +191,12 @@
         "long_landing": false,
         "short_landing": false,
         "zone": "In TDZ"
+      },
+      "wind": {
+        "from_deg": 269.998046875,
+        "speed_kt": 3.0000015673215064,
+        "headwind_kt": -0.23201290569616168,
+        "crosswind_kt": 2.9910164518975684
       }
     }
   ],

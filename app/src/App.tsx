@@ -1,17 +1,19 @@
 import { useCallback, useEffect } from "react";
-import { PackageCheck, TriangleAlert } from "lucide-react";
+import { Newspaper, PackageCheck, TriangleAlert } from "lucide-react";
 import { Badge } from "@ui/components/badge/badge";
 import { Button } from "@ui/components/button/button";
 import { Tooltip } from "@ui/components/tooltip/tooltip";
 import { ThemeSwitch } from "@ui/components/theme-switch/theme-switch";
 import { api } from "./api";
 import { AutostartToggle } from "./components/AutostartToggle";
+import { DevlogScreen } from "./components/devlog/DevlogScreen";
+import { WhatsNewDialog } from "./components/devlog/WhatsNewDialog";
 import { DebriefScreen } from "./components/debrief/DebriefScreen";
 import { FlightsScreen } from "./components/flights/FlightsScreen";
 import { RecorderStatusPill } from "./components/RecorderStatusPill";
 import { SetupScreen } from "./components/setup/SetupScreen";
 import { measured, number } from "./lib/format";
-import { flightHref, openFlight, openSetup, SETUP_HREF, useRoute } from "./lib/route";
+import { DEVLOG_HREF, flightHref, openFlight, openSetup, SETUP_HREF, useRoute } from "./lib/route";
 import { useNotify, useTheme } from "./lib/context";
 import { useBackendEvent, useRecorderStatus, useSetup } from "./lib/use-backend";
 import type { LandingNotice, OpenFlight } from "./types";
@@ -62,6 +64,10 @@ export default function App() {
             <nav aria-label="Breadcrumb" className="hidden items-center gap-2 text-sm text-fg-3 sm:flex">
               <span>/</span><a className="text-fg no-underline" href={SETUP_HREF} aria-current="page">Installation</a>
             </nav>
+          ) : route.screen === "devlog" ? (
+            <nav aria-label="Breadcrumb" className="hidden items-center gap-2 text-sm text-fg-3 sm:flex">
+              <span>/</span><a className="text-fg no-underline" href={DEVLOG_HREF} aria-current="page">What's new</a>
+            </nav>
           ) : null}
           <div className="ml-auto flex items-center gap-2">
             {failing ? (
@@ -70,6 +76,11 @@ export default function App() {
               </a>
             ) : null}
             <RecorderStatusPill status={recorder} />
+            <Tooltip content="What's new" side="bottom">
+              <Button href={DEVLOG_HREF} variant={route.screen === "devlog" ? "secondary" : "ghost"} size="sm" iconOnly label="What's new" aria-current={route.screen === "devlog" ? "page" : undefined}>
+                <Newspaper size={16} aria-hidden="true" />
+              </Button>
+            </Tooltip>
             <Tooltip content="Installation status" side="bottom">
               <Button href={SETUP_HREF} variant={route.screen === "setup" ? "secondary" : "ghost"} size="sm" iconOnly label="Installation status" aria-current={route.screen === "setup" ? "page" : undefined}>
                 <PackageCheck size={16} aria-hidden="true" />
@@ -81,7 +92,9 @@ export default function App() {
         </div>
       </header>
       {route.screen === "debrief" ? <DebriefScreen key={route.id} id={route.id} />
-        : route.screen === "setup" ? <SetupScreen setup={setup} /> : <FlightsScreen recorder={recorder} />}
+        : route.screen === "setup" ? <SetupScreen setup={setup} />
+        : route.screen === "devlog" ? <DevlogScreen /> : <FlightsScreen recorder={recorder} />}
+      <WhatsNewDialog />
     </div>
   );
 }

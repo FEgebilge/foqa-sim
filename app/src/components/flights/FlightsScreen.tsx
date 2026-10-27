@@ -1,55 +1,69 @@
 import { useMemo, useState } from "react";
 import { FolderOpen, PlaneLanding, RefreshCw, SearchX, ServerCrash } from "lucide-react";
+import { api } from "../../api";
 import { Button } from "@ui/components/button/button";
 import { EmptyState } from "@ui/components/empty-state/empty-state";
 import { SearchField } from "@ui/components/search-field/search-field";
 import SegmentedControl from "@ui/components/segmented-control/segmented-control";
 import type { SortState } from "@ui/components/sortable-data-table/sortable-data-table";
-import { duration, LEVEL_LABEL, LEVELS, number } from "../../lib/format";
+import { useNotify } from "../../lib/context";
+import { aircraftName, duration, flightDate, GRADE_LABEL, GRADES, number } from "../../lib/format";
 import type { RecorderState } from "../../lib/use-backend";
 import { useFlights } from "../../lib/use-backend";
-import type { Level } from "../../types";
+import type { FlightSummary, Grade } from "../../types";
+import { ConfirmDialog } from "../ConfirmDialog";
 import { useOpenFolder } from "../use-open-folder";
 import { toRow } from "./flight-row";
 import { FlightsTable } from "./FlightsTable";
 
-type LevelFilter = "all" | Level | "clean";
+type GradeFilter = "all" | Grade;
 
 export function FlightsScreen({ recorder }: { recorder: RecorderState | null }) {
   const { state, refresh, refreshing } = useFlights();
   const openFolder = useOpenFolder();
   const [query, setQuery] = useState("");
-  const [level, setLevel] = useState<LevelFilter>("all");
+  const [grade, setGrade] = useState<GradeFilter>("all");
+  const [doomed, setDoomed] = useState<FlightSummary | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const notify = useNotify();
   const [sort, setSort] = useState<SortState>({ key: "date", direction: "desc" });
 
   const flights = useMemo(() => (state.status === "ready" ? state.data : []), [state]);
   const rows = useMemo(() => flights.map(toRow), [flights]);
   const counts = useMemo(() => {
-    const byLevel: Record<LevelFilter, number> = { all: rows.length, high: 0, medium: 0, low: 0, advisory: 0, clean: 0 };
-    for (const row of rows) byLevel[row.flight.worst_level ?? "clean"]++;
-    return byLevel;
+    const byGrade: Record<GradeFilter, number> = { all: rows.length, good: 0, fair: 0, poor: 0 };
+    for (const row of rows) byGrade[row.flight.assessment.grade]++;
+    return byGrade;
   }, [rows]);
   const visible = useMemo(() => {
     const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
     return rows.filter((row) => {
-      if (level !== "all" && (row.flight.worst_level ?? "clean") !== level) return false;
+      if (grade !== "all" && row.flight.assessment.grade !== grade) return false;
       const { aircraft, departure, arrival, id } = row.flight;
       const text = [aircraft?.icao, aircraft?.title, departure, arrival, id].filter(Boolean).join(" ").toLowerCase();
       return words.every((word) => text.includes(word));
     });
-  }, [rows, query, level]);
+  }, [rows, query, grade]);
 
   const totals = useMemo(() => ({
     time: flights.reduce((sum, f) => sum + f.duration_s, 0),
     landings: flights.reduce((sum, f) => sum + f.landings, 0),
-    withEvents: flights.filter((f) => f.worst_level && f.worst_level !== "advisory").length,
+    needAttention: flights.filter((f) => f.assessment.grade !== "good").length,
   }), [flights]);
 
   const filterOptions = [
     { value: "all", label: "All" },
-    ...LEVELS.map((value) => ({ value, label: LEVEL_LABEL[value] })),
-    { value: "clean", label: "Clean" },
-  ].map((option) => ({ ...option, accessory: <span className="readout text-xs text-fg-3">{counts[option.value as LevelFilter]}</span> }));
+    ...GRADES.map((value) => ({ value, label: GRADE_LABEL[value] })),
+  ].map((option) => ({ ...option, accessory: <span className="readout text-xs text-fg-3">{counts[option.value as GradeFilter]}</span> }));
+  const recordingId = recorder?.value.state === "recording" ? recorder.value.flight_id : undefined;
+
+  const confirmDelete = () => {
+    if (!doomed) return;
+    setDeleting(true);
+    api.deleteFlight(doomed.id)
+      .then(refresh, (error: unknown) => notify({ title: "Could not delete the flight", body: String(error), tone: "error" }))
+      .finally(() => { setDeleting(false); setDoomed(null); });
+  };
 
   const actions = (
     <div className="flex items-center gap-2">
@@ -81,12 +95,12 @@ export function FlightsScreen({ recorder }: { recorder: RecorderState | null }) 
       <>
         <div className="flex flex-wrap items-center gap-3">
           <div className="w-full max-w-sm"><SearchField label="Search flights" hideLabel size="sm" placeholder="Aircraft, airport or flight ID" value={query} onValueChange={setQuery} /></div>
-          <SegmentedControl label="Worst event level" options={filterOptions} value={level} onValueChange={(value) => setLevel(value as LevelFilter)} />
+          <SegmentedControl label="Assessment" options={filterOptions} value={grade} onValueChange={(value) => setGrade(value as GradeFilter)} />
           <span className="readout ml-auto text-xs text-fg-3" aria-live="polite">{visible.length === rows.length ? `${rows.length} flights` : `${visible.length} of ${rows.length} flights`}</span>
         </div>
-        {visible.length ? <FlightsTable rows={visible} sort={sort} onSortChange={setSort} /> : (
+        {visible.length ? <FlightsTable rows={visible} sort={sort} onSortChange={setSort} onDelete={(row) => setDoomed(row.flight)} recordingId={recordingId} /> : (
           <div className="panel">
-            <EmptyState size="sm" icon={<SearchX size={18} />} title="No flights match" description="Change the search or the level filter." action={<Button variant="secondary" size="sm" onClick={() => { setQuery(""); setLevel("all"); }}>Clear filters</Button>} />
+            <EmptyState size="sm" icon={<SearchX size={18} />} title="No flights match" description="Change the search or the assessment filter." action={<Button variant="secondary" size="sm" onClick={() => { setQuery(""); setGrade("all"); }}>Clear filters</Button>} />
           </div>
         )}
       </>
@@ -108,10 +122,13 @@ export function FlightsScreen({ recorder }: { recorder: RecorderState | null }) 
           <Stat label="Flights" value={number(flights.length)} />
           <Stat label="Flight time" value={duration(totals.time)} />
           <Stat label="Landings" value={number(totals.landings)} />
-          <Stat label="With low or higher events" value={number(totals.withEvents)} />
+          <Stat label="Fair or poor" value={number(totals.needAttention)} />
         </dl>
       ) : null}
       {body}
+      <ConfirmDialog open={doomed !== null} title="Delete this flight?" confirmLabel="Delete flight" busy={deleting} onConfirm={confirmDelete} onCancel={() => setDoomed(null)}>
+        {doomed ? `${aircraftName(doomed.aircraft)}, ${flightDate(doomed.started_utc)} (${doomed.id}). ` : ""}Its recording files are deleted from disk for good. This cannot be undone.
+      </ConfirmDialog>
     </main>
   );
 }
