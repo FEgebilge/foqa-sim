@@ -174,54 +174,91 @@ pub struct RecvFacilityDataEnd {
     pub request_id: Dword,
 }
 
-// `extern "system"` is the Win32 calling convention: stdcall on x86, the
-// standard C convention on x64.
-pub type OpenFn = unsafe extern "system" fn(
-    *mut Handle,
-    *const c_char,
-    *mut c_void,
-    Dword,
-    Handle,
-    Dword,
-) -> HResult;
-pub type CloseFn = unsafe extern "system" fn(Handle) -> HResult;
-pub type AddToDataDefinitionFn = unsafe extern "system" fn(
-    Handle,
-    Dword,
-    *const c_char,
-    *const c_char,
-    i32,
-    f32,
-    Dword,
-) -> HResult;
-pub type RequestDataOnSimObjectFn = unsafe extern "system" fn(
-    Handle,
-    Dword,
-    Dword,
-    Dword,
-    i32,
-    Dword,
-    Dword,
-    Dword,
-    Dword,
-) -> HResult;
-pub type SubscribeToSystemEventFn =
-    unsafe extern "system" fn(Handle, Dword, *const c_char) -> HResult;
-pub type GetNextDispatchFn =
-    unsafe extern "system" fn(Handle, *mut *mut Recv, *mut Dword) -> HResult;
-pub type SubscribeToFlowEventFn = unsafe extern "system" fn(Handle) -> HResult;
-pub type AddToFacilityDefinitionFn =
-    unsafe extern "system" fn(Handle, Dword, *const c_char) -> HResult;
-pub type RequestFacilityDataFn =
-    unsafe extern "system" fn(Handle, Dword, Dword, *const c_char, *const c_char) -> HResult;
-pub type RequestFacilitiesListEx1Fn = unsafe extern "system" fn(Handle, i32, Dword) -> HResult;
-/// `SimConnect_CallCommBusEvent` (H:1132); `Data` is `BufferSize` bytes.
-pub type CallCommBusEventFn =
-    unsafe extern "system" fn(Handle, *const c_char, Dword, Dword, *const c_char) -> HResult;
-/// `SimConnect_SubscribeToCommBusEvent` (H:1130).
-pub type SubscribeToCommBusEventFn =
-    unsafe extern "system" fn(Handle, Dword, *const c_char) -> HResult;
-pub type GetLastSentPacketIdFn = unsafe extern "system" fn(Handle, *mut Dword) -> HResult;
+// `SIMCONNECTAPI` is `extern "C" HRESULT` (H:1011): the C calling convention.
+// The SDK's static SimConnect.lib provides these symbols (see build.rs).
+unsafe extern "C" {
+    #[link_name = "SimConnect_Open"]
+    pub fn open(
+        handle: *mut Handle,
+        name: *const c_char,
+        hwnd: *mut c_void,
+        user_event_win32: Dword,
+        event_handle: Handle,
+        config_index: Dword,
+    ) -> HResult;
+    #[link_name = "SimConnect_Close"]
+    pub fn close(handle: Handle) -> HResult;
+    #[link_name = "SimConnect_AddToDataDefinition"]
+    pub fn add_to_data_definition(
+        handle: Handle,
+        define_id: Dword,
+        datum_name: *const c_char,
+        units_name: *const c_char,
+        datum_type: i32,
+        epsilon: f32,
+        datum_id: Dword,
+    ) -> HResult;
+    #[link_name = "SimConnect_RequestDataOnSimObject"]
+    pub fn request_data_on_sim_object(
+        handle: Handle,
+        request_id: Dword,
+        define_id: Dword,
+        object_id: Dword,
+        period: i32,
+        flags: Dword,
+        origin: Dword,
+        interval: Dword,
+        limit: Dword,
+    ) -> HResult;
+    #[link_name = "SimConnect_SubscribeToSystemEvent"]
+    pub fn subscribe_to_system_event(
+        handle: Handle,
+        event_id: Dword,
+        system_event_name: *const c_char,
+    ) -> HResult;
+    #[link_name = "SimConnect_GetNextDispatch"]
+    pub fn get_next_dispatch(handle: Handle, data: *mut *mut Recv, len: *mut Dword) -> HResult;
+    #[link_name = "SimConnect_SubscribeToFlowEvent"]
+    pub fn subscribe_to_flow_event(handle: Handle) -> HResult;
+    #[link_name = "SimConnect_AddToFacilityDefinition"]
+    pub fn add_to_facility_definition(
+        handle: Handle,
+        define_id: Dword,
+        field_name: *const c_char,
+    ) -> HResult;
+    #[link_name = "SimConnect_RequestFacilityData"]
+    pub fn request_facility_data(
+        handle: Handle,
+        define_id: Dword,
+        request_id: Dword,
+        icao: *const c_char,
+        region: *const c_char,
+    ) -> HResult;
+    #[link_name = "SimConnect_RequestFacilitiesList_EX1"]
+    pub fn request_facilities_list_ex1(
+        handle: Handle,
+        list_type: i32,
+        request_id: Dword,
+    ) -> HResult;
+    /// H:1132; `data` is `buffer_size` bytes.
+    #[link_name = "SimConnect_CallCommBusEvent"]
+    pub fn call_comm_bus_event(
+        handle: Handle,
+        event_name: *const c_char,
+        broadcast_flags: Dword,
+        buffer_size: Dword,
+        data: *const c_char,
+    ) -> HResult;
+    /// H:1130.
+    #[link_name = "SimConnect_SubscribeToCommBusEvent"]
+    pub fn subscribe_to_comm_bus_event(
+        handle: Handle,
+        event_id: Dword,
+        event_name: *const c_char,
+    ) -> HResult;
+    #[link_name = "SimConnect_GetLastSentPacketID"]
+    pub fn get_last_sent_packet_id(handle: Handle, send_id: *mut Dword) -> HResult;
+}
 
 #[cfg(test)]
 mod tests {

@@ -1,29 +1,16 @@
 use std::collections::HashSet;
 use std::ffi::{CString, c_char};
 use std::mem::size_of;
-use std::path::PathBuf;
-use std::{env, fmt, ptr, slice};
-
-use libloading::Library;
+use std::{fmt, ptr, slice};
 
 use crate::facility::Requests;
 use crate::ffi::{self, HResult};
 
-const DLL: &str = "SimConnect.dll";
-const COMM_BUS_CALL: &str = "SimConnect_CallCommBusEvent";
-const COMM_BUS_SUBSCRIBE: &str = "SimConnect_SubscribeToCommBusEvent";
-
 #[derive(Debug)]
 pub enum Error {
-    /// No SimConnect.dll at any of the searched paths.
-    DllNotFound(Vec<PathBuf>),
-    MissingSymbol(&'static str),
     /// A SimConnect call returned a failing HRESULT. `SimConnect_Open` fails
     /// this way when the simulator is not running.
-    Call {
-        func: &'static str,
-        hr: HResult,
-    },
+    Call { func: &'static str, hr: HResult },
     /// Names passed to SimConnect cannot contain NUL bytes.
     InvalidName(String),
 }
@@ -31,8 +18,6 @@ pub enum Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::DllNotFound(paths) => write!(f, "{DLL} not found; searched {paths:?}"),
-            Self::MissingSymbol(name) => write!(f, "{DLL} has no symbol {name}"),
             Self::Call { func, hr } => write!(f, "{func} failed with HRESULT {:#010x}", *hr as u32),
             Self::InvalidName(name) => write!(f, "name contains NUL: {name:?}"),
         }
@@ -139,83 +124,9 @@ pub enum Facility {
     },
 }
 
-/// SimConnect entry points resolved from the DLL at runtime.
-struct Api {
-    open: ffi::OpenFn,
-    close: ffi::CloseFn,
-    add_to_data_definition: ffi::AddToDataDefinitionFn,
-    request_data_on_sim_object: ffi::RequestDataOnSimObjectFn,
-    subscribe_to_system_event: ffi::SubscribeToSystemEventFn,
-    subscribe_to_flow_event: ffi::SubscribeToFlowEventFn,
-    get_next_dispatch: ffi::GetNextDispatchFn,
-    get_last_sent_packet_id: ffi::GetLastSentPacketIdFn,
-    add_to_facility_definition: ffi::AddToFacilityDefinitionFn,
-    request_facility_data: ffi::RequestFacilityDataFn,
-    request_facilities_list_ex1: ffi::RequestFacilitiesListEx1Fn,
-    /// Optional: only SimConnect builds since MSFS 2024 SU5 export it, and
-    /// recording must not depend on it.
-    call_comm_bus_event: Option<ffi::CallCommBusEventFn>,
-    subscribe_to_comm_bus_event: Option<ffi::SubscribeToCommBusEventFn>,
-    /// Keeps the DLL mapped while the function pointers above are in use.
-    _lib: Library,
-}
-
-impl Api {
-    fn load() -> Result<Self, Error> {
-        let candidates = dll_candidates();
-        // SAFETY: loading SimConnect.dll runs only its own initialisation.
-        let lib = candidates
-            .iter()
-            .find_map(|p| unsafe { Library::new(p) }.ok())
-            .ok_or_else(|| Error::DllNotFound(candidates.clone()))?;
-        // SAFETY: each symbol has the signature declared for it in `ffi`.
-        unsafe {
-            Ok(Self {
-                open: symbol(&lib, "SimConnect_Open")?,
-                close: symbol(&lib, "SimConnect_Close")?,
-                add_to_data_definition: symbol(&lib, "SimConnect_AddToDataDefinition")?,
-                request_data_on_sim_object: symbol(&lib, "SimConnect_RequestDataOnSimObject")?,
-                subscribe_to_system_event: symbol(&lib, "SimConnect_SubscribeToSystemEvent")?,
-                subscribe_to_flow_event: symbol(&lib, "SimConnect_SubscribeToFlowEvent")?,
-                get_next_dispatch: symbol(&lib, "SimConnect_GetNextDispatch")?,
-                get_last_sent_packet_id: symbol(&lib, "SimConnect_GetLastSentPacketID")?,
-                add_to_facility_definition: symbol(&lib, "SimConnect_AddToFacilityDefinition")?,
-                request_facility_data: symbol(&lib, "SimConnect_RequestFacilityData")?,
-                request_facilities_list_ex1: symbol(&lib, "SimConnect_RequestFacilitiesList_EX1")?,
-                call_comm_bus_event: symbol(&lib, COMM_BUS_CALL).ok(),
-                subscribe_to_comm_bus_event: symbol(&lib, COMM_BUS_SUBSCRIBE).ok(),
-                _lib: lib,
-            })
-        }
-    }
-}
-
-/// The app's own folder first (where a release would place the DLL), then
-/// the installed MSFS 2024 SDK (`MSFS2024_SDK`, else its default folder).
-fn dll_candidates() -> Vec<PathBuf> {
-    let beside_exe = env::current_exe()
-        .ok()
-        .and_then(|exe| Some(exe.parent()?.join(DLL)));
-    let sdk = env::var_os("MSFS2024_SDK").unwrap_or_else(|| r"C:\MSFS 2024 SDK".into());
-    let in_sdk = PathBuf::from(sdk)
-        .join("SimConnect SDK")
-        .join("lib")
-        .join(DLL);
-    beside_exe.into_iter().chain([in_sdk]).collect()
-}
-
-/// # Safety
-/// `T` must be the exact function pointer type of the exported symbol.
-unsafe fn symbol<T: Copy>(lib: &Library, name: &'static str) -> Result<T, Error> {
-    unsafe { lib.get::<T>(name.as_bytes()) }
-        .map(|s| *s)
-        .map_err(|_| Error::MissingSymbol(name))
-}
-
 /// An open connection to the simulator. Closed on drop. Not `Send`: the
 /// handle belongs to the thread that opened it.
 pub struct SimConnect {
-    api: Api,
     handle: ffi::Handle,
     /// Definitions built with `add_text`, whose data decodes as strings.
     text_defines: HashSet<u32>,
@@ -223,12 +134,11 @@ pub struct SimConnect {
 
 impl SimConnect {
     pub fn open(app_name: &str) -> Result<Self, Error> {
-        let api = Api::load()?;
         let name = c_string(app_name)?;
         let mut handle = ptr::null_mut();
         // SAFETY: valid out-pointer and NUL-terminated name; no window or event handle.
         let hr = unsafe {
-            (api.open)(
+            ffi::open(
                 &mut handle,
                 name.as_ptr(),
                 ptr::null_mut(),
@@ -239,7 +149,6 @@ impl SimConnect {
         };
         check("SimConnect_Open", hr)?;
         Ok(Self {
-            api,
             handle,
             text_defines: HashSet::new(),
         })
@@ -291,7 +200,7 @@ impl SimConnect {
         let (simvar, unit) = (c_string(simvar)?, c_string(unit)?);
         // SAFETY: open handle and NUL-terminated strings that outlive the call.
         let hr = unsafe {
-            (self.api.add_to_data_definition)(
+            ffi::add_to_data_definition(
                 self.handle,
                 define_id,
                 simvar.as_ptr(),
@@ -314,7 +223,7 @@ impl SimConnect {
     ) -> Result<(), Error> {
         // SAFETY: open handle; scalar arguments only.
         let hr = unsafe {
-            (self.api.request_data_on_sim_object)(
+            ffi::request_data_on_sim_object(
                 self.handle,
                 request_id,
                 define_id,
@@ -332,14 +241,13 @@ impl SimConnect {
     pub fn subscribe_system_event(&mut self, event_id: u32, name: &str) -> Result<(), Error> {
         let name = c_string(name)?;
         // SAFETY: open handle and a NUL-terminated name that outlives the call.
-        let hr =
-            unsafe { (self.api.subscribe_to_system_event)(self.handle, event_id, name.as_ptr()) };
+        let hr = unsafe { ffi::subscribe_to_system_event(self.handle, event_id, name.as_ptr()) };
         check("SimConnect_SubscribeToSystemEvent", hr)
     }
 
     pub fn subscribe_flow_events(&mut self) -> Result<(), Error> {
         // SAFETY: open handle.
-        let hr = unsafe { (self.api.subscribe_to_flow_event)(self.handle) };
+        let hr = unsafe { ffi::subscribe_to_flow_event(self.handle) };
         check("SimConnect_SubscribeToFlowEvent", hr)
     }
 
@@ -348,7 +256,7 @@ impl SimConnect {
         let mut data = ptr::null_mut();
         let mut len = 0;
         // SAFETY: valid out-pointers on an open handle.
-        let hr = unsafe { (self.api.get_next_dispatch)(self.handle, &mut data, &mut len) };
+        let hr = unsafe { ffi::get_next_dispatch(self.handle, &mut data, &mut len) };
         if hr < 0 || data.is_null() {
             return None;
         }
@@ -365,15 +273,11 @@ impl SimConnect {
     /// the sim's JavaScript views: in-game panels, EFB apps, instruments.
     /// Fire and forget: nothing tells whether a view is listening.
     pub fn call_comm_bus_js(&mut self, name: &str, data: &str) -> Result<(), Error> {
-        let call = self
-            .api
-            .call_comm_bus_event
-            .ok_or(Error::MissingSymbol(COMM_BUS_CALL))?;
         let (name, data) = (c_string(name)?, c_string(data)?);
         // SAFETY: open handle; `data` holds `comm_bus_len` bytes, its NUL included;
         // both strings outlive the call.
         let hr = unsafe {
-            call(
+            ffi::call_comm_bus_event(
                 self.handle,
                 name.as_ptr(),
                 ffi::COMM_BUS_BROADCAST_TO_JS,
@@ -381,26 +285,22 @@ impl SimConnect {
                 data.as_ptr(),
             )
         };
-        check(COMM_BUS_CALL, hr)
+        check("SimConnect_CallCommBusEvent", hr)
     }
 
     /// Delivers Comm Bus event `name`, as the sim's views send it
     /// (`callSimConnect`), as `Recv::CommBus` with `event_id`.
     pub fn subscribe_comm_bus(&mut self, event_id: u32, name: &str) -> Result<(), Error> {
-        let subscribe = self
-            .api
-            .subscribe_to_comm_bus_event
-            .ok_or(Error::MissingSymbol(COMM_BUS_SUBSCRIBE))?;
         let name = c_string(name)?;
         // SAFETY: open handle and a NUL-terminated name that outlives the call.
-        let hr = unsafe { subscribe(self.handle, event_id, name.as_ptr()) };
-        check(COMM_BUS_SUBSCRIBE, hr)
+        let hr = unsafe { ffi::subscribe_to_comm_bus_event(self.handle, event_id, name.as_ptr()) };
+        check("SimConnect_SubscribeToCommBusEvent", hr)
     }
 
     fn last_sent_packet_id(&self) -> Result<u32, Error> {
         let mut id = 0;
         // SAFETY: valid out-pointer on an open handle.
-        let hr = unsafe { (self.api.get_last_sent_packet_id)(self.handle, &mut id) };
+        let hr = unsafe { ffi::get_last_sent_packet_id(self.handle, &mut id) };
         check("SimConnect_GetLastSentPacketID", hr)?;
         Ok(id)
     }
@@ -412,9 +312,7 @@ impl Requests for SimConnect {
     fn add_facility_field(&mut self, define_id: u32, field: &str) -> Result<u32, Error> {
         let field = c_string(field)?;
         // SAFETY: open handle and a NUL-terminated name that outlives the call.
-        let hr = unsafe {
-            (self.api.add_to_facility_definition)(self.handle, define_id, field.as_ptr())
-        };
+        let hr = unsafe { ffi::add_to_facility_definition(self.handle, define_id, field.as_ptr()) };
         check("SimConnect_AddToFacilityDefinition", hr)?;
         self.last_sent_packet_id()
     }
@@ -433,7 +331,7 @@ impl Requests for SimConnect {
         let (icao, region) = (c_string(icao)?, c_string(region)?);
         // SAFETY: open handle and NUL-terminated strings that outlive the call.
         let hr = unsafe {
-            (self.api.request_facility_data)(
+            ffi::request_facility_data(
                 self.handle,
                 define_id,
                 request_id,
@@ -450,7 +348,7 @@ impl Requests for SimConnect {
     fn request_airports_nearby(&mut self, request_id: u32) -> Result<(), Error> {
         // SAFETY: open handle; scalar arguments only.
         let hr = unsafe {
-            (self.api.request_facilities_list_ex1)(
+            ffi::request_facilities_list_ex1(
                 self.handle,
                 ffi::FACILITY_LIST_TYPE_AIRPORT,
                 request_id,
@@ -463,7 +361,7 @@ impl Requests for SimConnect {
 impl Drop for SimConnect {
     fn drop(&mut self) {
         // SAFETY: the handle is open and never used after this call.
-        unsafe { (self.api.close)(self.handle) };
+        unsafe { ffi::close(self.handle) };
     }
 }
 
