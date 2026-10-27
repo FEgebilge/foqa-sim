@@ -1,0 +1,15 @@
+# Pilatus PC-12 NGX type profile. Schema: docs/rules.md.
+#
+# No tail_contact, hard_landing_g, max_tailwind: not published or reachable.
+type: PC12
+name: Pilatus PC-12 NGX
+class: light
+vmo: { value: 240 kt, source: &tcds "EASA TCDS EASA.A.089 Issue 11 (07 Jul 2025), https://www.easa.europa.eu/de/downloads/7348/en", note: "VMO 240 KCAS; TCDS speeds are KCAS, AFM KIAS may differ slightly" }
+vle: { value: 240 kt, source: *tcds, note: "VLE 240 KCAS" }
+vlo: { value: 180 kt, source: *tcds, note: "VLO 180 KCAS; TCDS gives a single VLO, PC-12/45, /47, /47E, /47G (NGX) same table" }
+max_crosswind: { value: 25 kt, source: "EuroGA forum quoting PC-12 POH: 30 kt flaps 0, 25 kt flaps 15, 15 kt flaps 40 (not primary)", approximate: true, note: "flap dependent; 25 kt is the flaps-15 value, 15 kt at flaps 40" }
+flaps:
+  - { up_to: 15 deg, vfe: { value: 165 kt, source: *tcds, note: "VFE up to 15 deg 165 KCAS; flaps 0-15" } }
+  - { vfe: { value: 130 kt, source: *tcds, note: "VFE above 15 deg 130 KCAS; flaps 30 and 40 both 130" } }
+phases:
+  approach_ft: { value: 1500 ft, source: "FAA AIM 4-3-3 (traffic patterns): large and turbine-powered aircraft enter the pattern at 1500 ft AGL", note: "CICTT starts the approach at 1000 ft or at the VFR pattern entry" }

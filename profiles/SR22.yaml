@@ -1,0 +1,13 @@
+# Cirrus SR22 (G6) type profile. Schema: docs/rules.md.
+#
+# No vle/vlo: fixed gear. No tail_contact, hard_landing_g, max_tailwind: not
+# published or reachable. The TCDS flap table text is garbled; the 150/110
+# assignment follows the later-serial order.
+type: SR22
+name: Cirrus SR22 (G6)
+class: light
+vmo: { value: 208 kt, source: &tcds "EASA TCDS EASA.IM.A.007 Issue 19 (22 Apr 2026), SR22 serials 3915+, https://www.easa.europa.eu/en/downloads/7512/en", note: "VNE 208 KCAS; earlier serials 204 KCAS; Vno 179 KCAS" }
+max_crosswind: { value: 21 kt, source: "Boldmethod list gives SR22T G6 21 kt; SR20 checklist 21 kt", approximate: true, note: "derived from the SR22T/SR20; SR22 itself not found" }
+flaps:
+  - { up_to: 16 deg, vfe: { value: 150 kt, source: *tcds, approximate: true, note: "VFE (50%) 150 KIAS, serials 3915+; the 16 deg angle for 50% flap is from secondary sources/memory, not the TCDS" } }
+  - { vfe: { value: 110 kt, source: *tcds, approximate: true, note: "VFE (100%) 110 KIAS, serials 3915+; the 32 deg angle for 100% flap is not in the TCDS" } }

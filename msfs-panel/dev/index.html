@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>FOQA-Sim panel dev</title>
+<!-- Serve the repository root over HTTP (e.g. `python -m http.server` in it)
+     and open /msfs-panel/dev/. The sim's Comm Bus is stubbed and this page
+     plays the app (docs/ingame-panel.md): it replays the series of
+     app/public/mock/debrief-flight-1793037932.json as Live, its events as
+     Events and its touchdown as a LandingNotice, and acks commands. -->
+<link rel="stylesheet" href="../PackageSources/html_ui/InGamePanels/FOQASim/FOQASim.css" />
+<style>
+    body { margin: 0; min-height: 100vh; box-sizing: border-box; padding: 20px; background: #3a4a5c linear-gradient(#6d8fb3, #3a4a5c); font: 13px system-ui, sans-serif; color: #fff; }
+    .controls { margin-bottom: 14px; }
+    .controls button, .controls select, .controls label { margin: 0 6px 6px 0; }
+    .clock { font-family: monospace; font-size: 14px; margin-left: 8px; }
+    .row { display: flex; flex-wrap: wrap; align-items: flex-start; }
+    .frame { margin: 0 24px 24px 0; }
+    .frame h2 { margin: 0 0 6px; font-size: 12px; font-weight: 600; opacity: .85; }
+    .panel { overflow: hidden; resize: both; }
+    #main { width: 460px; height: 400px; }
+    #small { width: 300px; height: 250px; }
+</style>
+</head>
+<body>
+<div class="controls">
+    <button data-do="play">Pause</button>
+    <select id="speed"><option value="1">1×</option><option value="4" selected>4×</option><option value="10">10×</option></select>
+    <button data-jump="cruise">En route (flap overspeed)</button>
+    <button data-jump="g1000">1000 ft gate</button>
+    <button data-jump="g500">500 ft gate</button>
+    <button data-jump="touchdown">Touchdown</button>
+    <button data-jump="notice">Landing notice</button>
+    <button data-jump="taxi">Taxi in</button>
+    <br />
+    <button data-do="restart">Restart recording</button>
+    <button data-do="reopen">Reopen panels (late open)</button>
+    <button data-do="silence">App gone</button>
+    <label><input type="checkbox" id="fail" /> Commands fail</label>
+    <span class="clock" id="clock"></span>
+</div>
+<div class="row">
+    <div class="frame"><h2>Default size (~25% × 40% of 1080p), drag the corner to resize</h2><div class="panel" id="main"></div></div>
+    <div class="frame"><h2>Resized small</h2><div class="panel" id="small"></div></div>
+</div>
+<script src="../PackageSources/html_ui/InGamePanels/FOQASim/foqa-board.js"></script>
+<script>
+var MSG = FoqaSim.MSG, APPROACH = { Approach: true, Landing: true };
+
+// Stand-in for the sim's Comm Bus: every board hears every emit.
+var hub = {
+    buses: [],
+    bus: function () {
+        var b = { handlers: {}, on: function (n, cb) { b.handlers[n] = cb; }, send: function (n, json) { command(JSON.parse(json)); } };
+        this.buses.push(b);
+        return b;
+    },
+    emit: function (name, payload) {
+        var json = JSON.stringify(payload);
+        this.buses.forEach(function (b) { if (b.handlers[name]) b.handlers[name](json); });
+    }
+};
+
+function open() {
+    hub.buses = [];
+    ["main", "small"].forEach(function (id) {
+        var old = document.getElementById(id), el = old.cloneNode(false);   // a fresh element drops the old board
+        old.parentNode.replaceChild(el, old);
+        FoqaSim.attach(el, hub.bus());
+    });
+}
+
+fetch("../../app/public/mock/debrief-flight-1793037932.json").then(function (r) { return r.json(); }).then(function (D) {
+    var s = D.series, td = D.touchdowns[0], noticeAt = td.t_s + 12;
+    function index(t) {
+        var lo = 0, hi = s.t_s.length - 1;
+        while (lo < hi) { var m = (lo + hi) >> 1; if (s.t_s[m] < t) lo = m + 1; else hi = m; }
+        return lo;
+    }
+    function phaseAt(t) { return D.phases.filter(function (p) { return p.start_s <= t; }).pop().phase; }
+    var approach = D.phases.filter(function (p) { return p.phase === "Approach"; })[0];
+    function crossing(ft) {
+        for (var i = index(approach.start_s); s.t_s[i] < td.t_s; i++) if (s.aal_ft[i] !== null && s.aal_ft[i] <= ft) return s.t_s[i];
+        return null;
+    }
+    var cross = { 1000: crossing(1000), 500: crossing(500) };
+
+    // Gates as the app would judge them, thresholds of rules/core.yaml.
+    function gates(t, phase) {
+        if (!APPROACH[phase]) return [];
+        return [1000, 500].map(function (at) {
+            if (cross[at] === null || t < cross[at]) return { at_ft: at, state: "ahead", checks: [] };
+            var i = index(cross[at]), sink = -s.vs_fpm[i], bank = Math.abs(s.roll_deg[i]), vfe = s.vfe_kt[i];
+            var checks = [
+                { name: "sink", ok: sink <= 1000, value: sink, limit: 1000, unit: "fpm" },
+                { name: "speed", ok: vfe === null || s.ias_kt[i] <= vfe, value: s.ias_kt[i], limit: vfe === null ? undefined : vfe, unit: "kt" },
+                { name: "bank", ok: bank <= 7, value: bank, limit: 7, unit: "deg" },
+                { name: "flaps", ok: s.flap_deg[i] > 0, value: s.flap_deg[i], unit: "deg" }
+            ];
+            return { at_ft: at, state: checks.every(function (c) { return c.ok; }) ? "stable" : "unstable", checks: checks };
+        });
+    }
+
+    function live(t) {
+        var i = index(t), phase = phaseAt(t);
+        return {
+            v: 2, t_s: t, phase: phase,
+            on_ground: phase === "Standing" || phase === "Taxi" || (phase === "Landing" && t >= td.t_s) || (phase === "Takeoff" && s.ias_kt[i] < 55),
+            aal_ft: s.aal_ft[i], ias_kt: s.ias_kt[i], vs_fpm: s.vs_fpm[i], flap_deg: s.flap_deg[i], vfe_kt: s.vfe_kt[i],
+            bank_deg: s.roll_deg[i], gates: gates(t, phase)
+        };
+    }
+
+    // The flight's one landing, as the recorder reports it, plus two synthetic
+    // earlier touch-and-gos so the list has three (the mock has one landing).
+    function notice(t_td, patch) {
+        var tdz = JSON.parse(JSON.stringify(td));
+        tdz.t_s = t_td;
+        Object.keys(patch || {}).forEach(function (k) { if (k === "runway") Object.assign(tdz.runway, patch.runway); else tdz[k] = patch[k]; });
+        var from = patch ? t_td - 60 : approach.start_s;
+        return { flight_id: D.flight.id, touchdown: tdz, events: patch ? [] : D.events.filter(function (e) { return e.start_s >= from && e.start_s <= td.t_s + 10; }) };
+    }
+    var earlier = [
+        notice(60, { sink_fpm: 512, peak_g: 1.71, bounce: true, runway: { along_m: 620, cross_m: 3.1 } }),
+        notice(120, { sink_fpm: 344, peak_g: 1.38, runway: { along_m: 1104, in_tdz: false, long_landing: true, zone: "Long" } })
+    ];
+    var real = notice(td.t_s);
+
+    var sim, ack = null, tick = 0, statusOn = true;
+    function restart(t) { sim = { t: t, playing: sim ? sim.playing : true, recording: true }; }
+    restart(170);
+
+    function status() {
+        var st = sim.recording ? { state: "recording", flight_id: D.flight.id, elapsed_s: Math.floor(sim.t) } : { state: "connected" };
+        var msg = { v: 2, status: st };
+        if (sim.recording) {
+            msg.flight = { id: D.flight.id, aircraft: D.flight.aircraft.icao, departure: D.flight.departure, elapsed_s: Math.floor(sim.t),
+                phase: phaseAt(sim.t), landings: 2 + (sim.t >= td.t_s ? 1 : 0) };
+        }
+        if (ack) { msg.ack = ack; ack = null; }
+        hub.emit(MSG.status, msg);
+    }
+
+    function events() {
+        var ev = D.events.filter(function (e) { return e.peak_s <= sim.t; });
+        var counts = { advisory: 0, low: 0, medium: 0, high: 0 };
+        ev.forEach(function (e) { counts[e.level]++; });
+        hub.emit(MSG.events, { v: 2, flight_id: D.flight.id, events: ev, counts: counts });
+        return ev.length;
+    }
+
+    function landings() {
+        var all = sim.t >= noticeAt ? [real].concat(earlier.slice().reverse()) : earlier.slice().reverse();
+        hub.emit(MSG.landings, { v: 2, landings: all.slice(0, 3) });
+    }
+
+    // The app's answer to a command, in the next status.
+    window.command = function (msg) {
+        setTimeout(function () {
+            var fail = document.getElementById("fail").checked;
+            ack = { cmd: msg.cmd, ok: !fail };
+            if (fail) ack.message = "Recorder busy (stubbed failure)";
+            else if (msg.cmd === "mark") ack.message = "Marked at " + Math.floor(sim.t / 60) + ":" + ("0" + Math.floor(sim.t % 60)).slice(-2) + ", in the debrief";
+            else sim.recording = false;
+            status();
+        }, 700);
+    };
+
+    var lastCount = -1, landed = false;
+    function step() {
+        var speed = +document.getElementById("speed").value;
+        if (sim.playing && sim.recording) sim.t = Math.min(s.t_s[s.t_s.length - 1], sim.t + 0.25 * speed);
+        tick++;
+        document.getElementById("clock").textContent = "t " + sim.t.toFixed(1) + " s · " + phaseAt(sim.t) + (sim.recording ? "" : " · not recording") + (statusOn ? "" : " · app silent");
+        if (!statusOn) return;
+        if (tick % 4 === 0) status();
+        if (!sim.recording) return;
+        hub.emit(MSG.live, live(sim.t));
+        var n = D.events.filter(function (e) { return e.peak_s <= sim.t; }).length;
+        if (n !== lastCount || tick % 20 === 0) { lastCount = n; events(); }
+        if (sim.t >= noticeAt && (!landed || tick % 20 === 0)) {
+            hub.emit(MSG.landing, { v: 2, age_s: Math.floor((sim.t - noticeAt) / speed), notice: real });
+            if (!landed) landings();
+            landed = true;
+        } else if (sim.t < noticeAt) landed = false;
+        if (tick % 20 === 0) landings();
+    }
+
+    open();
+    status(); events(); landings();
+    setInterval(step, 250);
+
+    var jumps = { cruise: 185, g1000: cross[1000] - 3, g500: cross[500] - 2, touchdown: td.t_s - 3, notice: noticeAt - 1, taxi: 300 };
+    document.querySelector(".controls").addEventListener("click", function (e) {
+        var j = e.target.getAttribute("data-jump"), d = e.target.getAttribute("data-do");
+        if (j) { sim.t = jumps[j]; sim.recording = true; statusOn = true; }
+        else if (d === "play") { sim.playing = !sim.playing; e.target.textContent = sim.playing ? "Pause" : "Play"; }
+        else if (d === "restart") { restart(170); lastCount = -1; statusOn = true; }
+        else if (d === "reopen") { open(); status(); events(); landings(); }
+        else if (d === "silence") statusOn = false;
+    });
+});
+</script>
+</body>
+</html>

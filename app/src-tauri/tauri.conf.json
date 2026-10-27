@@ -1,0 +1,74 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "FOQA-Sim",
+  "version": "0.2.0",
+  "identifier": "com.egebilge.foqa-sim",
+  "build": {
+    "devUrl": "http://localhost:5173",
+    "frontendDist": "../dist",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "FOQA-Sim",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 960,
+        "minHeight": 600,
+        "visible": false
+      }
+    ],
+    "security": {
+      "csp": {
+        "default-src": "'self'",
+        "script-src": "'self'",
+        "style-src": "'self' 'unsafe-inline'",
+        "img-src": "'self' data: blob: https://tiles.openfreemap.org",
+        "font-src": "'self' data:",
+        "worker-src": "'self' blob:",
+        "child-src": "blob:",
+        "connect-src": "'self' ipc: http://ipc.localhost https://tiles.openfreemap.org"
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico"
+    ],
+    "resources": {
+      "../../msfs-panel/out/Packages/foqa-sim-panel": "packages/foqa-sim-panel",
+      "../../msfs-panel/out/Packages/foqa-sim-efb": "packages/foqa-sim-efb",
+      "vcrt/msvcp140.dll": "msvcp140.dll",
+      "vcrt/vcruntime140.dll": "vcruntime140.dll",
+      "vcrt/vcruntime140_1.dll": "vcruntime140_1.dll"
+    },
+    "publisher": "Ege Bilge",
+    "copyright": "Copyright (c) 2026 Ege Bilge",
+    "license": "Apache-2.0",
+    "shortDescription": "Flight-data debrief for MSFS flights",
+    "category": "Utility",
+    "windows": {
+      "webviewInstallMode": {
+        "type": "embedBootstrapper"
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "installerHooks": "./windows/hooks.nsh",
+        "displayLanguageSelector": false,
+        "languages": [
+          "English"
+        ]
+      }
+    }
+  }
+}

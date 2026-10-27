@@ -1,0 +1,21 @@
+# Boeing 787-10 type profile. Schema: docs/rules.md.
+#
+# No tail_contact: no 787-10 FCTM value reachable.
+# No hard_landing_g: no 787 AMM threshold found.
+type: B78X
+name: Boeing 787-10
+class: transport
+vmo: { value: 350 kt, source: "EASA TCDS IM.A.115 Issue 30 Sec 3 787-10, https://www.easa.europa.eu/en/downloads/7302/en", note: "TCDS: VMO/MMO 350 KEAS / 0.90 M (certification limit); some FCOM sources show 330 kt operating VMO, unverified" }
+vle: { value: 270 kt, source: "Airliners.net forum + Quizlet 787 limitations (secondary, weak)", approximate: true, note: "787 gear extended appears to equal the gear operating limit 270 kt/0.82M (unlike 737/747 at 320); low confidence" }
+vlo: { value: 270 kt, source: "Quizlet 787 limitations / airliners.net forum (secondary)", approximate: true, note: "270 kt/0.82M for extend and retract per secondary sources" }
+max_crosswind: { value: 40 kt, source: "typical Boeing widebody (777/787) demonstrated crosswind, from memory", approximate: true, note: "no source found online, low confidence; demonstrated, not a limit" }
+max_tailwind: { value: 15 kt, source: "EASA TCDS IM.A.115 Issue 30 Sec 3 787-10, https://www.easa.europa.eu/en/downloads/7302/en", note: "TCDS: max takeoff and landing tailwind 15 kt; EASA operational approval only up to 10 kt" }
+flaps:
+  - { up_to: 1 deg, vfe: { value: 260 kt, source: &fc "Air Canada 787 flashcards (787-9 placards, same wing as the -10; brainscape/freezingblue); 787-10 value not directly found", approximate: true, note: "787-9 value, same wing; flaps 1" } }
+  - { up_to: 5 deg, vfe: { value: 240 kt, source: *fc, approximate: true, note: "787-9 value, same wing; flaps 5" } }
+  - { up_to: 10 deg, vfe: { value: 230 kt, source: *fc, approximate: true, note: "787-9 value, same wing; flaps 10" } }
+  - { up_to: 15 deg, vfe: { value: 220 kt, source: *fc, approximate: true, note: "787-9 value, same wing; flaps 15" } }
+  - { up_to: 18 deg, vfe: { value: 215 kt, source: *fc, approximate: true, note: "787-9 value, same wing; flaps 17/18" } }
+  - { up_to: 20 deg, vfe: { value: 210 kt, source: *fc, approximate: true, note: "787-9 value, same wing; flaps 20" } }
+  - { up_to: 25 deg, vfe: { value: 190 kt, source: *fc, approximate: true, note: "787-9 value, same wing; flaps 25" } }
+  - { vfe: { value: 180 kt, source: *fc, approximate: true, note: "787-9 value, same wing; flaps 30. The 787-8 card shows lower values (1:250 5:230 15:215 20:210 25:180 30:170), so the variant matters" } }

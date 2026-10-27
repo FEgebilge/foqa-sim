@@ -1,0 +1,13 @@
+# Pilatus PC-24 type profile. Schema: docs/rules.md.
+#
+# No tail_contact, hard_landing_g, max_crosswind, max_tailwind: not in the TCDS,
+# nothing reachable.
+type: PC24
+name: Pilatus PC-24
+class: transport
+vmo: { value: 290 kt, source: &tcds "EASA TCDS EASA.A.594 PC-24 Issue 08, https://www.easa.europa.eu/en/downloads/44366/en", approximate: true, note: "TCDS gives VMO 290 KEAS (MMO 0.74); at low altitude EAS is within 1-2 kt of IAS" }
+vle: { value: 250 kt, source: *tcds, approximate: true, note: "TCDS gives VLE 250 KEAS; KEAS taken as KIAS" }
+vlo: { value: 200 kt, source: *tcds, approximate: true, note: "TCDS VLO extension 250 KEAS, retraction 200 KEAS; lower given, KEAS taken as KIAS" }
+flaps:
+  - { up_to: 15 deg, vfe: { value: 200 kt, source: *tcds, note: "8 deg takeoff 200 KEAS, 15 deg approach 200 KEAS" } }
+  - { vfe: { value: 175 kt, source: *tcds, note: "33 deg landing" } }

@@ -1,0 +1,14 @@
+# Saab 340B type profile. Schema: docs/rules.md.
+#
+# No tail_contact, hard_landing_g, max_crosswind: no source found.
+type: SF34
+name: Saab 340B
+class: transport
+vmo: { value: 250 kt, source: "Airliners.net https://www.airliners.net/forum/viewtopic.php?t=745789 and brainscape Saab 340 limitations flashcards", approximate: true, note: "250 KIAS up to 16,000 ft, decreasing to about 210 kt at FL250; forum/flashcards, EASA TCDS A.068 Issue 26 only says refer to the AFM" }
+vle: { value: 200 kt, source: &cards "brainscape Saab 340 FCOM ch.2 flashcards https://www.brainscape.com/flashcards/saab-340-limitations-memory-items-fcom-c-14356168/packs/21679145", approximate: true, note: "flashcard value, not a primary document" }
+vlo: { value: 150 kt, source: *cards, approximate: true, note: "retract 150, extend 200 (lower given); flashcard value" }
+max_tailwind: { value: 10 kt, source: "EASA TCDS EASA.A.068 Issue 26 https://www.easa.europa.eu/lv/downloads/7388/en, Item B-8", note: "takeoff and landing with tailwind greater than 10 kt not approved" }
+flaps:
+  - { up_to: 15 deg, vfe: { value: 175 kt, source: &fl "Airliners.net forum and the flashcards above", approximate: true, note: "flaps 7 and 15; flashcard value" } }
+  - { up_to: 20 deg, vfe: { value: 165 kt, source: *fl, approximate: true, note: "flashcard value, flaps 20" } }
+  - { vfe: { value: 140 kt, source: *fl, approximate: true, note: "flaps 35; flashcard value" } }

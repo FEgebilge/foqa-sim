@@ -1,0 +1,21 @@
+# Boeing 747-8 Intercontinental type profile. Schema: docs/rules.md.
+#
+# No tail_contact.landing: no source found.
+# No hard_landing_g: only a weak patent source (1.7 g for the 747-400).
+type: B748
+name: Boeing 747-8 Intercontinental
+class: transport
+tail_contact:
+  takeoff: { value: 12.5 deg, source: "Boeing AERO tail strike article, 747-400, https://www.leonardo-in-flight.nl/PDF/Boeing AERO Tailstrikes].pdf", approximate: true, note: "struts extended; 747-400 value, the 747-8 fuselage is stretched so the true value is likely a bit lower" }
+vmo: { value: 365 kt, source: "EASA TCDS IM.A.196 747-8 section, https://www.easa.europa.eu/en/downloads/102235/en (FAA TCDS A20WE)", note: "TCDS 747-8: VMO/MMO 365 KCAS / 0.9" }
+vle: { value: 320 kt, source: "Quizlet 747-8 limitations (secondary)", approximate: true, note: "320 kt/0.82M gear extended, wheel well doors closed; secondary source" }
+vlo: { value: 270 kt, source: "Quizlet 747-8 limitations (secondary)", approximate: true, note: "270 kt/0.82M gear operating; secondary source" }
+max_crosswind: { value: 35 kt, source: "forum recollection for the 747; a Boeing guideline deck cites 36 kt demonstrated (model unspecified)", approximate: true, note: "low confidence, demonstrated value" }
+max_tailwind: { value: 15 kt, source: "typical Boeing transport limit; the 747-8 TCDS section has no tailwind line", approximate: true, note: "typical Boeing transport limit, not specific to the 747-8" }
+flaps:
+  - { up_to: 1 deg, vfe: { value: 285 kt, source: &q748 "Quizlet 747-8F limitations card (secondary; the -400 card differs by 5 kt: 280/260/240/230/205/180)", approximate: true, note: "747-8F value from a secondary card; flaps 1" } }
+  - { up_to: 5 deg, vfe: { value: 265 kt, source: *q748, approximate: true, note: "747-8F value from a secondary card; flaps 5" } }
+  - { up_to: 10 deg, vfe: { value: 245 kt, source: *q748, approximate: true, note: "747-8F value from a secondary card; flaps 10" } }
+  - { up_to: 20 deg, vfe: { value: 235 kt, source: *q748, approximate: true, note: "747-8F value from a secondary card; flaps 20" } }
+  - { up_to: 25 deg, vfe: { value: 210 kt, source: *q748, approximate: true, note: "747-8F value from a secondary card; flaps 25" } }
+  - { vfe: { value: 185 kt, source: *q748, approximate: true, note: "747-8F value from a secondary card; flaps 30" } }

@@ -1,0 +1,17 @@
+[package]
+name = "rules"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+analyzer = { path = "../analyzer" }
+fdm-core = { path = "../fdm-core" }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_yaml_ng = "0.10.0"
+
+[dev-dependencies]
+recorder = { path = "../recorder" }
+testkit = { path = "../testkit" }
