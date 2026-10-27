@@ -31,6 +31,40 @@ measure everything else, and accept an attempt only if the measured
 conditions are inside the challenge's bands.** Fairness then becomes a
 verified property of the attempt, not a hope about the user's settings.
 
+## Setting the weather (experiment, 2026-10-27)
+
+Ranked attempts must start with the same weather every time (Ege). The sim's
+own weather service is reachable from any Coherent page that has
+`RegisterViewListenerT` (our EFB app's page does), as the sim's weather
+toolbar does it (`fs-base-ui/html_ui/JS/Services/Weather.js`):
+
+```js
+const l = RegisterViewListenerT("JS_LISTENER_WEATHER", ready, ViewListener.ViewListener);
+l.on("SetWeatherList", list => ...);           // presets: index, name, wind summary
+l.on("UpdatePreset", preset => ...);           // the selected preset, full data
+l.trigger("ASK_WEATHER_LIST");
+l.trigger("CUSTOM_WEATHER_PRESET_CHANGED", 1); // select by index
+l.call("UpdateTempWeatherPreset", preset);     // edited copy, resolves with the result
+```
+
+Verified on the running sim (MS Store build, paused before Ready to fly):
+the listener answers with 11 presets (live, clear sky, ..., last custom);
+selecting index 1 pushes the full preset (`tWindLayers` with `dvAltitude`,
+`dvAngleRad`, `dvSpeed`, `gustWaveData`; up to 3 `tCloudLayers`;
+`oSettings` with `dvMSLPressure`, `dvMSLGLTemperature`, `dvPrecipitation`,
+`dvPollution`, ...); editing wind layer 0 to 270 deg / 18 kt with no gust
+and calling `UpdateTempWeatherPreset` is accepted and echoed back exactly.
+Values carry the user's display units (`inHg`, `°F` here): convert from each
+value's `unit`, never assume.
+
+Not yet verified: that the aircraft then flies in that wind. While frozen
+before Ready to fly the ambient wind SimVars kept the previous weather.
+Next: in flight, select a preset, set wind layer 0, then compare
+`AMBIENT WIND DIRECTION` / `VELOCITY`, `SEA LEVEL PRESSURE` and temperature
+with the challenge before the attempt starts. Gusts stay off for ranked
+challenges: their phase is random, so identical gust settings do not give
+identical wind.
+
 ## Challenge definition
 
 A versioned JSON file, opened locally or served by a site; the app (and a
