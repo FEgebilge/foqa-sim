@@ -10,6 +10,9 @@ import type { AttemptRecord, AttemptView, Briefing, ChallengeEntry, Debrief, Fli
 
 export type Unlisten = () => void;
 
+/** The flight exports of `fdm export` (docs/exports.md). */
+export type ExportFormat = "csv" | "kml" | "gpx" | "parquet";
+
 export interface BackendEvents {
   "recorder-status": RecorderStatus;
   "flight-saved": FlightSummary;
@@ -57,6 +60,12 @@ export interface Api extends ChallengesApi, SitesApi {
   /** null goes back to the Community folder of the install found. */
   setupUseCommunity(path: string | null): Promise<SetupStatus>;
   setupPickCommunity(): Promise<SetupStatus>;
+  /** Saves the flight in a format other tools read, where the user picks; the file, null when cancelled. `identity` adds the aircraft's title and tail number. */
+  exportFlight(id: string, format: ExportFormat, identity: boolean): Promise<string | null>;
+  /** Saves the flight list as a Little Navmap logbook CSV; the file, null when cancelled. */
+  exportLogbook(identity: boolean): Promise<string | null>;
+  /** Saves a PNG the window drew (the landing card); the file, null when cancelled. */
+  saveImage(png: Blob, name: string): Promise<string | null>;
   on<K extends keyof BackendEvents>(event: K, handler: (payload: BackendEvents[K]) => void): Promise<Unlisten>;
 }
 
@@ -73,6 +82,9 @@ const tauriApi: Api = {
   setupRemove: (pkg) => invoke<SetupStatus>("setup_remove", { package: pkg }),
   setupUseCommunity: (path) => invoke<SetupStatus>("setup_use_community", { path }),
   setupPickCommunity: () => invoke<SetupStatus>("setup_pick_community"),
+  exportFlight: (id, format, identity) => invoke<string | null>("export_flight", { id, format, identity }),
+  exportLogbook: (identity) => invoke<string | null>("export_logbook", { identity }),
+  saveImage: async (png, name) => invoke<string | null>("save_image", { name, png: Array.from(new Uint8Array(await png.arrayBuffer())) }),
   challengesList: () => invoke<ChallengeEntry[]>("challenges_list"),
   challengeImport: () => invoke<ChallengeEntry | null>("challenge_import"),
   challengeRemove: (key) => invoke<void>("challenge_remove", { key }),
@@ -115,6 +127,24 @@ async function firstJson<T>(paths: string[]): Promise<T> {
   throw new Error(`No mock data at ${paths.join(" or ")}`);
 }
 
+/** Hands a file to the browser's downloads: the mock's stand-in for a save dialog. */
+function download(blob: Blob, name: string) {
+  const url = URL.createObjectURL(blob);
+  const link = Object.assign(document.createElement("a"), { href: url, download: name });
+  link.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return name;
+}
+
+/** A mock export made by `fdm` (public/mock/export); Vite answers a missing one with index.html. */
+async function mockExport(name: string) {
+  const response = await fetch(`/mock/export/${name}`);
+  if (!response.ok || response.headers.get("content-type")?.includes("html")) {
+    throw new Error(`The mock has ${name.endsWith(".parquet") ? "no Parquet export" : "exports of c172-pattern only"}; the desktop app exports every flight.`);
+  }
+  return download(await response.blob(), name);
+}
+
 const params = new URLSearchParams(window.location.search);
 // Real backend output wins over the synthetic sample (scripts/make-sample-mock.mjs); `?samples` shows only the sample.
 const mockFiles = (name: string) => (params.has("samples") ? [`/mock/sample-${name}`] : [`/mock/${name}`, `/mock/sample-${name}`]);
@@ -154,6 +184,9 @@ const mockApi: Api = {
     const flights = await firstJson<FlightSummary[]>(mockFiles("flights.json"));
     return { flights: flights.length, bytes: flights.length * 1_800_000, folder: "Documents\\FOQA-Sim\\flights" };
   },
+  exportFlight: (id, format) => mockExport(`${id.split(COPY)[0]}.${format}`),
+  exportLogbook: () => mockExport("logbook.csv"),
+  saveImage: async (png, name) => download(png, name),
   ...mockSetup(params.get("setup")),
   ...mockChallenges(params.get("status")),
   ...mockSites(params.get("sites")),

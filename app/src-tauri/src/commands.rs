@@ -129,7 +129,7 @@ impl Shared {
 
     /// The stored file of a flight id. Ids are file stems from `list_flights`;
     /// anything else could name a file outside the folder.
-    fn flight(&self, id: &str) -> Result<PathBuf, String> {
+    pub(crate) fn flight(&self, id: &str) -> Result<PathBuf, String> {
         let stem = !id.is_empty()
             && id
                 .chars()
@@ -165,7 +165,7 @@ pub fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 /// Runs analysis off the IPC thread: a long flight takes a while.
-async fn blocking<T: Send + 'static>(
+pub(crate) async fn blocking<T: Send + 'static>(
     f: impl FnOnce() -> Result<T, String> + Send + 'static,
 ) -> Result<T, String> {
     tauri::async_runtime::spawn_blocking(f)
