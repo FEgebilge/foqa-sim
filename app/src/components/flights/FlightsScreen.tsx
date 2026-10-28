@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
-import { BookOpen, FolderOpen, PlaneLanding, RefreshCw, SearchX, ServerCrash } from "lucide-react";
+import { BookOpen, FolderOpen, RefreshCw, SearchX, ServerCrash } from "lucide-react";
 import { api } from "../../api";
 import { Button } from "@ui/components/button/button";
 import { EmptyState } from "@ui/components/empty-state/empty-state";
@@ -13,6 +13,8 @@ import { useFlights } from "../../lib/use-backend";
 import type { FlightSummary, Grade } from "../../types";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { ExportMenu } from "../ExportMenu";
+import { FirstRun } from "../home/FirstRun";
+import { LatestFlight } from "../home/LatestFlight";
 import { useOpenFolder } from "../use-open-folder";
 import { toRow, type FlightRow } from "./flight-row";
 import { FlightsTable } from "./FlightsTable";
@@ -84,19 +86,7 @@ export function FlightsScreen({ recorder }: { recorder: RecorderState | null }) 
   else if (state.status === "error") {
     body = <div className="panel"><EmptyState icon={<ServerCrash size={20} />} title="Could not read the flights" description={state.message} action={<Button variant="secondary" size="sm" onClick={refresh}>Try again</Button>} /></div>;
   } else if (!flights.length) {
-    const waiting = recorder?.value.state === "waiting_for_sim";
-    body = (
-      <div className="panel">
-        <EmptyState
-          icon={<PlaneLanding size={20} />}
-          title="No flights yet"
-          description={waiting
-            ? "Start MSFS and fly. FOQA-Sim records in the background and lists the flight here, analysed, when it closes."
-            : "Load a flight in MSFS. It is recorded automatically and appears here, analysed, when it closes."}
-          action={<Button variant="secondary" size="sm" onClick={openFolder}><FolderOpen size={15} aria-hidden="true" />Open flights folder</Button>}
-        />
-      </div>
-    );
+    body = <FirstRun recorder={recorder} />;
   } else {
     body = (
       <>
@@ -124,6 +114,7 @@ export function FlightsScreen({ recorder }: { recorder: RecorderState | null }) 
         </div>
         {actions}
       </header>
+      {flights.length ? <LatestFlight flights={flights} /> : null}
       {flights.length ? (
         <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-[var(--radius-panel)] border border-line bg-line sm:grid-cols-4">
           <Stat label="Flights" value={number(flights.length)} />

@@ -42,9 +42,27 @@ const COPY = "~";
 /** Mock flights "deleted" in this page session. */
 const deleted = new Set<string>();
 
+/** `?mock=empty`: no flights yet, the first run. `?mock=history`: a flight list built from the trends sample, so the
+ * latest flight has others in its type to compare with; each opens the c172-pattern debrief. */
+const scenario = params.get("mock");
+
+/** The trends sample's landings as flight summaries, one flight each. */
+async function historyFlights(): Promise<FlightSummary[]> {
+  const { landings } = await firstJson<Trends>(["/mock/trends.json"]);
+  return landings.map(({ flight_id, started_utc, aircraft, ...facts }): FlightSummary => ({
+    id: `c172-pattern${COPY}${flight_id}`, started_utc: started_utc ?? undefined, duration_s: 3600 + facts.t_s, aircraft: aircraft ? { icao: aircraft, title: aircraft } : undefined,
+    departure: facts.icao, arrival: facts.icao, landings: 1, worst_level: facts.grade === "good" ? undefined : "medium",
+    event_counts: { advisory: 1, low: 0, medium: facts.grade === "good" ? 0 : 1, high: facts.grade === "poor" ? 1 : 0 },
+    assessment: { grade: facts.grade ?? "fair", points: 0, findings: 0, method: "landing-3", score: facts.score, confidence: facts.confidence },
+    landings_detail: [facts],
+  })).reverse();
+}
+
 export const mockApi: Api = {
   live: false,
   async listFlights() {
+    if (scenario === "empty") return [];
+    if (scenario === "history") return (await historyFlights()).filter((f) => !deleted.has(f.id));
     const flights = await firstJson<FlightSummary[]>(mockFiles("flights.json"));
     if (!(many > flights.length)) return flights.filter((f) => !deleted.has(f.id));
     return Array.from({ length: many }, (_, index) => {
@@ -84,6 +102,9 @@ export const mockApi: Api = {
   },
   async openFlightsFolder() {
     throw new Error("Opening the flights folder needs the desktop app.");
+  },
+  async openLogFolder() {
+    throw new Error("Opening the log folder needs the desktop app.");
   },
   async storageUsage() {
     const flights = await firstJson<FlightSummary[]>(mockFiles("flights.json"));
