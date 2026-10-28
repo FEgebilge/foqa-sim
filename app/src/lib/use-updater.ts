@@ -38,7 +38,8 @@ export function useUpdater(recording: boolean) {
     setError(undefined);
     try {
       const update = await api.checkUpdate();
-      try { localStorage.setItem(CHECKED, String(Date.now())); } catch { /* storage unavailable: asked again next start */ }
+      // Only "nothing new" waits a day: a found update is offered again at the next start until it is installed.
+      if (!update) try { localStorage.setItem(CHECKED, String(Date.now())); } catch { /* storage unavailable: asked again next start */ }
       setDismissed(false);
       setState(update ? { phase: "available", update } : { phase: "idle" });
       if (manual && !update) notify({ title: "FOQA-Sim is up to date" });
