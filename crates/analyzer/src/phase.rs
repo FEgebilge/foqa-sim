@@ -593,7 +593,7 @@ mod tests {
         air.extend(up_and_down(900)[9..].iter().copied());
         let mut t = circuit(&air);
         assert!(phase_labels(&t, &T).contains(&GoAround));
-        t.breaks = vec![k..k + 2];
+        t.breaks.push(k..k + 2);
         let spans = phases(&t, &T);
         let seq = [
             Takeoff,
