@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type BackendEvents } from "../api";
+import { rememberFlights } from "./flight-names";
 import type { Debrief, FlightSummary, RecorderStatus, SetupStatus, TrendFilter } from "../types";
 
 export type Load<T> = { status: "loading" } | { status: "ready"; data: T } | { status: "error"; message: string };
@@ -51,17 +52,21 @@ export function useLoad<T>(load: () => Promise<T>) {
 }
 
 export function useFlights() {
-  const load = useCallback(() => api.listFlights(), []);
+  const load = useCallback(() => api.listFlights().then((flights) => { rememberFlights(flights); return flights; }), []);
   const result = useLoad(load);
   const { patch } = result;
   // A newly saved flight goes to the top (or replaces its older summary).
-  const onSaved = useCallback((flight: FlightSummary) => patch((flights) => [flight, ...flights.filter((f) => f.id !== flight.id)]), [patch]);
+  const onSaved = useCallback((flight: FlightSummary) => {
+    rememberFlights([flight]);
+    patch((flights) => [flight, ...flights.filter((f) => f.id !== flight.id)]);
+  }, [patch]);
   useBackendEvent("flight-saved", onSaved);
   return result;
 }
 
 export function useDebrief(id: string) {
-  const load = useCallback(() => api.debrief(id), [id]);
+  // The flight summary inside the debrief names the flight in the header, with no call of its own.
+  const load = useCallback(() => api.debrief(id).then((debrief) => { rememberFlights([debrief.flight]); return debrief; }), [id]);
   const result = useLoad<Debrief>(load);
   return { state: result.state, refresh: result.refresh, refreshing: result.refreshing };
 }
