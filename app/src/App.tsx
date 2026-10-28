@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import { Newspaper, PackageCheck, Plane, TrendingUp, TriangleAlert, Trophy } from "lucide-react";
 import { Badge } from "@ui/components/badge/badge";
 import { Button } from "@ui/components/button/button";
@@ -6,17 +6,13 @@ import { Tooltip } from "@ui/components/tooltip/tooltip";
 import { ThemeSwitch } from "@ui/components/theme-switch/theme-switch";
 import { api } from "./api";
 import { AutostartToggle } from "./components/AutostartToggle";
-import { ChallengesScreen } from "./components/challenges/ChallengesScreen";
 import { DeepLinkDialog } from "./components/challenges/DeepLinkDialog";
-import { DevlogScreen } from "./components/devlog/DevlogScreen";
 import { WhatsNewDialog } from "./components/devlog/WhatsNewDialog";
 import { DebriefScreen } from "./components/debrief/DebriefScreen";
 import { FlightsScreen } from "./components/flights/FlightsScreen";
 import { RecorderStatusPill } from "./components/RecorderStatusPill";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { UpdateNotice } from "./components/UpdateNotice";
-import { SetupScreen } from "./components/setup/SetupScreen";
-import { TrendsScreen } from "./components/trends/TrendsScreen";
 import { appVersion } from "./lib/devlog";
 import { measured, number } from "./lib/format";
 import { LOGO } from "./lib/logo";
@@ -25,6 +21,12 @@ import { useNotify, useTheme } from "./lib/context";
 import { useBackendEvent, useRecorderStatus, useSetup } from "./lib/use-backend";
 import { useUpdater } from "./lib/use-updater";
 import type { LandingNotice, OpenFlight } from "./types";
+
+// The flights list and the debrief open first; the other screens load when asked for.
+const ChallengesScreen = lazy(() => import("./components/challenges/ChallengesScreen").then((m) => ({ default: m.ChallengesScreen })));
+const DevlogScreen = lazy(() => import("./components/devlog/DevlogScreen").then((m) => ({ default: m.DevlogScreen })));
+const SetupScreen = lazy(() => import("./components/setup/SetupScreen").then((m) => ({ default: m.SetupScreen })));
+const TrendsScreen = lazy(() => import("./components/trends/TrendsScreen").then((m) => ({ default: m.TrendsScreen })));
 
 export default function App() {
   const route = useRoute();
@@ -123,11 +125,13 @@ export default function App() {
         </div>
       </header>
       <ErrorBoundary key={route.screen === "debrief" ? route.id : route.screen}>
+      <Suspense fallback={<main className="w-full px-6 py-5 2xl:px-8"><div className="h-32 animate-pulse rounded-[var(--radius-panel)] bg-muted" aria-label="Loading" /></main>}>
       {route.screen === "debrief" ? <DebriefScreen key={route.id} id={route.id} />
         : route.screen === "setup" ? <SetupScreen setup={setup} />
         : route.screen === "challenges" ? <ChallengesScreen selected={route.key} recorder={recorder} />
         : route.screen === "trends" ? <TrendsScreen />
         : route.screen === "devlog" ? <DevlogScreen updater={updater} /> : <FlightsScreen recorder={recorder} />}
+      </Suspense>
       </ErrorBoundary>
       <WhatsNewDialog />
       <UpdateNotice updater={updater} />
