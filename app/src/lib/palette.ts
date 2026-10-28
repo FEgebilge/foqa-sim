@@ -41,3 +41,8 @@ export function applyPalette(theme: Theme) {
 
 /** Resolved value of a CSS custom property, for canvas text and grid colours. */
 export const cssVar = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+/** Line colours of the parameter charts and the approach profile (first, second line). */
+export const LINE = { dark: ["#62c9e3", "#c3aefc"], light: ["#0a6f8c", "#6447c0"] } as const;
+/** Reference lines: neutral grey, so they never read as an event level. */
+export const REF = { dark: "#9aa5b8", light: "#5f6b80" } as const;

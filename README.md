@@ -37,7 +37,7 @@ a debrief that says what happened, why it matters and what to do differently.
 
 ## Status
 
-Version 0.8. Works end to end with MSFS 2024 on Windows: installer, automatic recording,
+Version 0.9. Works end to end with MSFS 2024 on Windows: installer, automatic recording,
 debrief with replay and flying skills, trends across flights, exports, in-sim panel and EFB app, local landing
 challenges. It is being tested with a small group of pilots before a first public release. In
 progress: challenges with the same weather for every pilot, and the first website running the
@@ -54,6 +54,10 @@ open challenge protocol.
   rollout), each read against checkride tolerances (FAA ACS) and airline FDM thresholds (EASA
   Data4Safety, FSF ALAR), with safety caps and the item behind every deduction
   ([scoring.md](docs/scoring.md)). Missing data is reported as such, never as full marks.
+- **Reference approach.** Each scored approach drawn against the profile it was graded by: the
+  3° path (or your ILS glideslope), speed against Vapp, sink against what the path needs, and
+  configuration at the gate, with the score's own bands and the first point you left each one
+  ([reference-approach.md](docs/reference-approach.md)).
 - **Flight phases** after the ICAO CICTT definitions, following the aircraft (a light aircraft
   flares lower, turboprops fly a higher pattern), each with the reason it started.
 - **Flying skills.** How the flight was flown, as measures with their sources rather than a
@@ -147,7 +151,8 @@ Worth reading first: [format.md](docs/format.md) (recording formats),
 (flight phases), [debrief-api.md](docs/debrief-api.md) (backend and UI contract),
 [ingame-panel.md](docs/ingame-panel.md) (app and in-sim panel),
 [challenges.md](docs/challenges.md) (landing challenges), [exports.md](docs/exports.md)
-(exports and the landing card), [trends.md](docs/trends.md) (trends across flights), [skills.md](docs/skills.md) (flying skills).
+(exports and the landing card), [trends.md](docs/trends.md) (trends across flights), [skills.md](docs/skills.md) (flying skills),
+[reference-approach.md](docs/reference-approach.md) (approach profile).
 
 ## Development
 

@@ -97,11 +97,103 @@ fn the_assessment_matches_its_snapshot() {
     let lost: f64 = landing.domains.iter().map(|d| d.points).sum();
     assert!((100.0 - lost - landing.raw.unwrap()).abs() < 0.3, "{lost}");
 
-    let json = rounded(serde_json::to_value(a).unwrap());
+    // The profile's arrays are checked below, not snapshotted.
+    let mut json = serde_json::to_value(a).unwrap();
+    for l in json["landings"].as_array_mut().unwrap() {
+        l.as_object_mut().unwrap().remove("profile");
+    }
+    let json = rounded(json);
     if std::env::var_os("UPDATE_SNAPSHOTS").is_some() || !Path::new(SNAPSHOT).exists() {
         let text = serde_json::to_string_pretty(&json).unwrap() + "\n";
         fs::write(SNAPSHOT, text).unwrap();
     }
     let saved: Value = serde_json::from_str(&fs::read_to_string(SNAPSHOT).unwrap()).unwrap();
     assert_eq!(json, rounded(saved), "UPDATE_SNAPSHOTS=1 to accept");
+}
+
+/// The profile of the only landing of `script` flown into `events`.
+fn profile_of(events: &[SimEvent], script: impl Fn(f64) -> Pt) -> Option<debrief::ApproachProfile> {
+    let (flight, _) = fly_to(events, AIRLINER_LB, TD_S + ROLLOUT_S, script);
+    let d = Station::core()
+        .unwrap()
+        .analyse("flight-1".into(), flight)
+        .unwrap()
+        .debrief();
+    d.flight.assessment_detail.landings[0].profile.clone()
+}
+
+/// A 140 kt approach on the 3 degree path to a 50 ft threshold crossing,
+/// the threshold 400 m before the touchdown (`runway_behind_touchdown`),
+/// flared over the last metres.
+fn on_path(t: f64) -> Pt {
+    let threshold_s = TD_S - 400.0 / (140.0 * KT_MS);
+    let ft_s = 140.0 * KT_MS / 0.3048 * 3f64.to_radians().tan();
+    let alt = lerp(
+        &[
+            (0.0, 50.0 + ft_s * threshold_s),
+            (threshold_s, 50.0),
+            (TD_S, 0.0),
+        ],
+        t,
+    );
+    Pt {
+        alt,
+        ..landing(t, TD_S, 1.2)
+    }
+}
+
+fn airport() -> [SimEvent; 2] {
+    [
+        identity("B738"),
+        SimEvent::Airport(runway_behind_touchdown(400.0)),
+    ]
+}
+
+#[test]
+fn the_profile_follows_the_threshold_and_the_path() {
+    let p = profile_of(&airport(), on_path).expect("a profile");
+    let n = p.t_s.len();
+    assert!(n > 50, "{n}");
+    assert!(
+        [&p.dist_nm, &p.height_ft, &p.gs_dot, &p.loc_dot]
+            .iter()
+            .all(|v| v.len() == n)
+    );
+    assert_eq!((p.path_deg, p.tch_ft), (3.0, 50.0));
+    assert_eq!((p.top_ft, p.bottom_ft), (1000.0, 50.0));
+    // Closing on the threshold at 140 kt, 72 m/s.
+    assert!(p.dist_nm.windows(2).all(|w| w[1] < w[0]));
+    let ahead = p.dist_nm.last().unwrap();
+    assert!((0.0..0.25).contains(ahead), "{ahead}");
+    // Above the flare the height is the 3 degree path's.
+    for (&d, &h) in p
+        .dist_nm
+        .iter()
+        .zip(&p.height_ft)
+        .filter(|(d, _)| **d > 0.2)
+    {
+        let path = 50.0 + d * 1852.0 / 0.3048 * 3f64.to_radians().tan();
+        assert!((h - path).abs() < 10.0, "{d} nm: {h} ft, path {path} ft");
+    }
+    // No ILS recorded: unknown, not zero.
+    assert!(p.gs_dot.iter().chain(&p.loc_dot).all(|x| x.is_nan()));
+}
+
+#[test]
+fn the_profile_carries_the_ils_deviation_and_needs_a_runway() {
+    let p = profile_of(&airport(), |t| Pt {
+        set: vec![
+            ("NAV HAS GLIDE SLOPE:1", 1.0),
+            ("NAV GSI:1", 1.5 * 119.0 / 2.0),
+        ],
+        ..on_path(t)
+    })
+    .unwrap();
+    assert!(
+        p.gs_dot.iter().all(|x| (x.abs() - 1.5).abs() < 0.1),
+        "{:?}",
+        p.gs_dot
+    );
+    assert!(p.loc_dot.iter().all(|x| x.is_nan()));
+    assert_eq!(profile_of(&[identity("B738")], on_path), None);
 }

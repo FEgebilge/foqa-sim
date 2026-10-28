@@ -247,6 +247,20 @@ interface LandingAssessment {
   split_ft: number | null;   // the approach window's split height for its class (light 300, else 500); null when insufficient
   speeds: { vref_kt: number; vapp_kt: number; source: "profile" | "selected"; approximate: boolean; basis: string } | null;
   domains: DomainAssessment[];     // stability, energy, point, lateral, contact, rollout; empty when insufficient
+  profile?: ApproachProfile;       // the approach against its reference ([reference-approach.md](reference-approach.md)); absent without a runway fix or an approach window
+}
+
+// The approach window's points as parallel arrays; NaN goes out as null.
+interface ApproachProfile {
+  t_s: number[];          // track time, oldest first
+  dist_nm: number[];      // to the threshold along the extended centreline, positive before it
+  height_ft: number[];    // above the runway, as graded
+  gs_dot: number[];       // glideslope deviation, fly-up positive; null without a signal
+  loc_dot: number[];      // localizer deviation, right positive; null without a signal
+  path_deg: number;       // 3.0 (ICAO PANS-OPS standard path)
+  tch_ft: number;         // 50
+  top_ft: number;         // the window used for grading
+  bottom_ft: number;
 }
 
 interface DomainAssessment {
@@ -281,6 +295,8 @@ interface CriterionAssessment {
   bands_text: { above: (string | null)[]; below: (string | null)[] };   // each anchor as shown, like `value_text`
   standard: string;          // the published source, with "est" for FOQA-Sim choices
   sets: boolean;             // it set its domain's loss
+  first_out_s?: number;      // a series: when it first left the tolerance band (ell past 0.5, persistence held)
+  worst_s?: number;          // a series: when it was worst
 }
 
 interface FindingAssessment {

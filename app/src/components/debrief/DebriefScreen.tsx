@@ -8,6 +8,7 @@ import { clock, number, phaseName } from "../../lib/format";
 import { levelVar } from "../../lib/palette";
 import { openFlights } from "../../lib/route";
 import { useNotify, useTheme } from "../../lib/context";
+import { landingAt } from "../../lib/assessment";
 import { groupLandings } from "../../lib/landings";
 import { adjacentEvent, valueAt } from "../../lib/series";
 import { TimeBus, useHover, type TimeRange } from "../../lib/time";
@@ -19,6 +20,7 @@ import { AssessmentPanel } from "./AssessmentPanel";
 import { SkillsPanel } from "./SkillsPanel";
 import { DebriefHeader } from "./DebriefHeader";
 import { EventList, LevelLegend } from "./EventList";
+import { ApproachProfile } from "./ApproachProfile";
 import { LandingCard } from "./LandingCard";
 import { PhaseTimeline } from "./PhaseTimeline";
 import { ReplayPfd } from "./ReplayPfd";
@@ -70,6 +72,8 @@ function DebriefView({ debrief, refreshing, onRefresh, onOpenFolder }: { debrief
   const range = useMemo<TimeRange>(() => [Math.min(series.t_s[0] ?? 0, phases[0]?.start_s ?? Infinity), Math.max(series.t_s.at(-1) ?? 0, phases.at(-1)?.end_s ?? 0)], [series, phases]);
   const flown = useMemo(() => airborne(phases), [phases]);
   const landings = useMemo(() => groupLandings(touchdowns), [touchdowns]);
+  // Scored landings that carry the reference approach, with the index of their landing card.
+  const profiled = useMemo(() => landings.flatMap((l, index) => { const a = landingAt(debrief, l.touchdown.t_s); return a?.status === "scored" && a.profile?.dist_nm.some((d) => d !== null) ? [{ landing: a, index }] : []; }), [landings, debrief]);
   const [selected, setSelected] = useState<number | null>(null);
   const [focus, setFocus] = useState<number | null>(null);
   const [view, setView] = useState<TimeRange | null>(flown);
@@ -220,6 +224,12 @@ function DebriefView({ debrief, refreshing, onRefresh, onOpenFolder }: { debrief
                   <div className="panel"><EmptyState size="sm" icon={<PlaneLanding size={18} />} title="No touchdown recorded" description={flight.damaged_at !== undefined ? "The recording ends before the aircraft landed." : "The aircraft did not land during this recording."} /></div>
                 )}
               </section>
+              {profiled.length ? (
+                <section aria-labelledby="profile-title" className="flex flex-col gap-4">
+                  <h2 id="profile-title" className="eyebrow">Reference approach</h2>
+                  {profiled.map(({ landing, index }) => <ApproachProfile key={landing.t_s} debrief={debrief} landing={landing} index={index} bus={bus} focus={focus} onFocus={place} />)}
+                </section>
+              ) : null}
             </div>
           </div>
         </div>
