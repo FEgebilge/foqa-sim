@@ -4,11 +4,11 @@ import "uplot/dist/uPlot.min.css";
 import { aircraftName, flightDate, number } from "../../lib/format";
 import { cssVar, type Theme } from "../../lib/palette";
 import { openFlight } from "../../lib/route";
-import { GRADE_VAR, rollingMean, scoredLandings } from "../../lib/trends";
+import { chartHeight, GRADE_VAR, rollingMean, scoredLandings } from "../../lib/trends";
 import type { TrendLanding } from "../../types";
 
 const WINDOW = 5;
-const HEIGHT = 240;
+const height = (width: number) => chartHeight(width, 240, 400);
 const HIT = 12;
 
 /** Scored landings over time: a dot per landing coloured by grade, the rolling mean as a line; click a dot to open its flight. */
@@ -36,7 +36,7 @@ export function ScoreChart({ landings, theme }: { landings: TrendLanding[]; them
     };
     let downX = 0;
     const plot = new uPlot({
-      width: node.clientWidth, height: HEIGHT,
+      width: node.clientWidth, height: height(node.clientWidth),
       scales: { x: { time: true }, y: { range: (_, min, max) => [Math.max(0, Math.floor((min - 6) / 10) * 10), Math.min(100, Math.ceil((max + 3) / 10) * 10)] } },
       legend: { show: false },
       cursor: { drag: { x: false, y: false }, points: { show: false }, x: false, y: false },
@@ -72,7 +72,7 @@ export function ScoreChart({ landings, theme }: { landings: TrendLanding[]; them
         }],
       },
     }, [xs, mean], node);
-    const observer = new ResizeObserver(() => plot.setSize({ width: node.clientWidth, height: HEIGHT }));
+    const observer = new ResizeObserver(() => plot.setSize({ width: node.clientWidth, height: height(node.clientWidth) }));
     observer.observe(node);
     return () => { observer.disconnect(); plot.destroy(); };
   }, [rows, theme]);
