@@ -13,6 +13,7 @@ import { WhatsNewDialog } from "./components/devlog/WhatsNewDialog";
 import { DebriefScreen } from "./components/debrief/DebriefScreen";
 import { FlightsScreen } from "./components/flights/FlightsScreen";
 import { RecorderStatusPill } from "./components/RecorderStatusPill";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { UpdateNotice } from "./components/UpdateNotice";
 import { SetupScreen } from "./components/setup/SetupScreen";
 import { TrendsScreen } from "./components/trends/TrendsScreen";
@@ -121,11 +122,13 @@ export default function App() {
           </div>
         </div>
       </header>
+      <ErrorBoundary key={route.screen === "debrief" ? route.id : route.screen}>
       {route.screen === "debrief" ? <DebriefScreen key={route.id} id={route.id} />
         : route.screen === "setup" ? <SetupScreen setup={setup} />
         : route.screen === "challenges" ? <ChallengesScreen selected={route.key} recorder={recorder} />
         : route.screen === "trends" ? <TrendsScreen />
         : route.screen === "devlog" ? <DevlogScreen updater={updater} /> : <FlightsScreen recorder={recorder} />}
+      </ErrorBoundary>
       <WhatsNewDialog />
       <UpdateNotice updater={updater} />
       <DeepLinkDialog />
