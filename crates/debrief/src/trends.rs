@@ -10,7 +10,7 @@ use rules::{Domain, Level};
 use serde::{Deserialize, Serialize};
 
 use crate::assessment::{domain_short, domain_title};
-use crate::{FlightSummary, LandingFacts, Station, iso_utc};
+use crate::{FlightSummary, LandingFacts, SkillsSummary, Station, iso_utc};
 
 /// A comparison of the newest half with the older half needs this many in
 /// each, else it is `None`.
@@ -45,6 +45,7 @@ pub struct Trends {
     pub events: Vec<EventTrend>,
     pub by_aircraft: Vec<AircraftTrend>,
     pub by_airport: Vec<AirportTrend>,
+    pub skills: SkillsTrend,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -128,6 +129,26 @@ pub struct AirportTrend {
     pub in_tdz: Option<f64>,
     /// Signed: the average offset from the centreline, right positive.
     pub mean_cross_m: Option<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SkillsTrend {
+    /// Mean of the flights' autopilot shares of their airborne time.
+    pub ap_share: Option<f64>,
+    /// Over hand-flown landings: an autoland has no disconnect, so it is
+    /// counted in `autolands` instead.
+    pub ap_off_ft_median: Option<f64>,
+    pub autolands: usize,
+    pub vertical_rms_median: Option<f64>,
+    pub descent_level_s_median: Option<f64>,
+    /// Per type, by ICAO: fuel flow is not comparable across types.
+    pub fuel_kg_h: Vec<FuelTrend>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct FuelTrend {
+    pub icao: String,
+    pub median: f64,
 }
 
 /// A landing with the flight it belongs to.
@@ -221,6 +242,7 @@ fn build(summaries: &[FlightSummary], filter: &TrendFilter, station: &Station, n
         events: events(&flights, station),
         by_aircraft: by_aircraft(&flights, &rows, &scored),
         by_airport: by_airport(&rows),
+        skills: skills_trend(&flights),
     }
 }
 
@@ -379,6 +401,35 @@ fn by_airport(rows: &[Row]) -> Vec<AirportTrend> {
     out
 }
 
+/// The flying skills of the flights (docs/skills.md): medians, so one
+/// turbulent or hand-flown sector does not move them.
+fn skills_trend(flights: &[&FlightSummary]) -> SkillsTrend {
+    let of = |get: fn(&SkillsSummary) -> Option<f64>| -> Vec<f64> {
+        flights.iter().filter_map(|f| get(&f.skills)).collect()
+    };
+    let mut types: BTreeMap<&str, Vec<f64>> = BTreeMap::new();
+    for f in flights {
+        if let (Some(icao), Some(kg_h)) = (icao(f), f.skills.fuel_kg_h) {
+            types.entry(icao).or_default().push(kg_h);
+        }
+    }
+    SkillsTrend {
+        ap_share: mean(&of(|s| s.ap_share)).map(r2),
+        ap_off_ft_median: median(&of(|s| s.ap_off_ft)).map(r1),
+        autolands: flights.iter().filter(|f| f.skills.autoland).count(),
+        vertical_rms_median: median(&of(|s| s.vertical_rms)).map(r2),
+        descent_level_s_median: median(&of(|s| s.descent_level_s)).map(r1),
+        fuel_kg_h: types
+            .into_iter()
+            .filter_map(|(icao, v)| Some((icao, median(&v)?)))
+            .map(|(icao, m)| FuelTrend {
+                icao: icao.to_owned(),
+                median: r1(m),
+            })
+            .collect(),
+    }
+}
+
 fn icao(f: &FlightSummary) -> Option<&str> {
     f.aircraft.as_ref()?.icao.as_deref()
 }
@@ -390,11 +441,11 @@ fn halves<T>(v: &[T]) -> Option<(&[T], &[T])> {
     (earlier.len() >= MIN_HALF && recent.len() >= MIN_HALF).then_some((earlier, recent))
 }
 
-fn mean(v: &[f64]) -> Option<f64> {
+pub(crate) fn mean(v: &[f64]) -> Option<f64> {
     (!v.is_empty()).then(|| v.iter().sum::<f64>() / v.len() as f64)
 }
 
-fn median(v: &[f64]) -> Option<f64> {
+pub(crate) fn median(v: &[f64]) -> Option<f64> {
     let mut v = v.to_vec();
     v.sort_by(f64::total_cmp);
     let mid = v.len() / 2;
@@ -405,11 +456,11 @@ fn median(v: &[f64]) -> Option<f64> {
     }
 }
 
-fn r1(x: f64) -> f64 {
+pub(crate) fn r1(x: f64) -> f64 {
     (x * 10.0).round() / 10.0
 }
 
-fn r2(x: f64) -> f64 {
+pub(crate) fn r2(x: f64) -> f64 {
     (x * 100.0).round() / 100.0
 }
 
@@ -476,6 +527,7 @@ mod tests {
             event_counts: BTreeMap::new(),
             assessment: Assessment::of(&[]),
             landings_detail: landings,
+            skills: SkillsSummary::default(),
             rule_counts: BTreeMap::new(),
         }
     }
@@ -692,5 +744,58 @@ mod tests {
         assert_eq!(v["landings"][0]["flight_id"], "flight-000");
         assert_eq!(v["landings"][0]["score"], 70.0);
         assert_eq!(v["domains"][0]["id"], "stability");
+    }
+
+    #[test]
+    fn skills_are_medians_with_fuel_per_type() {
+        let with = |mut f: FlightSummary, ap: f64, off: Option<f64>, rms: f64, kg_h: f64| {
+            f.skills = SkillsSummary {
+                ap_share: Some(ap),
+                ap_off_ft: off,
+                vertical_rms: Some(rms),
+                fuel_kg_h: Some(kg_h),
+                ..Default::default()
+            };
+            f
+        };
+        let mut s = [
+            with(flight(1, Some(3), "B738", vec![]), 0.5, None, 0.2, 2400.0),
+            with(
+                flight(2, Some(2), "B738", vec![]),
+                0.7,
+                Some(300.0),
+                0.4,
+                2600.0,
+            ),
+            with(flight(3, Some(1), "C172", vec![]), 0.3, None, 0.3, 30.0),
+            // No skills at all (an old summary) leaves every figure out.
+            flight(4, Some(1), "C172", vec![]),
+        ];
+        // The first landed on the autopilot: no disconnect height.
+        s[0].skills.autoland = true;
+        let k = all(&s).skills;
+        assert_eq!(k.ap_share, Some(0.5));
+        assert_eq!(
+            (k.ap_off_ft_median, k.autolands, k.vertical_rms_median),
+            (Some(300.0), 1, Some(0.3))
+        );
+        assert_eq!(k.descent_level_s_median, None);
+        let fuel: Vec<_> = k
+            .fuel_kg_h
+            .iter()
+            .map(|f| (f.icao.as_str(), f.median))
+            .collect();
+        assert_eq!(fuel, [("B738", 2500.0), ("C172", 30.0)]);
+        assert_eq!(all(&[]).skills.ap_share, None);
+        let old: FlightSummary = serde_json::from_value(
+            serde_json::to_value(flight(5, None, "C172", vec![]))
+                .map(|mut v| {
+                    v.as_object_mut().unwrap().remove("skills");
+                    v
+                })
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(old.skills, SkillsSummary::default());
     }
 }

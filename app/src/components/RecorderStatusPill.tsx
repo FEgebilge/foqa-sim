@@ -34,7 +34,7 @@ export function RecorderStatusPill({ status }: { status: RecorderState | null })
           {recording || value.state === "connected" ? <span className="absolute inline-flex size-full animate-ping rounded-full opacity-60" style={{ background: copy.color }} /> : null}
           <span className="relative inline-flex size-2.5 rounded-full" style={{ background: copy.color }} />
         </span>
-        <span className="sr-only font-medium sm:not-sr-only">{copy.label}</span>
+        <span className="sr-only font-medium sm:not-sr-only sm:whitespace-nowrap">{copy.label}</span>
         {elapsed ? <span className="readout text-fg-2">{elapsed}</span> : null}
       </span>
     </Tooltip>
