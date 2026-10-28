@@ -10,6 +10,7 @@ mod attempts;
 mod commands;
 #[cfg(feature = "connect")]
 mod connect;
+mod diag;
 mod exports;
 mod insim;
 mod library;
@@ -17,6 +18,7 @@ mod links;
 mod setup;
 mod updated;
 
+use std::panic::{self, AssertUnwindSafe};
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
@@ -63,6 +65,7 @@ macro_rules! handler {
             commands::recorder_status,
             commands::open_flights_folder,
             commands::storage_usage,
+            commands::open_log_folder,
             commands::setup_status,
             commands::setup_install,
             commands::setup_remove,
@@ -71,7 +74,8 @@ macro_rules! handler {
             exports::export_flight,
             exports::export_logbook,
             exports::save_image,
-            updated::update_mark
+            updated::update_mark,
+            updated::update_mark_clear
             $(, $extra)*
         ]
     };
@@ -134,99 +138,10 @@ fn main() {
         ))
         .invoke_handler(commands)
         .setup(|app| {
-            let station = Arc::new(Station::core()?);
-            let dir = app.path().document_dir()?.join("FOQA-Sim").join("flights");
-            // FOQA_RAW=1 also keeps raw captures, to replay through a changed chain.
-            let mut service = Service::new(dir.clone(), Arc::clone(&station))?
-                .raw(std::env::var_os("FOQA_RAW").is_some());
-            let (stopper, index, sim) =
-                (service.stopper(), service.index(), service.sim_requests());
-            let (views, view_commands) = (service.views(), service.app_commands());
-            let (tx, rx) = mpsc::channel();
-            let recorder = thread::Builder::new()
-                .name("recorder".into())
-                .spawn(move || service.run(tx))?;
-            let setup = Setup::new(app.path().app_config_dir()?, app.path().resource_dir().ok());
-            // Challenges and attempts live with the app's data, out of synced Documents.
-            let data = app.path().app_data_dir()?;
-            let library = Library::new(data.join("challenges"))?;
-            let handle = app.handle().clone();
-            #[cfg(feature = "connect")]
-            let connect = connect::Connect::start(
-                data.clone(),
-                app.path().app_config_dir()?,
-                data.join("attempts"),
-                handle.clone(),
-            )?;
-            #[cfg(feature = "connect")]
-            let site = Arc::clone(&connect);
-            let (changed, strip) = mpsc::channel();
-            let attempts = Attempts::new(data.join("attempts"))?.on_change(move |record| {
-                if let Err(e) = handle.emit("attempt-changed", record) {
-                    eprintln!("event not sent: {e}");
-                }
-                let _ = changed.send(());
-                #[cfg(feature = "connect")]
-                site.attempt_changed(record);
-            });
-            let shared = Shared::new(
-                station, dir, stopper, index, recorder, setup, sim, library, attempts, views,
-            );
-            #[cfg(feature = "connect")]
-            let shared = shared.with_hooks(Arc::clone(&connect) as Arc<dyn commands::AttemptHooks>);
-            let shared = Arc::new(shared);
-            shared.in_sim(strip, view_commands);
-            #[cfg(feature = "connect")]
-            {
-                use tauri_plugin_deep_link::DeepLinkExt;
-                let links = app.deep_link();
-                // The installer registers the scheme; registering again at
-                // start-up repairs an install that missed it (B2).
-                if let Err(e) = links.register(::connect::deeplink::SCHEME) {
-                    eprintln!("deep links not registered: {e}");
-                }
-                // A link that started the app.
-                links::in_args(std::env::args()).for_each(|link| connect.open_url(&link));
-                app.manage(connect);
+            if let Ok(dir) = app.path().app_log_dir() {
+                diag::init(&dir);
             }
-            #[cfg(not(feature = "connect"))]
-            links::arrived(app.handle(), std::env::args());
-            app.manage(Arc::clone(&shared));
-            let recover = Arc::clone(&shared);
-            thread::spawn(move || recover.recover());
-            // After an update, the in-sim packages follow the app's version.
-            let refresh = Arc::clone(&shared);
-            thread::spawn(move || {
-                for (name, result) in refresh.setup.refresh() {
-                    match result {
-                        Ok(()) => eprintln!("{name}: brought up to date"),
-                        Err(e) => eprintln!("{name}: could not be brought up to date: {e}"),
-                    }
-                }
-            });
-            // Brings the flight list's index up to date before it is asked for.
-            let warm = Arc::clone(&shared);
-            thread::spawn(move || warm.summaries());
-
-            let handle = app.handle().clone();
-            app.notification().on_action(move |action| {
-                let extra = |key| action.notification()?.extra().get(key)?.as_str();
-                if action.action_id() != "tap" {
-                    return;
-                }
-                show(&handle, extra(FLIGHT_ID));
-                if let Some(key) = extra(CHALLENGE_KEY) {
-                    let _ = handle.emit("open-challenge", OpenChallenge { key });
-                }
-            })?;
-            let tray = Tray::new(app.handle())?;
-            // The installer restarts the app like any start, hidden in the tray: after an update, show it.
-            if updated::take() {
-                show(app.handle(), None);
-            }
-            let handle = app.handle().clone();
-            thread::spawn(move || relay(&handle, &shared, &tray, rx));
-            Ok(())
+            start(app).inspect_err(|e| diag::start_failed(app.handle(), e))
         })
         // The window only hides: the app keeps recording from the tray.
         .on_window_event(|window, event| {
@@ -236,7 +151,127 @@ fn main() {
             }
         })
         .run(tauri::generate_context!())
-        .expect("error while running FOQA-Sim");
+        // The dialog is shown (`start_failed`); a panic here would add nothing.
+        .unwrap_or_else(|e| {
+            eprintln!("error while running FOQA-Sim: {e}");
+            std::process::exit(1)
+        });
+}
+
+type Failure = Box<dyn std::error::Error>;
+
+/// Opens the folders and starts the recorder and the shared state.
+fn start(app: &mut tauri::App) -> Result<(), Failure> {
+    let station = Arc::new(Station::core()?);
+    let dir = app.path().document_dir()?.join("FOQA-Sim").join("flights");
+    // FOQA_RAW=1 also keeps raw captures, to replay through a changed chain.
+    let mut service = Service::new(dir.clone(), Arc::clone(&station))?
+        .raw(std::env::var_os("FOQA_RAW").is_some());
+    let (stopper, index, sim) = (service.stopper(), service.index(), service.sim_requests());
+    let (views, view_commands) = (service.views(), service.app_commands());
+    let (tx, rx) = mpsc::channel();
+    let recorder = thread::Builder::new()
+        .name("recorder".into())
+        .spawn(move || supervise(service, tx))?;
+    let setup = Setup::new(app.path().app_config_dir()?, app.path().resource_dir().ok());
+    // Challenges and attempts live with the app's data, out of synced Documents.
+    let data = app.path().app_data_dir()?;
+    let library = Library::new(data.join("challenges"))?;
+    let handle = app.handle().clone();
+    #[cfg(feature = "connect")]
+    let connect = connect::Connect::start(
+        data.clone(),
+        app.path().app_config_dir()?,
+        data.join("attempts"),
+        handle.clone(),
+    )?;
+    #[cfg(feature = "connect")]
+    let site = Arc::clone(&connect);
+    let (changed, strip) = mpsc::channel();
+    let attempts = Attempts::new(data.join("attempts"))?.on_change(move |record| {
+        if let Err(e) = handle.emit("attempt-changed", record) {
+            eprintln!("event not sent: {e}");
+        }
+        let _ = changed.send(());
+        #[cfg(feature = "connect")]
+        site.attempt_changed(record);
+    });
+    let shared = Shared::new(
+        station, dir, stopper, index, recorder, setup, sim, library, attempts, views,
+    );
+    #[cfg(feature = "connect")]
+    let shared = shared.with_hooks(Arc::clone(&connect) as Arc<dyn commands::AttemptHooks>);
+    let shared = Arc::new(shared);
+    shared.in_sim(strip, view_commands);
+    #[cfg(feature = "connect")]
+    {
+        use tauri_plugin_deep_link::DeepLinkExt;
+        let links = app.deep_link();
+        // The installer registers the scheme; registering again at
+        // start-up repairs an install that missed it (B2).
+        if let Err(e) = links.register(::connect::deeplink::SCHEME) {
+            eprintln!("deep links not registered: {e}");
+        }
+        // A link that started the app.
+        links::in_args(std::env::args()).for_each(|link| connect.open_url(&link));
+        app.manage(connect);
+    }
+    #[cfg(not(feature = "connect"))]
+    links::arrived(app.handle(), std::env::args());
+    app.manage(Arc::clone(&shared));
+    let recover = Arc::clone(&shared);
+    thread::spawn(move || recover.recover());
+    // After an update, the in-sim packages follow the app's version.
+    let refresh = Arc::clone(&shared);
+    thread::spawn(move || {
+        for (name, result) in refresh.setup.refresh() {
+            match result {
+                Ok(()) => eprintln!("{name}: brought up to date"),
+                Err(e) => eprintln!("{name}: could not be brought up to date: {e}"),
+            }
+        }
+    });
+    // Brings the flight list's index up to date before it is asked for.
+    let warm = Arc::clone(&shared);
+    thread::spawn(move || warm.summaries());
+
+    let handle = app.handle().clone();
+    app.notification().on_action(move |action| {
+        let extra = |key| action.notification()?.extra().get(key)?.as_str();
+        if action.action_id() != "tap" {
+            return;
+        }
+        show(&handle, extra(FLIGHT_ID));
+        if let Some(key) = extra(CHALLENGE_KEY) {
+            let _ = handle.emit("open-challenge", OpenChallenge { key });
+        }
+    })?;
+    let tray = Tray::new(app.handle())?;
+    // The installer restarts the app like any start, hidden in the tray: after an update, show it.
+    if updated::take() {
+        show(app.handle(), None);
+    }
+    let handle = app.handle().clone();
+    thread::spawn(move || relay(&handle, &shared, &tray, rx));
+    Ok(())
+}
+
+/// Runs the recorder; if it panics, says so as an error status (shown by the
+/// tray and the window) rather than leaving recording silently stopped. No
+/// restart: the panic consumed the service, and its journal is repaired at
+/// the next start.
+fn supervise(service: Service, out: mpsc::Sender<Happening>) {
+    let mine = out.clone();
+    if let Err(panic) = panic::catch_unwind(AssertUnwindSafe(move || service.run(out))) {
+        let why = panic
+            .downcast_ref::<&str>()
+            .copied()
+            .or_else(|| panic.downcast_ref::<String>().map(String::as_str))
+            .unwrap_or("unknown");
+        eprintln!("recorder panicked: {why}");
+        let message = "Recording stopped unexpectedly. Restart FOQA-Sim.".to_owned();
+        let _ = mine.send(Happening::Status(RecorderStatus::Error { message }));
+    }
 }
 
 /// Hands what the recorder reports to the tray, the window and the

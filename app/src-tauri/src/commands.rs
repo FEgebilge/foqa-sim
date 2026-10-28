@@ -26,6 +26,7 @@ use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
 
 use crate::attempts::{Attempts, Cut, Record, State as AttemptState, Uncut, View};
+use crate::diag;
 use crate::library::{Briefing, Entry, Library};
 use crate::setup::{Setup, SetupStatus};
 
@@ -678,8 +679,9 @@ impl Line {
 }
 
 #[tauri::command]
-pub fn challenges_list(shared: State<'_, Arc<Shared>>) -> Vec<Entry> {
-    shared.library.list()
+pub async fn challenges_list(shared: State<'_, Arc<Shared>>) -> Result<Vec<Entry>, String> {
+    let shared = Arc::clone(&shared);
+    blocking(move || Ok(shared.library.list())).await
 }
 
 /// Asks for a challenge file and keeps it; `None` when cancelled.
@@ -709,8 +711,12 @@ pub fn challenge_remove(key: String, shared: State<'_, Arc<Shared>>) -> Result<(
 }
 
 #[tauri::command]
-pub fn challenge_briefing(key: String, shared: State<'_, Arc<Shared>>) -> Result<Briefing, String> {
-    shared.library.briefing(&key)
+pub async fn challenge_briefing(
+    key: String,
+    shared: State<'_, Arc<Shared>>,
+) -> Result<Briefing, String> {
+    let shared = Arc::clone(&shared);
+    blocking(move || shared.library.briefing(&key)).await
 }
 
 #[tauri::command]
@@ -755,9 +761,13 @@ pub fn attempt_abandon(id: String, shared: State<'_, Arc<Shared>>) -> Result<Rec
 /// Every attempt; the Challenges screen listing them also cuts again the
 /// slices still to cut.
 #[tauri::command]
-pub fn attempts_list(shared: State<'_, Arc<Shared>>) -> Vec<View> {
-    shared.reslice();
-    shared.attempts.list()
+pub async fn attempts_list(shared: State<'_, Arc<Shared>>) -> Result<Vec<View>, String> {
+    let shared = Arc::clone(&shared);
+    blocking(move || {
+        shared.reslice();
+        Ok(shared.attempts.list())
+    })
+    .await
 }
 
 /// The sim's answer to a request; an error without one in `ASK_TIMEOUT`,
@@ -777,9 +787,23 @@ pub fn open_flights_folder(shared: State<'_, Arc<Shared>>) -> Result<(), String>
     shared.open_folder().map_err(|e| e.to_string())
 }
 
+/// Opens the folder holding the log file (docs/debrief-api.md).
 #[tauri::command]
-pub fn storage_usage(shared: State<'_, Arc<Shared>>) -> StorageUsage {
-    ::debrief::storage_usage(&shared.dir)
+pub fn open_log_folder() -> Result<(), String> {
+    let dir = diag::path()
+        .and_then(|p| p.parent())
+        .ok_or("There is no log file.")?;
+    Command::new("explorer")
+        .arg(dir)
+        .spawn()
+        .map(drop)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn storage_usage(shared: State<'_, Arc<Shared>>) -> Result<StorageUsage, String> {
+    let shared = Arc::clone(&shared);
+    blocking(move || Ok(::debrief::storage_usage(&shared.dir))).await
 }
 
 /// Runs a fix off the IPC thread, then checks again.

@@ -40,5 +40,9 @@ tauri-plugin-single-instance = "2"
 tauri-plugin-updater = "2"
 uuid = { version = "1", features = ["v4"] }
 
+[target.'cfg(windows)'.dependencies]
+# SetStdHandle, to send stderr to the log file (diag.rs); already in the tree.
+windows-sys = { version = "0.61", features = ["Win32_System_Console"] }
+
 [dev-dependencies]
 tempfile = "3"
