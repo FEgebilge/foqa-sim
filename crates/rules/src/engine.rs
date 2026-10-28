@@ -14,6 +14,12 @@ const FEET_PER_METRE: f64 = 3.280_839_895;
 /// phases (about 5 s out of phase at 8 Hz); a shorter gap is a phase flicker,
 /// not a new approach.
 const REARM_AFTER_US: i64 = 5_000_000;
+/// Two points at a level this close in time are one run, whatever lies
+/// between: a value hovering at a threshold, recorded at 1-2 Hz and
+/// interpolated, dips under it for a fraction of a second at a time and is
+/// one exceedance, not several short ones or none (the exit hysteresis of
+/// FDM event detection).
+const MAX_DIP_US: i64 = 1_000_000;
 
 /// One rule exceedance, with everything needed to explain it.
 #[derive(Debug, Clone, PartialEq)]
@@ -362,15 +368,16 @@ impl<'a> Evaluation<'a> {
     }
 }
 
-/// Exceedance episodes of `levels` (one per unbroken stretch of known
-/// levels) as (level, whole episode, the longest run at that level that
-/// satisfies `sustain_us`); episodes that sustain no level are dropped.
+/// Exceedance episodes of `levels` (one per stretch of known levels, dips
+/// of up to `MAX_DIP_US` bridged) as (level, whole episode, the longest run
+/// at that level that satisfies `sustain_us`); episodes that sustain no
+/// level are dropped.
 fn episodes<'a>(
     t: &'a [SimTime],
     levels: &'a [Option<Level>],
     sustain_us: i64,
 ) -> impl Iterator<Item = (Level, Range<usize>, Range<usize>)> + 'a {
-    runs(levels.len(), |i| levels[i].is_some()).filter_map(move |span| {
+    bridged(t, 0..levels.len(), |i| levels[i].is_some()).filter_map(move |span| {
         Level::ALL.into_iter().rev().find_map(|level| {
             let run = longest_run(t, levels, &span, level, sustain_us)?;
             Some((level, span.clone(), run))
@@ -378,8 +385,8 @@ fn episodes<'a>(
     })
 }
 
-/// The longest unbroken stretch within `span` at or above `level` that lasts
-/// at least `sustain_us` (any single point if it is 0); the first on a tie.
+/// The longest run within `span` at or above `level` that lasts at least
+/// `sustain_us` (any single point if it is 0); the first on a tie.
 fn longest_run(
     t: &[SimTime],
     levels: &[Option<Level>],
@@ -387,12 +394,27 @@ fn longest_run(
     level: Level,
     sustain_us: i64,
 ) -> Option<Range<usize>> {
-    runs(span.len(), |k| {
-        levels[span.start + k].is_some_and(|l| l >= level)
-    })
-    .map(|r| span.start + r.start..span.start + r.end)
-    .filter(|r| t[r.end - 1].us_since(t[r.start]) >= sustain_us)
-    .reduce(|best, r| if r.len() > best.len() { r } else { best })
+    bridged(t, span.clone(), |i| levels[i].is_some_and(|l| l >= level))
+        .filter(|r| t[r.end - 1].us_since(t[r.start]) >= sustain_us)
+        .reduce(|best, r| if r.len() > best.len() { r } else { best })
+}
+
+/// Runs of the points of `span` where `at` holds, those whose points are at
+/// most `MAX_DIP_US` apart joined into one.
+fn bridged(
+    t: &[SimTime],
+    span: Range<usize>,
+    at: impl Fn(usize) -> bool,
+) -> impl Iterator<Item = Range<usize>> {
+    let mut joined: Vec<Range<usize>> = Vec::new();
+    for r in runs(span.len(), |k| at(span.start + k)) {
+        let r = span.start + r.start..span.start + r.end;
+        match joined.last_mut() {
+            Some(prev) if t[r.start].us_since(t[prev.end - 1]) <= MAX_DIP_US => prev.end = r.end,
+            _ => joined.push(r),
+        }
+    }
+    joined.into_iter()
 }
 
 #[cfg(test)]
@@ -467,6 +489,19 @@ mod tests {
             (e.level, e.value, e.threshold),
             (Level::Low, Some(500.0), Some(100.0))
         );
+    }
+
+    #[test]
+    fn a_value_hovering_at_the_threshold_is_one_event() {
+        // 6 s over the low level with a 1/8 s dip under it every second.
+        let hovering: Vec<f64> = (0..49).map(|i| if i % 8 == 4 { 50.0 } else { 150.0 }).collect();
+        assert_eq!(continuous("sustain: 5 s", &hovering).len(), 1);
+        // A dip longer than 1 s ends the run: two 3 s runs, neither 5 s.
+        let mut split = vec![150.0; 24];
+        split.extend([50.0; 9]);
+        split.extend([150.0; 24]);
+        assert_eq!(continuous("sustain: 5 s", &split), []);
+        assert_eq!(continuous("sustain: 2 s", &split).len(), 2);
     }
 
     fn gate(phases: &[Phase], aal: &[f64], ra: &[f64], vs: &[f64]) -> Vec<Event> {

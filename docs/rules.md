@@ -45,8 +45,11 @@ without one fails to load.
   load.
 - A condition `measure` takes `level:` and raises it whenever it holds.
 - In a continuous rule, an event's level is the highest one held for
-  `sustain` without a break; a run lasts from its first to its last point
-  (`sustain: 2 s` needs 2 s between them). Its value is the worst one among
+  `sustain`; a run lasts from its first to its last point (`sustain: 2 s`
+  needs 2 s between them). Points at a level up to 1 s apart belong to one
+  run, whatever lies between (a dip under the threshold, unknown data), so
+  a value hovering at a threshold is one event, not several or none; a
+  longer gap ends the run and the episode. Its value is the worst one among
   the points at exactly that level in the longest such run, so value and
   threshold always agree with the level. A brief spike over a higher
   threshold does not change either; the event still spans the whole episode.
