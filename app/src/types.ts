@@ -653,6 +653,8 @@ export interface AttemptResult {
   gate_s: number | null;
   touchdown_s: number | null;
   score: { version: string; total: number; parts: { name: string; weight: number; score: number; value: number | null; unit: string }[] } | null;
+  /** A landing-3 attempt's grade, confidence and caps (the debrief's); absent for landing-1. */
+  assessment?: { method: string; score: number; grade: Grade; confidence: Confidence; caps: CapNote[] };
 }
 
 /** One line of `log.jsonl`. */

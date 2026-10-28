@@ -82,7 +82,7 @@ export function mockChallenges(status: string | null): ChallengesApi {
             : { name: "aircraft", state: "ok", text: "Any aircraft." },
         ]
         : [
-          { name: "sim", state: "fail", text: "MSFS isn't connected.", fix: "Start MSFS 2024, then load a flight." },
+          { name: "sim", state: "fail", text: "MSFS isn't connected.", fix: "Start MSFS, then load a flight." },
           { name: "aircraft", state: "unknown", text: "Checked once a flight is loaded." },
         ];
       const weather = definition.conditions && (definition.conditions.wind || definition.conditions.crosswind_kt || definition.conditions.tailwind_kt);
