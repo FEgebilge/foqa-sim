@@ -12,6 +12,7 @@ use std::fs;
 use std::io;
 use std::num::NonZero;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::thread;
 use std::time::UNIX_EPOCH;
@@ -90,17 +91,32 @@ impl Index {
     /// Analyses only new and changed flights and saves the index when it
     /// changed; a concurrent call waits, then finds them analysed.
     pub fn summaries(&self, station: &Station) -> Vec<FlightSummary> {
-        self.list(station, |_| true)
+        self.summaries_with(station, &|| {})
+    }
+
+    /// As `summaries`, each analysing thread first running `start`: a
+    /// warm-up lowers the priority of its threads there.
+    pub fn summaries_with(
+        &self,
+        station: &Station,
+        start: &(dyn Fn() + Sync),
+    ) -> Vec<FlightSummary> {
+        self.list(station, |_| true, start)
     }
 
     /// The compact flights' summaries only, as `summaries`: no journal, so
     /// no flight being recorded, is analysed.
     pub fn saved(&self, station: &Station) -> Vec<FlightSummary> {
-        self.list(station, |p| has_ext(p, COMPACT_EXT))
+        self.list(station, |p| has_ext(p, COMPACT_EXT), &|| {})
     }
 
     /// The summaries of the stored flights `keep` takes.
-    fn list(&self, station: &Station, keep: impl Fn(&Path) -> bool) -> Vec<FlightSummary> {
+    fn list(
+        &self,
+        station: &Station,
+        keep: impl Fn(&Path) -> bool,
+        start: &(dyn Fn() + Sync),
+    ) -> Vec<FlightSummary> {
         let mut files: Vec<_> = flight_files(&self.dir)
             .into_iter()
             .filter(|p| keep(p))
@@ -113,7 +129,7 @@ impl Index {
             entry.is_some_and(|e| f.matches(e))
         };
         let stale: Vec<&Stored> = files.iter().filter(|f| !cached(f)).collect();
-        let fresh = analyse(station, &stale);
+        let fresh = analyse(station, &stale, start);
         let mut dirty = false;
         for (f, summary) in stale.into_iter().zip(fresh) {
             let Some(summary) = summary else { continue };
@@ -166,23 +182,38 @@ impl Index {
     }
 }
 
-/// Each flight's `Entry::summary`, up to `WORKERS` at a time; `None` for
-/// one that could not be read.
-fn analyse(station: &Station, files: &[&Stored]) -> Vec<Option<Option<FlightSummary>>> {
-    let workers = thread::available_parallelism().map_or(1, NonZero::get);
-    let chunk = files.len().div_ceil(workers.min(WORKERS)).max(1);
-    let summaries =
-        |part: &[&Stored]| -> Vec<_> { part.iter().map(|f| summary(station, &f.path)).collect() };
-    thread::scope(|s| {
-        let parts: Vec<_> = files
-            .chunks(chunk)
-            .map(|part| s.spawn(move || summaries(part)))
+/// Each flight's `Entry::summary`, up to `WORKERS` at a time, each worker
+/// first running `start`; `None` for one that could not be read. The workers
+/// take the next flight from one counter, so a slow flight holds up only
+/// its own worker.
+fn analyse(
+    station: &Station,
+    files: &[&Stored],
+    start: &(dyn Fn() + Sync),
+) -> Vec<Option<Option<FlightSummary>>> {
+    let cores = thread::available_parallelism().map_or(1, NonZero::get);
+    let next = AtomicUsize::new(0);
+    let work = || {
+        start();
+        let mut done = Vec::new();
+        loop {
+            let i = next.fetch_add(1, Ordering::Relaxed);
+            let Some(f) = files.get(i) else { break };
+            done.push((i, summary(station, &f.path)));
+        }
+        done
+    };
+    let mut done: Vec<(usize, _)> = thread::scope(|s| {
+        let workers: Vec<_> = (0..cores.min(WORKERS).min(files.len()))
+            .map(|_| s.spawn(work))
             .collect();
-        let joined = parts.into_iter().map(|h| h.join());
+        let joined = workers.into_iter().map(|h| h.join());
         joined
             .flat_map(|r| r.unwrap_or_else(|p| std::panic::resume_unwind(p)))
             .collect()
-    })
+    });
+    done.sort_by_key(|(i, _)| *i);
+    done.into_iter().map(|(_, s)| s).collect()
 }
 
 /// The flight's `Entry::summary`; `None` on an OS error (locked,
@@ -271,6 +302,32 @@ mod tests {
         let flight = File::options().write(true).open(dir.join("flight-1.fqz"));
         flight.unwrap().set_modified(touched).unwrap();
         assert_eq!(landings(dir, &station), [1, 1]);
+    }
+
+    #[test]
+    fn every_flight_is_analysed_once_in_order_by_workers_that_each_start() {
+        let (tmp, station) = (folder(), Station::core().unwrap());
+        let dir = tmp.path();
+        for n in 3..=9 {
+            fs::copy(
+                dir.join("flight-2.fqj"),
+                dir.join(format!("flight-{n}.fqj")),
+            )
+            .unwrap();
+        }
+        let started = AtomicUsize::new(0);
+        let summaries = Index::open(dir).summaries_with(&station, &|| {
+            started.fetch_add(1, Ordering::Relaxed);
+        });
+        assert_eq!(summaries.len(), 9);
+        let listed = Index::open(dir).summaries(&station);
+        let ids = |v: &[FlightSummary]| v.iter().map(|s| s.id.clone()).collect::<Vec<_>>();
+        assert_eq!(
+            ids(&summaries),
+            ids(&listed),
+            "newest first, whoever finished first"
+        );
+        assert!((1..=WORKERS).contains(&started.load(Ordering::Relaxed)));
     }
 
     #[test]

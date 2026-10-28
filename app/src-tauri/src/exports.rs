@@ -121,7 +121,7 @@ pub async fn export_logbook(
         else {
             return Ok(None);
         };
-        export::logbook_file(&shared.summaries(), Options { identity }, &out)
+        export::logbook_file(&shared.saved(), Options { identity }, &out)
             .map_err(|e| e.to_string())?;
         Ok(Some(out.display().to_string()))
     })

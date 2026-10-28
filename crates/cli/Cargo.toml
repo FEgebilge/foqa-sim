@@ -25,7 +25,7 @@ sim = ["dep:sim-link"]
 [dependencies]
 analyzer = { path = "../analyzer" }
 challenge = { path = "../challenge" }
-debrief = { path = "../debrief" }
+debrief = { path = "../debrief", features = ["parquet"] }
 fdm-core = { path = "../fdm-core" }
 recorder = { path = "../recorder" }
 rules = { path = "../rules" }

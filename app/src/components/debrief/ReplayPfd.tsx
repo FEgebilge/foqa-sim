@@ -2,7 +2,7 @@ import { useState, type ReactNode } from "react";
 import { clock, number } from "../../lib/format";
 import type { Theme } from "../../lib/palette";
 import { DERIVED, instrumentsAt, type Instruments } from "../../lib/series";
-import { useHover, type TimeBus } from "../../lib/time";
+import { useHover, usePlaced, type TimeBus } from "../../lib/time";
 import type { Debrief } from "../../types";
 
 // A primary flight display rebuilt from the recorded parameters at the cursor, for the replay. Deliberately generic
@@ -225,12 +225,13 @@ function Annunciator({ x, label, on, what }: { x: number; label: string; on: boo
 
 const gearText = (g: Instruments["gear"]) => (g === null ? NO_DATA : g.state === "transit" ? `transit ${number(g.extended * 100)}%` : g.state === "down" ? "DOWN" : "UP");
 
-interface Props { debrief: Debrief; theme: Theme; focus: number | null; bus: TimeBus }
+interface Props { debrief: Debrief; theme: Theme; bus: TimeBus }
 
 /** The reconstructed PFD at the hovered time, else at the cursor. */
-export function ReplayPfd({ debrief, theme, focus, bus }: Props) {
+export function ReplayPfd({ debrief, theme, bus }: Props) {
   const [hover, setHover] = useState<number | null>(null);
   useHover(bus, setHover);
+  const focus = usePlaced(bus);
   const t = hover ?? focus;
   const i = t === null ? null : instrumentsAt(debrief, t);
   const bug = COLOURS[theme].bug;

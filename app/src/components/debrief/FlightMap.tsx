@@ -1,14 +1,13 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { CloudOff, MapPinOff } from "lucide-react";
+import { CloudOff } from "lucide-react";
 import { LngLatBounds, Map as MapLibre, Marker, NavigationControl, ScaleControl, setWorkerUrl, type AddLayerObject, type GeoJSONSource, type TransformStyleFunction } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
-import { EmptyState } from "@ui/components/empty-state/empty-state";
 import { phaseName } from "../../lib/format";
 import { contacts, groupLandings } from "../../lib/landings";
 import { levelColor, phaseColor, type Theme } from "../../lib/palette";
 import { bearing, indexAt, positionAt, type Position } from "../../lib/series";
-import type { TimeBus } from "../../lib/time";
+import { usePlaced, type TimeBus } from "../../lib/time";
 import type { Debrief, FlightEvent, RunwayEnd } from "../../types";
 
 // MapLibre finds its worker next to its own module, which Vite pre-bundling moves; point it at the emitted file instead.
@@ -124,7 +123,7 @@ function overlay(debrief: Debrief, theme: Theme, selected: FlightEvent | null) {
 
 const blank = (theme: Theme): Style => ({ version: 8, sources: {}, layers: [{ id: "background", type: "background", paint: { "background-color": theme === "dark" ? "#141b2b" : "#eef1f5" } }] });
 
-interface Props { debrief: Debrief; theme: Theme; focus: number | null; selected: FlightEvent | null; bus: TimeBus; onFocus?: (t: number) => void }
+interface Props { debrief: Debrief; theme: Theme; selected: FlightEvent | null; bus: TimeBus; onFocus?: (t: number) => void }
 
 /** Pixels from the track within which the mouse picks a point of it. */
 const PICK_PX = 14;
@@ -137,13 +136,13 @@ const easeOut = (k: number) => 1 - (1 - k) ** 3;
  * 2D track coloured by phase over runways from the airport snapshot; the dot follows the cursor of the charts.
  * Hovering the track moves the shared cursor, clicking it places the focus there.
  */
-export default function FlightMap({ debrief, theme, focus, selected, bus, onFocus }: Props) {
+export default function FlightMap({ debrief, theme, selected, bus, onFocus }: Props) {
+  const focus = usePlaced(bus);
   const host = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapLibre | null>(null);
   const cursor = useRef<Marker | null>(null);
   const following = useRef(false);
   const [offline, setOffline] = useState(false);
-  const hasTrack = useMemo(() => debrief.series.lat.some((v) => v !== null), [debrief]);
   const latest = useRef({ selected, focus, onFocus });
   useLayoutEffect(() => { latest.current = { selected, focus, onFocus }; });
   const phases = useMemo(() => [...new Set(debrief.phases.map((p) => p.phase))], [debrief]);
@@ -151,7 +150,7 @@ export default function FlightMap({ debrief, theme, focus, selected, bus, onFocu
   // Map and base style: rebuilt for a new flight or theme. The overlay is drawn first on a blank style, then merged into the basemap once it loads.
   useEffect(() => {
     const node = host.current;
-    if (!node || !hasTrack) return;
+    if (!node) return;
     const withOverlay = (base: Style): Style => {
       const own = overlay(debrief, theme, latest.current.selected);
       return { ...base, sources: { ...base.sources, ...own.sources }, layers: [...base.layers, ...(own.layers as Style["layers"])] };
@@ -217,7 +216,7 @@ export default function FlightMap({ debrief, theme, focus, selected, bus, onFocu
       .finally(() => window.clearTimeout(timer));
 
     return () => { cancelled = true; controller.abort(); labels.forEach((m) => m.remove()); map.remove(); mapRef.current = null; cursor.current = null; };
-  }, [debrief, theme, hasTrack, bus]);
+  }, [debrief, theme, bus]);
 
   // Selected event: its stretch of track is redrawn in the event's colour.
   useEffect(() => {
@@ -246,7 +245,6 @@ export default function FlightMap({ debrief, theme, focus, selected, bus, onFocu
     return bus.subscribe((t) => place(t ?? latest.current.focus));
   }, [bus, debrief, focus]);
 
-  if (!hasTrack) return <EmptyState size="sm" icon={<MapPinOff size={18} />} title="No position recorded" description="This flight has no latitude/longitude samples to draw." />;
   return (
     <div className="relative h-full">
       <div ref={host} className="h-full w-full" />

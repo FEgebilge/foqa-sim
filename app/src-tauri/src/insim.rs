@@ -51,8 +51,7 @@ impl Shared {
 
     /// The current attempt's strip to the views.
     fn publish_strip(&self) {
-        let views = self.attempts.list();
-        let Some(view) = current(&views) else {
+        let Some(view) = &self.attempts.current() else {
             return;
         };
         self.watch_gate(&view.record);
@@ -155,8 +154,7 @@ impl Shared {
 
 /// The open attempt, else the newest; `views` come newest first.
 fn current(views: &[View]) -> Option<&View> {
-    let open = |v: &&View| v.record.state.can_become(State::Abandoned);
-    views.iter().find(open).or(views.first())
+    views.iter().find(|v| v.record.open()).or(views.first())
 }
 
 /// The attempt a view's command names by `id`: it must be the one the strip
@@ -170,7 +168,7 @@ fn named<'a>(views: &'a [View], id: &str, open: bool) -> Result<&'a Record, &'st
     if r.id != id {
         return Err("That attempt is no longer the current one.");
     }
-    if open && !r.state.can_become(State::Abandoned) {
+    if open && !r.open() {
         return Err("No attempt is open.");
     }
     Ok(r)

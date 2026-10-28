@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { BookOpen, FolderOpen, PlaneLanding, RefreshCw, SearchX, ServerCrash } from "lucide-react";
 import { api } from "../../api";
 import { Button } from "@ui/components/button/button";
@@ -14,7 +14,7 @@ import type { FlightSummary, Grade } from "../../types";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { ExportMenu } from "../ExportMenu";
 import { useOpenFolder } from "../use-open-folder";
-import { toRow } from "./flight-row";
+import { toRow, type FlightRow } from "./flight-row";
 import { FlightsTable } from "./FlightsTable";
 
 type GradeFilter = "all" | Grade;
@@ -25,6 +25,8 @@ export function FlightsScreen({ recorder }: { recorder: RecorderState | null }) 
   const [query, setQuery] = useState("");
   const [grade, setGrade] = useState<GradeFilter>("all");
   const [doomed, setDoomed] = useState<FlightSummary | null>(null);
+  // Stable, so the table keeps its columns while the search text changes.
+  const askDelete = useCallback((row: FlightRow) => setDoomed(row.flight), []);
   const [deleting, setDeleting] = useState(false);
   const notify = useNotify();
   const [sort, setSort] = useState<SortState>({ key: "date", direction: "desc" });
@@ -103,7 +105,7 @@ export function FlightsScreen({ recorder }: { recorder: RecorderState | null }) 
           <SegmentedControl label="Assessment" options={filterOptions} value={grade} onValueChange={(value) => setGrade(value as GradeFilter)} />
           <span className="readout ml-auto text-xs text-fg-3" aria-live="polite">{visible.length === rows.length ? `${rows.length} flights` : `${visible.length} of ${rows.length} flights`}</span>
         </div>
-        {visible.length ? <FlightsTable rows={visible} sort={sort} onSortChange={setSort} onDelete={(row) => setDoomed(row.flight)} recordingId={recordingId} /> : (
+        {visible.length ? <FlightsTable rows={visible} sort={sort} onSortChange={setSort} onDelete={askDelete} recordingId={recordingId} /> : (
           <div className="panel">
             <EmptyState size="sm" icon={<SearchX size={18} />} title="No flights match" description="Change the search or the assessment filter." action={<Button variant="secondary" size="sm" onClick={() => { setQuery(""); setGrade("all"); }}>Clear filters</Button>} />
           </div>

@@ -14,6 +14,7 @@ import { useAttempts, useChallenges, useLoad } from "../../lib/use-backend";
 import type { AttemptView, Briefing, ChallengeDefinition, ChallengeEntry, PreflightLine } from "../../types";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { OPEN_STATES } from "../../lib/attempts";
+import { useVisible } from "../../lib/visible";
 import { type SiteAttempt, useConnect, useSiteAttempts, useSites } from "../../lib/sites";
 import { AttemptList, Stages } from "./AttemptList";
 import { SitesPanel } from "./SitesPanel";
@@ -166,10 +167,13 @@ function usePreflight(key: string, recorder: string | undefined) {
   const measure = useCallback((): Promise<PreflightLine[]> => api.challengePreflight(key)
     .catch((error: unknown) => [{ name: "sim", state: "unknown", text: `Could not check: ${message(error)}` }]), [key, recorder]); // eslint-disable-line react-hooks/exhaustive-deps
   const { state, reload, refresh, refreshing } = useLoad(measure);
+  // Each measure analyses the flight being recorded: not while the window is hidden.
+  const visible = useVisible();
   useEffect(() => {
+    if (!visible) return;
     const timer = window.setInterval(reload, PREFLIGHT_EVERY_MS);
     return () => window.clearInterval(timer);
-  }, [reload]);
+  }, [reload, visible]);
   return { lines: state.status === "ready" ? state.data : null, checking: refreshing, check: refresh };
 }
 
