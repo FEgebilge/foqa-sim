@@ -15,8 +15,16 @@ const FT_PER_M: f64 = 1.0 / 0.3048;
 /// Descent rate on a 3 deg path per knot of ground speed: tan 3 deg x
 /// 6076 ft / 60 min.
 const ROD3_FPM_PER_KT: f64 = 5.31;
-/// Threshold crossing height the AFM landing distances assume (S8).
+/// Threshold crossing height of the glidepath (S8; ICAO Annex 10 ILS
+/// reference datum height 15 m), at the eye or the antenna.
 const TCH_FT: f64 = 50.0;
+/// The glidepath to the touchdown target: 3 deg (ICAO PANS-OPS, S8).
+const GLIDEPATH_DEG: f64 = 3.0;
+/// A light aircraft aims at the Annex 14 aiming point of runways under
+/// 800 m (Vol I Table 5-1, 150 m), the code 1 runways its field length is
+/// laid out for, on any runway: the airline aiming point (up to 400 m) of a
+/// long runway is no touchdown target for it.
+const LIGHT_AIM_M: f64 = 150.0;
 /// A longer stretch without data in the window makes the score partial.
 const MAX_GAP_US: i64 = 1_500_000;
 /// Gear counts as down from here, %.
@@ -205,7 +213,15 @@ impl Method {
         let profile_value = |f| l.selection.profile.and_then(|p| p.value(f, || None));
         let track_ft = profile_value(rules::ProfileField::MainGearTrack)
             .unwrap_or(self.fallback_track_ft[&class]);
-        let target_m = l.target_m.unwrap_or(fix.aiming_point_m);
+        let aim_m = if light {
+            LIGHT_AIM_M
+        } else {
+            fix.aiming_point_m
+        };
+        let target_m = l.target_m.unwrap_or(aim_m);
+        // The glidepath to the target at the threshold, at the wheels.
+        let path_ft = target_m * FT_PER_M * GLIDEPATH_DEG.to_radians().tan();
+        let tch_ft = path_ft.min(TCH_FT) - eye_to_wheel_ft(class);
         let context = Context {
             add_kt: speeds.as_ref().map(|s| s.vapp_kt - s.vref_kt),
             gust_kt: Some(0.0),
@@ -277,7 +293,7 @@ impl Method {
                 "A6",
                 configuration(&a, light, self.windows[&class].split_ft, retractable),
             ),
-            ("B1", crossing.map(|c| c.height_ft - TCH_FT)),
+            ("B1", crossing.map(|c| c.height_ft - tch_ft)),
             ("B2", td.ias_kt.zip(reference).map(|(ias, r)| ias - r)),
             ("B3", a.float_s),
             ("C1", Some((fix.along_m - target_m) * FT_PER_M)),
@@ -344,6 +360,18 @@ pub fn scoring_class(s: &Selection) -> ScoringClass {
         || ScoringClass::of(s.class.unwrap_or(Aircraft::Transport)),
         |p| p.scoring_class,
     )
+}
+
+/// Eye to main-wheel height on the glidepath, from the FAA Order 8260.3
+/// height groups: HG1 up to 10 ft (general aviation, commuters), HG2 10-15
+/// ft (737, A320); the class value is an estimate within them. The radio
+/// height B1 reads is the wheels' (`Track::ra_ft`).
+fn eye_to_wheel_ft(class: ScoringClass) -> f64 {
+    match class {
+        ScoringClass::Light => 6.0,
+        ScoringClass::Turboprop => 10.0,
+        ScoringClass::Jet => 15.0,
+    }
 }
 
 fn mean(xs: impl Iterator<Item = f64>) -> Option<f64> {

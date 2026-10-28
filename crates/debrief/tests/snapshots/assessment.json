@@ -498,18 +498,18 @@
                   "-40 ft"
                 ]
               },
-              "ell": 0.3021,
+              "ell": 0.099,
               "height": "all",
               "height_text": null,
               "id": "B1",
               "level": 0,
-              "loss": 0.0604,
+              "loss": 0.0198,
               "sets": false,
-              "standard": "S8 50 ft standard, +200 ft landing distance per 10 ft; bands est",
-              "title": "Threshold crossing height off 50 ft",
+              "standard": "S8 50 ft standard, +200 ft landing distance per 10 ft; wheel height against the 3 deg path to the target (at most 50 ft) less the eye-to-wheel height (FAA Order 8260.3 height groups); bands est",
+              "title": "Threshold crossing height off the glidepath",
               "unit": "ft",
-              "value": -8.021,
-              "value_text": "-8.0 ft"
+              "value": 6.979,
+              "value_text": "+7.0 ft"
             },
             {
               "bands": {
@@ -673,7 +673,7 @@
           "set_by_text": null,
           "sets_by": null,
           "short": "Landing spot",
-          "summary": "How far from the aiming point the wheels touched down",
+          "summary": "How far from the touchdown target the wheels touched down",
           "title": "Touchdown point",
           "weight": 20.0
         },

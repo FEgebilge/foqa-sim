@@ -187,7 +187,7 @@ shows it as "Stable from 1000 ft" or "Not stable until 380 ft".
 
 | Id | Measured | How | Class | ideal \| tol \| L1 \| L2 \| L3 | Standard |
 |---|---|---|---|---|---|
-| B1 | Threshold crossing height (TCH) | **new**: height above the threshold (RA, else AAL against the threshold elevation) interpolated at `along_m = 0` on the approach | all | 45–55 \| 40–65 \| >75 or <30 \| >100 or <20 \| >150 or <10 ft | S8: 50 ft standard, +200 ft per 10 ft ✔; bands est |
+| B1 | Threshold crossing height (TCH) | **new**: wheel height above the threshold (RA, else AAL against the threshold elevation) interpolated at `along_m = 0` on the approach, against the wheel height of the 3° path to the target (C): min(target · tan 3°, 50 ft), an eye/antenna height, less the eye-to-wheel height (light 6, turboprop 10, jet 15 ft, from the FAA Order 8260.3 height groups, est). Jet: 35 ft; light to 150 m: 20 ft | all | ref +5/−5 \| +15/−10 \| +25/−20 \| +50/−30 \| +100/−40 ft | S8: 50 ft standard, +200 ft per 10 ft ✔; bands est |
 | B2 | Touchdown IAS | `td.ias_kt` (exists, unused) vs Vref | T/J | Vref −2/+3 \| ±5 (+gust) \| +10/−7 \| +15/−10 \| +25/−15 | S9 ≥ Vref−5, Vref−10 tail clearance ✔; L1, L3 est |
 | | | vs Vapp | light | ≤ Vapp−10 \| ≤ Vapp−5 \| > Vapp \| > Vapp+10 \| > Vapp+20 | POH main wheels first ✔; bands est |
 | B3 | Float time | **new**: time from 50 ft above the runway to main-gear contact | T/J | 8 \| 10 \| 12 \| 15 \| 20 s | S7 RE28 measure ✔; S9 flare 4–8 s ✔; bands est |
@@ -198,9 +198,13 @@ window.
 
 #### C. Touchdown point (W 20)
 
-`x = fix.along_m − target`. Target: T/J use the aiming-point marking
-(`fix.aiming_point_m`). Light uses the challenge's `target_m` if set, else
-the aiming point (open question 2). TDZ end = `fix.tdz_m`.
+`x = fix.along_m − target`. Target: the challenge's `target_m` if set.
+Else T/J use the aiming-point marking (`fix.aiming_point_m`), and light
+aircraft 150 m: the Annex 14 aiming point of runways under 800 m (Vol I
+Table 5-1), the code 1 runways their field length is laid out for. The
+airline aiming point of a long runway (up to 400 m) is no light-aircraft
+target, and its 3° path would cross the threshold at 69 ft. TDZ end =
+`fix.tdz_m`.
 
 | Id | Side | Class | ideal \| tol \| L1 \| L2 \| L3 | Standard |
 |---|---|---|---|---|---|
@@ -443,7 +447,9 @@ by app updates.
 
 ### Worked example 1: C172, normal landing
 
-Runway: LDA 1600 m, width 30 m, aiming point 300 m (Annex 14), TDZ 533 m.
+Runway: LDA 1600 m, width 30 m, aiming point 300 m (Annex 14), TDZ 533 m,
+in a challenge whose target is that aiming point (without one a light
+aircraft aims at 150 m, §C).
 Flaps full, Vapp 65 kt (S11 60–70 mid), calm. Light bands. Main-gear track
 is the light fallback, half-track 1.25 m.
 
@@ -451,7 +457,7 @@ is the light fallback, half-track 1.25 m.
 |---|---|---|---|---|---|
 | A (25) | A1 speed at 250 ft (3 s) | +12 kt (tol +10, L1 +15) | 0.70 | 0.20 | 5.0 |
 | | A2 sink | 820 fpm (ideal 529, tol 1000) | 0.31 | 0.06 | – |
-| B (10) | B1 TCH | 62 ft (tol 65) | 0.35 | 0.07 | 0.7 |
+| B (10) | B1 TCH | 62 ft wheels, +18 ft over the 44 ft path to 300 m (50 − 6; tol +15, L1 +25) | 0.65 | 0.18 | 1.8 |
 | C (20) | C1 long | 470 m = target +558 ft (tol +400; L1 +800 ft = 544 m is past the TDZ end, so held at 533 m = +764 ft) | 0.72 | 0.21 | 4.2 |
 | D (15) | D1 centreline | 2.4 m (tol 1.25, L1 7.6) | 0.59 | 0.15 | 2.2 |
 | | D2 crab | 3° (tol 3°) | 0.50 | 0.10 | – |
@@ -459,9 +465,10 @@ is the light fallback, half-track 1.25 m.
 | | E2 sink | 260 fpm | 0.17 | 0.03 | – |
 | F (10) | F2 required decel | 0.04 g; F1 n/a by design | 0 | 0 | 0 |
 
-Score **86.5, Good**, with no FDM events. (An earlier draft read 86.7: it
-left L1 at 544 m, past the TDZ end, against "anchors never exceed the next
-one"; the golden test in `crates/assess/tests/score.rs` follows the rule.) The debrief still flags two items
+Score **85.4, Good**, with no FDM events. (Earlier drafts read 86.7, with
+L1 left at 544 m past the TDZ end against "anchors never exceed the next
+one", and 86.5, with B1 against 50 ft at the wheels; the golden test in
+`crates/assess/tests/score.rs` follows the method.) The debrief still flags two items
 as "outside checkride tolerance": +12 kt at 250 ft, and touchdown 558 ft
 past the target, beyond the Private ACS 400 ft window.
 
@@ -563,7 +570,7 @@ as a competitive sim pilot, Codex) under Ege's standing instruction.
    per-flight debrief and never counts for a ranked challenge; a type with
    no sourced Vref cannot be ranked on speed (n/a, as in §5).
 2. **Touchdown target (2 of 3):** the runway's aiming-point marking by
-   default; a challenge may specify another point (ACS "specified point",
+   default (a light aircraft's: that of a code 1 runway, 150 m, §C); a challenge may specify another point (ACS "specified point",
    e.g. the 1000 ft markers). The resolved target and tolerance are
    published in the challenge and shown before the attempt.
 3. **Flight grade (2 of 3):** the last full-stop landing sets the flight

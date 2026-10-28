@@ -12,7 +12,8 @@
 #   add     kt   Vapp - Vref (the wind additive)
 #   gust    kt   gust factor (not recorded: 0)
 #   rod3    fpm  3 deg path descent rate at the ground speed, 5.31 x GS
-#   target  ft   touchdown target past the threshold
+#   target  ft   touchdown target past the threshold: the challenge's, else
+#                the aiming point (light: 150 m, Annex 14 code 1)
 #   tdz lda width  ft  touchdown zone length, landing distance, width
 #   track   ft   main-gear track (profile, else the class fallback)
 #   hard_g  g    the type's hard-landing inspection load (profile)
@@ -106,10 +107,10 @@ criteria:
     bands:
       - { classes: [light, turboprop, jet], above: [~, ~, 1, 2, 3] }
   - id: B1
-    title: Threshold crossing height off 50 ft
+    title: Threshold crossing height off the glidepath
     domain: energy
     unit: ft
-    source: "S8 50 ft standard, +200 ft landing distance per 10 ft; bands est"
+    source: "S8 50 ft standard, +200 ft landing distance per 10 ft; wheel height against the 3 deg path to the target (at most 50 ft) less the eye-to-wheel height (FAA Order 8260.3 height groups); bands est"
     bands:
       - { classes: [light, turboprop, jet], above: [5 ft, 15 ft, 25 ft, 50 ft, 100 ft], below: [-5 ft, -10 ft, -20 ft, -30 ft, -40 ft] }
   - id: B2

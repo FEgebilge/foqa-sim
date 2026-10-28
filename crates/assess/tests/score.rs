@@ -50,8 +50,8 @@ fn near(x: f64, want: f64, tol: f64) -> bool {
     (x - want).abs() <= tol
 }
 
-/// Worked example 1: a C172 on a 1600 m runway, aiming point 300 m, TDZ
-/// 533 m, light main-gear track 2.5 m.
+/// Worked example 1: a C172 on a 1600 m runway, a challenge target at the
+/// 300 m aiming point, TDZ 533 m, light main-gear track 2.5 m.
 fn example_1() -> Measures {
     use Height::*;
     measures(
@@ -60,7 +60,7 @@ fn example_1() -> Measures {
         vec![
             scalar("A1", Below, 12.0),
             scalar("A2", Below, 820.0),
-            scalar("B1", All, 62.0 - 50.0),
+            scalar("B1", All, 62.0 - 44.0),
             scalar("C1", All, (470.0 - 300.0) * FT_PER_M),
             scalar("D1", All, 2.4 * FT_PER_M),
             scalar("D2", All, 3.0),
@@ -85,7 +85,8 @@ fn worked_example_1_c172_normal_landing() {
         domain(&s, Domain::Stability).set_by.as_deref(),
         Some("A1 below")
     );
-    assert_eq!(lost(Domain::Energy), 0.7);
+    // B1 62 ft against the 44 ft wheel path to a 300 m target: +18 ft, ℓ 0.65.
+    assert_eq!(lost(Domain::Energy), 1.75);
     // C1 558 ft past the target: L1 (target + 800 ft = 544 m) is held at
     // the TDZ end (533 m), so ℓ 0.72, loss 0.21 of 20.
     let c1 = &domain(&s, Domain::Point).criteria[0];
@@ -94,7 +95,7 @@ fn worked_example_1_c172_normal_landing() {
     assert_eq!(lost(Domain::Lateral), 2.18);
     assert_eq!(lost(Domain::Contact), 1.47);
     assert_eq!(lost(Domain::Rollout), 0.0);
-    assert_eq!((s.score, s.grade), (86.5, Grade::Good));
+    assert_eq!((s.score, s.grade), (85.4, Grade::Good));
     assert!(s.caps.is_empty());
     assert_eq!(s.confidence, Confidence::Full);
 }
@@ -333,7 +334,7 @@ fn the_last_full_stop_landing_sets_the_flight_grade() {
         ]
     );
     let g = m.flight_grade(&[(&good, false), (&good, true)], 0).unwrap();
-    assert_eq!((g.score, g.grade, g.reasons.len()), (86.5, Grade::Good, 0));
+    assert_eq!((g.score, g.grade, g.reasons.len()), (85.4, Grade::Good, 0));
     let g = m.flight_grade(&[(&good, true)], 1).unwrap();
     assert_eq!((g.score, g.grade), (84.9, Grade::Fair));
     let g = m.flight_grade(&[(&good, true)], 2).unwrap();
