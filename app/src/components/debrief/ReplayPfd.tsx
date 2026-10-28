@@ -243,11 +243,10 @@ export function ReplayPfd({ debrief, theme, bus }: Props) {
         <span id="pfd-title" className="eyebrow">Flight display</span>
         <span className="readout text-xs text-fg-3">{t === null ? "–" : `T+${clock(t)}${hover !== null ? " · hover" : ""}`}</span>
       </figcaption>
-      <div className="min-h-0 flex-1 p-2">
-        {i === null ? (
-          <div className="flex h-full items-center justify-center text-center text-xs text-fg-3">Place the cursor on the timeline, a chart or the track to replay the instruments.</div>
-        ) : (
-          <svg viewBox={`0 0 ${W} ${H}`} className="h-full w-full" role="img" aria-label={describe(i)} preserveAspectRatio="xMidYMid meet">
+      {/* The empty display keeps the instruments' size: hovering in and out does not resize the row. */}
+      <div className="relative min-h-0 flex-1 p-2">
+        <svg viewBox={`0 0 ${W} ${H}`} className="h-full w-full" preserveAspectRatio="xMidYMid meet" {...(i === null ? { "aria-hidden": true } : { role: "img", "aria-label": describe(i) })}>
+          {i === null ? null : (<>
             <Annunciator x={ATT.cx - 64} label="AP" on={i.ap} what="Autopilot" />
             <Annunciator x={ATT.cx + 6} label="A/T" on={i.at} what="Autothrottle" />
             <Attitude i={i} theme={theme} />
@@ -263,8 +262,11 @@ export function ReplayPfd({ debrief, theme, bus }: Props) {
               <T x={150} y={H - 14} anchor="start" size={11}>{`GEAR ${gearText(i.gear)}`}</T>
               <T x={W - 10} y={H - 14} anchor="end" size={11} title={DERIVED.trk}>{`TRK ${i.trk === null ? NO_DATA : `${String(Math.round(i.trk) % 360).padStart(3, "0")}°T${DAGGER}`}`}</T>
             </g>
-          </svg>
-        )}
+          </>)}
+        </svg>
+        {i === null ? (
+          <div className="absolute inset-0 flex items-center justify-center p-4 text-center text-xs text-fg-3">Place the cursor on the timeline, a chart or the track to replay the instruments.</div>
+        ) : null}
       </div>
       <p className="border-t border-line-subtle px-3 py-1.5 text-[11px] leading-snug text-fg-3">
         Rebuilt from the recording, not a real display. {DAGGER} derived: vertical speed from pressure altitude and load, track from GPS positions. Bands: <span className="text-[var(--warning)]">flap limit</span> and <span className="text-[var(--danger)]">maximum speed</span> from the type profile; <span style={{ color: bug }}>Vapp</span> of the next landing as graded.

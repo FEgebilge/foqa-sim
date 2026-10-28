@@ -103,6 +103,8 @@ pub type Reply = ControlFlow<(), Option<Command>>;
 #[derive(Debug)]
 pub(crate) enum Polled {
     Item(Telemetry),
+    /// The sim's state: flying (`true`) or in the menus.
+    State(bool),
     /// Nothing arrived for a while.
     Tick,
     /// The sim quit, or its connection is gone.
@@ -213,6 +215,10 @@ fn run(
                     Some(item) => Some(item),
                     None => continue,
                 },
+                Polled::State(flying) => {
+                    r.session.in_control(flying);
+                    continue;
+                }
                 Polled::Tick => {
                     // Nothing more may come for long: paused, or about to crash.
                     if let Some(Err(e)) = r.flight.as_mut().map(FlightFiles::flush) {

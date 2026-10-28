@@ -28,6 +28,10 @@ const TICK: Duration = Duration::from_millis(250);
 /// How often a quiet connection is checked. A crashed or killed sim sends
 /// no `Quit`; the next call on its connection fails instead.
 const PROBE_EVERY: Duration = Duration::from_secs(2);
+/// Frames are dropped until the sim says whether it is in the menus, at
+/// most this long after connecting: in the main menu they would open a
+/// flight.
+const STATE_WAIT: Duration = Duration::from_secs(2);
 /// Airports whose reference point lies this close to the aircraft at a
 /// departure or touchdown; covers the gate-to-reference-point distance of
 /// the largest airports without reaching far into neighbouring ones.
@@ -68,6 +72,8 @@ pub struct LiveSource {
     identity: Identity,
     cadence: Cadence,
     next_probe: Instant,
+    /// Until when frames wait for the sim's first state reply.
+    state_by: Option<Instant>,
 }
 
 impl LiveSource {
@@ -106,7 +112,8 @@ impl LiveSource {
             asks: AirportAsks::default(),
             identity: Identity::default(),
             cadence: Cadence::new(acquisition.columns()),
-            next_probe: Instant::now() + PROBE_EVERY,
+            next_probe: Instant::now(),
+            state_by: Some(Instant::now() + STATE_WAIT),
         })
     }
 
@@ -172,7 +179,9 @@ impl LiveSource {
                 self.identity.facts(&values);
                 None
             }
+            Recv::Data { .. } if self.state_by.is_some_and(|t| Instant::now() < t) => None,
             Recv::Data { values, .. } => {
+                self.state_by = None;
                 if let Some(skip) = self.cadence.follow(&values) {
                     self.sim.request_sim_frames(REQUEST, DEFINE, skip)?;
                 }
@@ -181,6 +190,13 @@ impl LiveSource {
             Recv::Text { values, .. } => {
                 self.identity.report(values);
                 None
+            }
+            Recv::SystemState {
+                request_id: PROBE_REQUEST,
+                in_control,
+            } => {
+                self.state_by = None;
+                return Ok(Some(Polled::State(in_control)));
             }
             Recv::Event { id, data } => system_event(id, data, ""),
             Recv::EventFilename { id, file } => system_event(id, 0, &file),
@@ -216,7 +232,7 @@ impl LiveSource {
                 None
             }
             Recv::Quit => return Ok(Some(Polled::Ended)),
-            Recv::CommBus { .. } | Recv::Other { .. } => None,
+            Recv::SystemState { .. } | Recv::CommBus { .. } | Recv::Other { .. } => None,
         };
         Ok(item.map(Polled::Item))
     }

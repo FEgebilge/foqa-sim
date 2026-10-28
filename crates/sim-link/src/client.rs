@@ -65,6 +65,12 @@ pub enum Recv {
         request_id: u32,
         values: Vec<String>,
     },
+    /// The reply to `SimConnect::probe`: whether the user flies the
+    /// aircraft (`true`) or is in the menus.
+    SystemState {
+        request_id: u32,
+        in_control: bool,
+    },
     /// A facility-database reply.
     Facility(Facility),
     /// A Comm Bus event subscribed with `subscribe_comm_bus`: its id and
@@ -381,9 +387,9 @@ impl SimConnect {
         }
     }
 
-    /// Asks for the sim's state (`Sim`, user aircraft loaded) as
-    /// `request_id`. Its reply is not decoded: this is a cheap call that
-    /// fails once the connection is gone, when nothing else is being sent.
+    /// Asks for the sim's state (`Sim`: flying, or in the menus) as
+    /// `request_id`; the reply is `Recv::SystemState`. A cheap call that
+    /// also fails once the connection is gone, when nothing else is sent.
     pub fn probe(&mut self, request_id: u32) -> Result<(), Error> {
         let state = c_string("Sim")?;
         // SAFETY: open handle and a NUL-terminated name that outlives the call.
@@ -560,6 +566,12 @@ fn parse(bytes: &[u8], text_defines: &HashSet<u32>) -> Recv {
                 Recv::Data { request_id, values }
             })
         }),
+        ffi::recv_id::SYSTEM_STATE => {
+            read::<ffi::RecvSystemState>(bytes, 0).map(|m| Recv::SystemState {
+                request_id: m.request_id,
+                in_control: m.integer == 1,
+            })
+        }
         ffi::recv_id::COMM_BUS => read::<ffi::RecvCommBus>(bytes, 0).and_then(|m| {
             // The record size, not the buffer length, bounds the payload.
             let data = bytes.get(size_of::<ffi::RecvCommBus>()..m.base.size as usize)?;
@@ -714,6 +726,21 @@ mod tests {
         bytes.truncate(bytes.len() - 1);
         let id = ffi::recv_id::SIMOBJECT_DATA;
         assert_eq!(decode(&bytes), Recv::Other { id });
+    }
+
+    #[test]
+    fn decodes_the_sim_state() {
+        let state = |integer| words(&[284, 6, ffi::recv_id::SYSTEM_STATE, 3, integer]);
+        let reply = |in_control| Recv::SystemState {
+            request_id: 3,
+            in_control,
+        };
+        assert_eq!(decode(&state(1)), reply(true));
+        assert_eq!(decode(&state(0)), reply(false));
+        let other = Recv::Other {
+            id: ffi::recv_id::SYSTEM_STATE,
+        };
+        assert_eq!(decode(&state(1)[..19]), other);
     }
 
     #[test]

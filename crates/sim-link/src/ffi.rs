@@ -59,6 +59,7 @@ pub mod recv_id {
     pub const EVENT: u32 = 4;
     pub const EVENT_FILENAME: u32 = 6;
     pub const SIMOBJECT_DATA: u32 = 8;
+    pub const SYSTEM_STATE: u32 = 15;
     pub const AIRPORT_LIST: u32 = 18;
     pub const FACILITY_DATA: u32 = 28;
     pub const FACILITY_DATA_END: u32 = 29;
@@ -99,6 +100,15 @@ pub struct RecvEvent {
     pub group_id: Dword,
     pub event_id: Dword,
     pub data: Dword,
+}
+
+/// Head of `SIMCONNECT_RECV_SYSTEM_STATE`: the float and the string that
+/// follow are not read.
+#[repr(C, packed)]
+pub struct RecvSystemState {
+    pub base: Recv,
+    pub request_id: Dword,
+    pub integer: Dword,
 }
 
 #[repr(C, packed)]

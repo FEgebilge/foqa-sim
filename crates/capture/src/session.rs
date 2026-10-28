@@ -28,6 +28,9 @@ pub enum Action {
 pub struct Session {
     open: bool,
     in_menu: bool,
+    /// `in_menu` came from the sim's state, not a flow event: the state
+    /// may also lift it (a pause menu left after connecting).
+    menu_by_state: bool,
     replaying: bool,
     /// No flight opens until `resume`: its files could not be written.
     blocked: bool,
@@ -78,6 +81,7 @@ impl Session {
             }
             FlightStart | FltLoaded | TeleportDone | SkipDone | BackOnTrackDone => {
                 self.in_menu = false;
+                self.menu_by_state = false;
                 self.held_or_recorded()
             }
             ReplayStart | ReplayEnd => {
@@ -93,6 +97,7 @@ impl Session {
     /// record) if one was open.
     pub fn end(&mut self) -> Action {
         self.in_menu = true;
+        self.menu_by_state = false;
         self.replaying = false;
         if std::mem::take(&mut self.open) {
             Action::Close
@@ -105,6 +110,22 @@ impl Session {
     /// a flight.
     pub fn start(&mut self) {
         self.in_menu = false;
+    }
+
+    /// The sim's state: flying (`true`) or in the menus. It sets the menu
+    /// state only between flights, which is how the main menu is known
+    /// when connecting there: no flow event says so. An open flight
+    /// ignores it, since a pause menu reports the menus too.
+    pub fn in_control(&mut self, flying: bool) {
+        if self.open {
+            return;
+        }
+        if !flying {
+            self.menu_by_state |= !self.in_menu;
+            self.in_menu = true;
+        } else if self.menu_by_state {
+            self.in_menu = false;
+        }
     }
 
     /// The open flight's files failed (the caller closes it): none opens
@@ -279,6 +300,33 @@ mod tests {
         // MSFS 2024 splits on its flow events instead.
         let items = [flow(FlowEvent::FlightStart), frame(), loaded(), frame()];
         assert_eq!(routes(&items), [Hold, Open, Record, Record]);
+    }
+
+    #[test]
+    fn connecting_in_the_main_menu_opens_no_flight_until_one_starts() {
+        use Action::*;
+        let mut session = Session::default();
+        session.in_control(false);
+        assert_eq!(session.route(&frame()), Skip);
+        session.in_control(false);
+        assert_eq!(session.route(&flow(FlowEvent::FlightStart)), Hold);
+        assert_eq!(session.route(&frame()), Open);
+        // Flying, a pause menu does not end the flight.
+        session.in_control(false);
+        assert_eq!(session.route(&frame()), Record);
+    }
+
+    #[test]
+    fn the_sim_state_lifts_only_the_menu_it_set() {
+        use Action::*;
+        let mut session = Session::default();
+        session.in_control(false);
+        session.in_control(true);
+        assert_eq!(session.route(&frame()), Open);
+        assert_eq!(session.end(), Close);
+        // Back in the main menu, only a flight start opens the next one.
+        session.in_control(true);
+        assert_eq!(session.route(&frame()), Skip);
     }
 
     #[test]
