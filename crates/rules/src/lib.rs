@@ -11,11 +11,11 @@ pub mod expr;
 mod profile;
 mod rule;
 
-pub use engine::{Event, aircraft, evaluate};
+pub use engine::{Event, aircraft, applies, evaluate};
 pub use profile::{
-    ApproachSpeeds, Cited, FLAP_TOLERANCE_DEG, FlapBand, PhaseField, Profile, ProfileError,
-    ProfileField, ProfileSet, RefSpeeds, ScoringClass, Selection, Sourced, VrefCurve, VrefTable,
-    class_phases, interpolate,
+    Airframe, ApproachSpeeds, Cited, Engine, FLAP_TOLERANCE_DEG, FlapBand, Gear, Identified, Kind,
+    PhaseField, Profile, ProfileError, ProfileField, ProfileSet, RefSpeeds, ScoringClass,
+    Selection, Sourced, VrefCurve, VrefTable, class_phases, interpolate,
 };
 pub use rule::{
     Aircraft, Domain, Level, Limits, LoadError, Rule, Scalar, Side, TdField, Trigger, Var, load,

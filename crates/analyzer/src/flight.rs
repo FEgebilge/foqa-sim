@@ -2,7 +2,7 @@ use std::io::{self, Read};
 use std::ops::Range;
 
 use fdm_core::geo::distance_m;
-use fdm_core::{AircraftId, Airport, Lfl, Sample, SignalDef, SignalId, SimTime, Unit};
+use fdm_core::{AircraftId, Airport, Lfl, Sample, SignalDef, SignalId, SimTime, Ssm, Unit};
 use recorder::{FlightRecords, FlowEvent, Record, SimEvent, read_records};
 
 /// Parameters whose value wraps around, as (name, lowest value, period).
@@ -96,6 +96,15 @@ impl Flight {
     /// Samples of a parameter, in time order. Panics on a name the LFL lacks.
     pub fn series(&self, name: &str) -> &[Sample] {
         &self.series[usize::from(self.def(name).id.0)]
+    }
+
+    /// Marks every sample of parameter `id` failed: a parameter known to be
+    /// wrong on this aircraft reads as no data, as a ground station flags
+    /// it in the LFL for that tail.
+    pub fn invalidate(&mut self, id: SignalId) {
+        if let Some(s) = self.series.get_mut(usize::from(id.0)) {
+            s.iter_mut().for_each(|s| s.ssm = Ssm::Failure);
+        }
     }
 
     /// Every parameter with its samples, in LFL order.
@@ -385,6 +394,14 @@ pub(crate) mod tests {
             .into();
         assert_eq!(f.aircraft(), Some(&id("C172SP Classic")));
         assert_eq!(f.aircraft().unwrap().icao_type().as_deref(), Some("C172"));
+    }
+
+    #[test]
+    fn an_invalidated_parameter_reads_as_no_data() {
+        let mut f = flight(&[ok("sel.speed", 0.0, 140.0), ok("ias", 0.0, 150.0)]);
+        f.invalidate(Lfl::V1.by_name("sel.speed").unwrap().id);
+        assert_eq!(f.at("sel.speed", SimTime::ZERO), None);
+        assert_eq!(f.at("ias", SimTime::ZERO), Some(150.0));
     }
 
     #[test]

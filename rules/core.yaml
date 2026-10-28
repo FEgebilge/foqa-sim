@@ -413,14 +413,16 @@ sustain: 3 s
 above: { low: 30 deg, medium: 45 deg }
 ---
 rule: hard-landing
-version: 1
+version: 2
 title: Hard landing
 domain: contact
 description: >
-  Peak normal load at touchdown, transport aircraft, read at 16 samples/s.
+  Peak normal load at touchdown, transport jets, read at 16 samples/s.
   Levels 1.6 / 1.8 / 2.1 g sit below the 737 AMM hard-landing indication,
   2.2 g on a 16 samples/s DFDR (Flight Safety Digest Aug 2004 p. 6, ATSB
-  AO-2023-010; EASA EOFDM RE30).
+  AO-2023-010; EASA EOFDM RE30). A jet airliner's levels, so a transport
+  turboprop is not graded by them (an unknown engine is); its type
+  profile's inspection load still applies (`hard-landing-inspection`).
 why_it_matters: >
   A high load at touchdown can damage the landing gear and airframe and may
   require a maintenance inspection.
@@ -429,6 +431,7 @@ advice: >
   the descent rate before contact. If the approach is unstable, go around.
 at: touchdown
 aircraft: transport
+engine: [jet]
 measure: td.peak_g
 detail: "{value} at touchdown, limit {threshold}"
 above: { low: 1.6 g, medium: 1.8 g, high: 2.1 g }
@@ -719,7 +722,7 @@ detail: "rejected at {value}"
 above: { low: 0 kt }
 ---
 rule: rotation-rate
-version: 1
+version: 2
 title: Rotation rate out of range
 domain: other
 description: >
@@ -728,7 +731,8 @@ description: >
   at liftoff. Boeing FCTM: rotate at 2-3 deg/s; Airbus: about 3 deg/s
   ("What about rotation technique", 2020). CAP 739 lists a high pitch rate
   at rotation among the core events. The levels, above 4 / 5 deg/s and
-  below 1.5 deg/s, are a FOQA-Sim estimate.
+  below 1.5 deg/s, are a FOQA-Sim estimate. Jets only: the rates are the
+  jet manufacturers' (an unknown engine is graded).
 why_it_matters: >
   Too fast a rotation can strike the tail before the aircraft flies; too
   slow lengthens the takeoff run beyond the AFM distance, which assumes the
@@ -738,6 +742,7 @@ advice: >
   target pitch, then follow the flight director.
 phase: Takeoff
 aircraft: transport
+engine: [jet]
 gate: not air_ground
 measure: takeoff.rotation_rate
 detail: "{value} rotation, limit {threshold}"
@@ -814,9 +819,9 @@ title: Maximum operating speed exceeded
 domain: energy
 description: >
   IAS above VMO (VNE for types without one) from the aircraft's type
-  profile (AFM limitations or the type certificate data sheet). MACH is not
-  recorded, so MMO exceedances above the crossover altitude are not seen.
-  Silent without a profile value. Levels above VMO are a FOQA-Sim estimate.
+  profile (AFM limitations or the type certificate data sheet). Above the
+  crossover altitude MMO binds instead: `mmo-exceedance`. Silent without a
+  profile value. Levels above VMO are a FOQA-Sim estimate.
 why_it_matters: >
   Above VMO the airframe is outside its certified flutter and structural
   margins; in a real aircraft the overspeed is reported and may need an
@@ -918,3 +923,54 @@ at: touchdown
 measure: td.tailwind - profile.max_tailwind
 detail: "{td.tailwind} tailwind, limit {profile.max_tailwind}"
 above: { medium: 0 kt, high: 5 kt }
+---
+rule: mmo-exceedance
+version: 1
+title: Maximum operating Mach exceeded
+domain: energy
+description: >
+  Mach number above MMO from the aircraft's type profile (AFM limitations
+  or the type certificate data sheet). VMO/MMO is one limit, airspeed or
+  Mach "whichever is critical at a particular altitude" (14 CFR 25.1505):
+  above the crossover altitude it is MMO. Held 2 s, like
+  `vmo-exceedance`. Silent without a profile value or a recorded Mach
+  (recordings before 0.11). Levels above MMO are a FOQA-Sim estimate.
+why_it_matters: >
+  Beyond MMO the aircraft leaves its certified margins against Mach buffet,
+  Mach tuck and flutter; in a real aircraft the overspeed is reported and
+  may need an inspection.
+advice: >
+  At altitude watch the Mach, not the airspeed: reduce thrust early in a
+  descent or a gust, and never fly into the barber pole.
+phase: [InitialClimb, EnRoute, Approach, GoAround]
+when: not air_ground
+measure: mach - profile.mmo
+detail: "{mach}, limit {profile.mmo}"
+sustain: 2 s
+above: { low: 0 M, medium: 0.01 M, high: 0.02 M }
+---
+rule: overweight-landing
+version: 1
+title: Landing above the maximum landing weight
+domain: other
+description: >
+  Gross weight at main-gear contact above the maximum landing weight (MLW)
+  in the aircraft's type profile, in percent of it. MLW is an operating
+  limitation (14 CFR 25.1519), and a landing above it calls for the
+  manufacturer's overweight-landing conditional inspection (Boeing 737 AMM
+  05-51, from a secondary copy; Boeing AERO Q3 2007, "Overweight Landing?
+  Fuel Jettison? What to Consider"), so any excess is medium; more than 5 %
+  above MLW is high, a FOQA-Sim estimate. Silent without a profile value.
+  Not part of the landing score: the weight is planned, not flown.
+why_it_matters: >
+  The gear and the structure are designed for a 10 ft/s touchdown only up
+  to the design landing weight (14 CFR 25.473); above it the same
+  touchdown loads them more, and the brakes take more energy on the roll.
+advice: >
+  Plan the fuel so the landing weight stays below MLW; if you must return
+  early, burn off or jettison fuel where the type allows, and land as
+  gently as you can.
+at: touchdown
+measure: (weight.gross / profile.mlw - 1) * 100 %
+detail: "{weight.gross} at touchdown, maximum landing weight {profile.mlw}"
+above: { medium: 0 %, high: 5 % }

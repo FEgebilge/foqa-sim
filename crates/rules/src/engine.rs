@@ -69,10 +69,9 @@ pub fn evaluate(
     let phases = phase_labels(track, &selection.phases);
     let takeoffs = Takeoffs::new(flight, track, &phases);
     let tds = touchdowns(flight, track);
-    let class = selection.class.unwrap_or(Aircraft::Transport);
     let mut events: Vec<Event> = rules
         .iter()
-        .filter(|r| r.aircraft.is_none_or(|a| a == class))
+        .filter(|r| applies(r, selection))
         .flat_map(|rule| {
             Evaluation {
                 rule,
@@ -87,6 +86,17 @@ pub fn evaluate(
         .collect();
     events.sort_by_key(|e| (e.start, std::cmp::Reverse(e.level)));
     events
+}
+
+/// Whether `rule` grades the aircraft of `s`: its class (transport where
+/// unknown), its engine where known, and runway rules only for what lands
+/// on a runway.
+pub fn applies(rule: &Rule, s: &Selection) -> bool {
+    let class = s.class.unwrap_or(Aircraft::Transport);
+    let engine = s.airframe.engine;
+    rule.aircraft.is_none_or(|a| a == class)
+        && (rule.engine.is_empty() || engine.is_none_or(|e| rule.engine.contains(&e)))
+        && (!rule.runway || s.airframe.runway_landing())
 }
 
 /// `takeoff.*` at every track point, `NaN` outside a takeoff.
@@ -608,6 +618,37 @@ mod tests {
         // The first known evaluation is the firing, exceeded or not.
         let events = gate(&phases, &aal, &[200.0; 4], &[NAN, 50.0, 500.0, 500.0]);
         assert_eq!(events, []);
+    }
+
+    #[test]
+    fn rules_follow_the_class_the_engine_and_the_kind() {
+        use crate::profile::{Airframe, Engine, Kind, ProfileSet};
+        let td = "rule: x\nversion: 1\ntitle: x\ndomain: other\nat: touchdown\n";
+        let rule = |rest: &str| load(&format!("{td}{rest}")).unwrap().remove(0);
+        let jet =
+            rule("aircraft: transport\nengine: [jet]\nmeasure: td.peak_g\nabove: { low: 2 g }");
+        let runway = rule("measure: abs(td.cross)\nabove: { low: 25 ft }");
+        let set = ProfileSet::load([]).unwrap();
+        let with = |kind, engine| Selection {
+            airframe: Airframe {
+                kind,
+                engine,
+                ..Airframe::default()
+            },
+            ..set.select_type(None, || None)
+        };
+        // Unknown class and engine: graded as a transport jet, as before.
+        assert!(applies(&jet, &with(None, None)));
+        assert!(applies(&jet, &with(None, Some(Engine::Jet))));
+        assert!(!applies(&jet, &with(None, Some(Engine::Turboprop))));
+        assert!(!applies(
+            &jet,
+            &set.select_type(None, || Some(Aircraft::Light))
+        ));
+        assert!(applies(&runway, &with(Some(Kind::SeaplaneAmphibian), None)));
+        assert!(!applies(&runway, &with(Some(Kind::Helicopter), None)));
+        assert!(!applies(&runway, &with(Some(Kind::Glider), None)));
+        assert!(applies(&jet, &with(Some(Kind::Helicopter), None)));
     }
 
     #[test]
