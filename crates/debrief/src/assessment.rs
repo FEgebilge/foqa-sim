@@ -1,4 +1,4 @@
-//! The flight's landing-2 assessment (docs/scoring.md): every landing
+//! The flight's landing-3 assessment (docs/scoring.md): every landing
 //! scored by `assess`, its findings pointing at `Debrief.events`, the
 //! flight graded by its last full-stop landing (Decision 3) and the rest of
 //! the flight. A flight without a scored landing keeps the points method.
@@ -330,7 +330,7 @@ pub fn domain_summary(d: Domain) -> &'static str {
             "Speed, descent rate, bank, pitch, glideslope and configuration on final"
         }
         Domain::Energy => "Height over the threshold, touchdown speed and float down the runway",
-        Domain::Point => "How far from the aiming point the wheels touched down",
+        Domain::Point => "How far from the touchdown target the wheels touched down",
         Domain::Lateral => {
             "Offset from the centreline, crab and drift at touchdown, then on the rollout"
         }

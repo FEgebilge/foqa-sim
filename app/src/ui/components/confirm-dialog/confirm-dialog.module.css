@@ -1,0 +1,6 @@
+/* Content, the typed field and the error stack with one rhythm; the dialog's body supplies the padding. */
+.stack { display: grid; gap: var(--space-4); }
+
+/* Danger is a filled button, not red text: the primary button re-coloured through its own tokens, with a label that reads on --danger in both themes. */
+.destructive { --button-primary-bg: var(--danger); --button-primary-fg: oklch(99% 0 0); }
+:global(:root[data-theme="dark"]) .destructive { --button-primary-fg: oklch(20% 0 0); }

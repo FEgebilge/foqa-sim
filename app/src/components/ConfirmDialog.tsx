@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useId, useRef, type ReactNode } from "react";
 import { Button } from "@ui/components/button/button";
 
 interface Props {
@@ -17,6 +17,7 @@ interface Props {
 /** A modal question on the native <dialog>: focus is trapped and Escape cancels. The confirm button is the destructive one unless `variant` says otherwise. */
 export function ConfirmDialog({ open, title, children, confirmLabel, busy, variant = "danger", cancelLabel = "Cancel", onConfirm, onCancel }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
   useEffect(() => {
     const dialog = ref.current;
     if (!dialog || open === dialog.open) return;
@@ -25,9 +26,9 @@ export function ConfirmDialog({ open, title, children, confirmLabel, busy, varia
   }, [open]);
 
   return (
-    <dialog ref={ref} onCancel={(event) => { event.preventDefault(); if (!busy) onCancel(); }} aria-labelledby="confirm-title"
+    <dialog ref={ref} onCancel={(event) => { event.preventDefault(); if (!busy) onCancel(); }} aria-labelledby={titleId}
       className="panel m-auto w-[min(28rem,calc(100vw-2rem))] p-5 text-fg backdrop:bg-black/50">
-      <h2 id="confirm-title" className="font-display text-base font-semibold">{title}</h2>
+      <h2 id={titleId} className="font-display text-base font-semibold">{title}</h2>
       <div className="mt-2 text-sm text-fg-2">{children}</div>
       <div className="mt-5 flex justify-end gap-2">
         <Button variant="secondary" size="sm" onClick={onCancel} disabled={busy && variant === "danger"}>{cancelLabel}</Button>

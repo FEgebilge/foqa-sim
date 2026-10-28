@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { ChevronRight, Download, Globe, KeyRound, LogIn, LogOut, Plus, Trash2 } from "lucide-react";
 import { Badge } from "@ui/components/badge/badge";
 import { Button } from "@ui/components/button/button";
@@ -7,6 +7,7 @@ import { api } from "../../api";
 import { useNotify } from "../../lib/context";
 import { flightDate } from "../../lib/format";
 import { challengeHref } from "../../lib/route";
+import { useLoad } from "../../lib/use-backend";
 import type { SiteChallenge, SiteSettings, SiteView } from "../../lib/sites";
 import { ConfirmDialog } from "../ConfirmDialog";
 
@@ -155,31 +156,30 @@ function SiteRow({ site, onChanged, onLeave }: { site: SiteView; onChanged: () =
         </div>
       </div>
       {signing === "browser" ? <p className="px-4 pb-3 pl-14 text-xs text-fg-3">Finish signing in in your browser; this waits up to 5 minutes.</p> : null}
-      {open ? <SiteChallenges site={site} onTaken={onChanged} /> : null}
+      {open ? <SiteChallenges key={site.origin} site={site} onTaken={onChanged} /> : null}
     </li>
   );
 }
 
 function SiteChallenges({ site, onTaken }: { site: SiteView; onTaken: () => void }) {
   const notify = useNotify();
-  const [list, setList] = useState<SiteChallenge[] | { error: string } | null>(null);
+  const load = useCallback(() => api.siteChallenges(site.origin), [site.origin]);
+  const { state, patch } = useLoad(load);
   const [taking, setTaking] = useState<string | null>(null);
-  useEffect(() => {
-    api.siteChallenges(site.origin).then(setList, (error: unknown) => setList({ error: message(error) }));
-  }, [site.origin]);
   const take = (c: SiteChallenge) => {
     setTaking(c.id);
     api.siteChallengeTake(site.origin, c.id)
       .then((entry) => {
-        setList((old) => (Array.isArray(old) ? old.map((x) => (x.id === c.id ? { ...x, key: entry.key } : x)) : old));
+        patch((old) => old.map((x) => (x.id === c.id ? { ...x, key: entry.key } : x)));
         onTaken();
         window.location.hash = challengeHref(entry.key).slice(1);
       }, (error: unknown) => notify({ tone: "error", title: "Could not take the challenge", body: message(error) }))
       .finally(() => setTaking(null));
   };
 
-  if (!list) return <div className="mx-4 mb-3 h-10 animate-pulse rounded-md bg-muted" aria-label="Loading the site's challenges" />;
-  if ("error" in list) return <p className="px-4 pb-3 pl-14 text-sm" style={{ color: "var(--danger)" }}>{list.error}</p>;
+  if (state.status === "loading") return <div className="mx-4 mb-3 h-10 animate-pulse rounded-md bg-muted" aria-label="Loading the site's challenges" />;
+  if (state.status === "error") return <p className="px-4 pb-3 pl-14 text-sm" style={{ color: "var(--danger)" }}>{state.message}</p>;
+  const list = state.data;
   if (!list.length) return <p className="px-4 pb-3 pl-14 text-sm text-fg-3">{site.host} has no open challenges right now.</p>;
   return (
     <ul className="mx-4 mb-3 ml-14 divide-y divide-line rounded-md border border-line">

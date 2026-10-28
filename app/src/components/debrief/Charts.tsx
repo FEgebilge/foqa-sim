@@ -50,7 +50,6 @@ interface Props {
   debrief: Debrief;
   theme: Theme;
   view: TimeRange | null;
-  focus: number | null;
   selected: FlightEvent | null;
   bus: TimeBus;
   onView: (range: TimeRange) => void;
@@ -61,16 +60,16 @@ interface Props {
  * Stacked time-series charts on one time axis (uPlot: canvas, fast with tens of thousands of points).
  * The cursor is synced across charts, the map and the timeline; drag across a chart to zoom all of them.
  */
-export default function Charts({ debrief, theme, view, focus, selected, bus, onView, onFocus }: Props) {
+export default function Charts({ debrief, theme, view, selected, bus, onView, onFocus }: Props) {
   const refs = useMemo(() => SPECS.map((spec) => spec.refs?.(debrief.flight) ?? []), [debrief.flight]);
   const fullRange = useMemo<TimeRange>(() => [debrief.series.t_s[0] ?? 0, debrief.series.t_s.at(-1) ?? 1], [debrief.series.t_s]);
   const shared = useRef<Shared>({
-    overlay: { theme, phases: debrief.phases, touchdowns: [], selected, focus },
+    overlay: { theme, phases: debrief.phases, touchdowns: [], selected, focus: bus.placed },
     onView, onFocus, range: view ?? fullRange, plots: new Map(), hovered: null,
   });
   // Latest props for the uPlot hooks, which live outside React.
   useLayoutEffect(() => {
-    Object.assign(shared.current, { overlay: { theme, phases: debrief.phases, touchdowns: debrief.touchdowns.map((td) => td.t_s), selected, focus }, onView, onFocus, range: view ?? fullRange });
+    Object.assign(shared.current, { overlay: { theme, phases: debrief.phases, touchdowns: debrief.touchdowns.map((td) => td.t_s), selected, focus: bus.placed }, onView, onFocus, range: view ?? fullRange });
   });
 
   // Overlay or zoom changed: redraw (cheap) or rescale every chart.
@@ -78,7 +77,12 @@ export default function Charts({ debrief, theme, view, focus, selected, bus, onV
     const [min, max] = view ?? fullRange;
     shared.current.plots.forEach((plot) => plot.setScale("x", { min, max }));
   }, [view, fullRange]);
-  useEffect(() => { shared.current.plots.forEach((plot) => plot.redraw(false, false)); }, [focus, selected]);
+  useEffect(() => { shared.current.plots.forEach((plot) => plot.redraw(false, false)); }, [selected]);
+  // The placed cursor (playback too) redraws the charts without re-rendering them.
+  useEffect(() => bus.onPlace(() => {
+    shared.current.overlay.focus = bus.placed;
+    shared.current.plots.forEach((plot) => plot.redraw(false, false));
+  }), [bus]);
 
   // A time hovered elsewhere (timeline, another chart) moves every chart's cursor.
   useEffect(() => bus.subscribe((t) => {
@@ -120,6 +124,8 @@ function Chart({ spec, refs, last, debrief, theme, bus, shared }: ChartProps) {
     const known = series[line.key].filter((v) => v !== null);
     return known.length ? `${fmt(Math.min(...known))} to ${fmt(Math.max(...known))}` : "–";
   }), [series, spec.lines, fmt]);
+  // Each value keeps the room of its range, longer than any one value with its unit, so the legend never rewraps as the cursor moves.
+  const room = useMemo(() => rest.map((r) => `${r.length}ch`), [rest]);
   useHover(bus, useCallback((t: number | null) => {
     const i = t === null ? -1 : indexAt(series.t_s, t);
     spec.lines.forEach((line, n) => {
@@ -259,7 +265,7 @@ function Chart({ spec, refs, last, debrief, theme, bus, shared }: ChartProps) {
               <li key={line.key} className="flex items-center gap-1.5">
                 <Swatch color={LINE[theme][i] ?? LINE[theme][0]} dash={line.dash} width={2} />
                 <span className="text-fg-3">{line.label}</span>
-                <span ref={(node) => { values.current[i] = node; }} className="readout text-fg">{rest[i]}</span>
+                <span ref={(node) => { values.current[i] = node; }} className="readout inline-block text-fg" style={{ minWidth: room[i] }}>{rest[i]}</span>
               </li>
             ))}
             {hasLimit ? (

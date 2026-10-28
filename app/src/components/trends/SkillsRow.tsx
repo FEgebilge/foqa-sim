@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { Gauge } from "lucide-react";
 import { EmptyState } from "@ui/components/empty-state/empty-state";
 import { Tooltip } from "@ui/components/tooltip/tooltip";
-import { duration, number } from "../../lib/format";
+import { duration, fuelUnit, fuelValue, number } from "../../lib/format";
 import { RIDE_BANDS, percent, rideStep } from "../../lib/skills";
 import type { Trends } from "../../types";
 import { Measure } from "../Measure";
@@ -50,7 +50,7 @@ function Body({ skills }: { skills: Skills }) {
               {fuel.map((f) => (
                 <tr key={f.icao} className="border-t border-line-subtle first:border-t-0">
                   <th scope="row" className="py-1 text-left font-normal text-fg-2">{f.icao}</th>
-                  <td className="readout py-1 text-right"><Measure value={f.median}>{number(f.median ?? 0)}<span className="ml-1 text-xs text-fg-3">kg/h</span></Measure></td>
+                  <td className="readout py-1 text-right"><Measure value={f.median}>{fuelValue(f.median ?? 0)}<span className="ml-1 text-xs text-fg-3">{fuelUnit("h")}</span></Measure></td>
                 </tr>
               ))}
             </tbody>

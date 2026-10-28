@@ -1,0 +1,18 @@
+{
+  "title": "Description list",
+  "description": "Label and value facts in a compact grid that adapts to its container, with empty, changed and copyable values.",
+  "category": "Data",
+  "kind": "component",
+  "dependencies": [],
+  "requires": [
+    "copy-button"
+  ],
+  "tags": [
+    "data",
+    "facts",
+    "details",
+    "new"
+  ],
+  "source": "egebilge",
+  "canvas": []
+}

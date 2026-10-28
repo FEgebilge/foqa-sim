@@ -1,14 +1,12 @@
 // The backend contract (docs/debrief-api.md). Inside Tauri it calls the Rust commands and listens to its events;
-// in a plain browser it reads mock JSON from /mock so the UI can be developed without the app.
+// in a plain browser it reads mock JSON from /mock (api-mock.ts) so the UI can be developed without the app.
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { mockChallenges } from "./lib/challenges-mock";
-import { mockSetup } from "./lib/setup-mock";
-import { mockSites } from "./lib/sites-mock";
 import type { DeepLink, LinkOpened, SiteAttempt, SiteChallenge, SiteSettings, SitesApi, SiteView } from "./lib/sites";
-import type { AppUpdate, AttemptRecord, AttemptView, Briefing, ChallengeEntry, Debrief, FlightSummary, LandingNotice, OpenFlight, PreflightLine, RecorderStatus, SetupStatus, StorageUsage, TrendFilter, Trends } from "./types";
+import type { AppUpdate, AttemptRecord, AttemptView, Briefing, ChallengeEntry, Debrief, Deleted, FlightMeta, FlightSummary, LandingNotice, OpenFlight, PreflightLine, RecorderStatus, SetupStatus, StorageUsage, TrendFilter, Trends } from "./types";
 
 export type Unlisten = () => void;
+
 
 /** The flight exports of `fdm export` (docs/exports.md). */
 export type ExportFormat = "csv" | "kml" | "gpx" | "parquet";
@@ -51,10 +49,19 @@ export interface Api extends ChallengesApi, SitesApi {
   debrief(id: string): Promise<Debrief>;
   /** One pilot's flights over time (docs/trends.md); an absent filter field means all. */
   trends(filter: TrendFilter): Promise<Trends>;
-  /** Removes the flight's recording files for good; the flight being recorded is refused. */
-  deleteFlight(id: string): Promise<void>;
+  /** Moves the flights' files to the trash, where `restoreFlights` finds them for 30 days; the flight being recorded is refused. */
+  deleteFlights(ids: string[]): Promise<Deleted>;
+  /** Brings trashed flights back; the ids restored. */
+  restoreFlights(ids: string[]): Promise<string[]>;
+  /** Deletes the trash for good; how many flights went. */
+  purgeTrash(): Promise<number>;
+  flightMetaGet(id: string): Promise<FlightMeta>;
+  /** Replaces the flight's title, notes and tags; the meta as kept (trimmed, tags without repeats). Too long a value rejects in plain words. */
+  flightMetaSet(id: string, meta: FlightMeta): Promise<FlightMeta>;
   recorderStatus(): Promise<RecorderStatus>;
   openFlightsFolder(): Promise<void>;
+  /** Opens the folder holding the app's log file, for a recorder error. */
+  openLogFolder(): Promise<void>;
   storageUsage(): Promise<StorageUsage>;
   setupStatus(): Promise<SetupStatus>;
   setupInstall(pkg: string): Promise<SetupStatus>;
@@ -64,8 +71,8 @@ export interface Api extends ChallengesApi, SitesApi {
   setupPickCommunity(): Promise<SetupStatus>;
   /** Saves the flight in a format other tools read, where the user picks; the file, null when cancelled. `identity` adds the aircraft's title and tail number. */
   exportFlight(id: string, format: ExportFormat, identity: boolean): Promise<string | null>;
-  /** Saves the flight list as a Little Navmap logbook CSV; the file, null when cancelled. */
-  exportLogbook(identity: boolean): Promise<string | null>;
+  /** Saves the flight list, or only flights `ids`, as a Little Navmap logbook CSV; the file, null when cancelled. */
+  exportLogbook(identity: boolean, ids?: string[]): Promise<string | null>;
   /** Asks the release feed for a newer version; null when this is the newest. Rejects when the feed cannot be reached. */
   checkUpdate(): Promise<AppUpdate | null>;
   /** Downloads and installs the update `checkUpdate` found, reporting bytes done and the total when known. The installer closes the app and starts it again. */
@@ -83,9 +90,14 @@ const tauriApi: Api = {
   listFlights: () => invoke<FlightSummary[]>("list_flights"),
   debrief: (id) => invoke<Debrief>("debrief", { id }),
   trends: (filter) => invoke<Trends>("trends", { filter }),
-  deleteFlight: (id) => invoke<void>("delete_flight", { id }),
+  deleteFlights: (ids) => invoke<Deleted>("delete_flights", { ids }),
+  restoreFlights: (ids) => invoke<string[]>("restore_flights", { ids }),
+  purgeTrash: () => invoke<number>("purge_trash"),
+  flightMetaGet: (id) => invoke<FlightMeta>("flight_meta_get", { id }),
+  flightMetaSet: (id, meta) => invoke<FlightMeta>("flight_meta_set", { id, meta }),
   recorderStatus: () => invoke<RecorderStatus>("recorder_status"),
   openFlightsFolder: () => invoke<void>("open_flights_folder"),
+  openLogFolder: () => invoke<void>("open_log_folder"),
   storageUsage: () => invoke<StorageUsage>("storage_usage"),
   setupStatus: () => invoke<SetupStatus>("setup_status"),
   setupInstall: (pkg) => invoke<SetupStatus>("setup_install", { package: pkg }),
@@ -93,7 +105,7 @@ const tauriApi: Api = {
   setupUseCommunity: (path) => invoke<SetupStatus>("setup_use_community", { path }),
   setupPickCommunity: () => invoke<SetupStatus>("setup_pick_community"),
   exportFlight: (id, format, identity) => invoke<string | null>("export_flight", { id, format, identity }),
-  exportLogbook: (identity) => invoke<string | null>("export_logbook", { identity }),
+  exportLogbook: (identity, ids) => invoke<string | null>("export_logbook", { identity, ids }),
   saveImage: async (png, name) => invoke<string | null>("save_image", { name, png: Array.from(new Uint8Array(await png.arrayBuffer())) }),
   async checkUpdate() {
     const { check } = await import("@tauri-apps/plugin-updater");
@@ -106,11 +118,17 @@ const tauriApi: Api = {
     let total: number | undefined;
     // The installer restarts the app hidden in the tray; the mark makes that start show its window.
     await invoke<void>("update_mark");
-    await found.downloadAndInstall((event) => {
-      if (event.event === "Started") total = event.data.contentLength;
-      else if (event.event === "Progress") done += event.data.chunkLength;
-      onProgress(done, total, event.event === "Finished");
-    });
+    try {
+      await found.downloadAndInstall((event) => {
+        if (event.event === "Started") total = event.data.contentLength;
+        else if (event.event === "Progress") done += event.data.chunkLength;
+        onProgress(done, total, event.event === "Finished");
+      });
+    } catch (e) {
+      // A failed update must not leave the mark to raise the window at a later start.
+      await invoke<void>("update_mark_clear").catch(() => {});
+      throw e;
+    }
   },
   challengesList: () => invoke<ChallengeEntry[]>("challenges_list"),
   challengeImport: () => invoke<ChallengeEntry | null>("challenge_import"),
@@ -145,96 +163,14 @@ const tauriApi: Api = {
   },
 };
 
-/** First JSON file that exists. Vite answers a missing file with index.html, so the content type decides. */
-async function firstJson<T>(paths: string[]): Promise<T> {
-  for (const path of paths) {
-    const response = await fetch(path);
-    if (response.ok && response.headers.get("content-type")?.includes("json")) return (await response.json()) as T;
-  }
-  throw new Error(`No mock data at ${paths.join(" or ")}`);
-}
+/** The browser mock, loaded on the first call: only a plain browser ever needs it. */
+const lazyMock = (): Api =>
+  new Proxy({ live: false } as Api, {
+    get: (target, key: keyof Api) =>
+      key in target ? target[key] : async (...args: unknown[]) => {
+        const { mockApi } = await import("./api-mock");
+        return (mockApi[key] as (...a: unknown[]) => unknown)(...args);
+      },
+  });
 
-/** Hands a file to the browser's downloads: the mock's stand-in for a save dialog. */
-function download(blob: Blob, name: string) {
-  const url = URL.createObjectURL(blob);
-  const link = Object.assign(document.createElement("a"), { href: url, download: name });
-  link.click();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-  return name;
-}
-
-/** A mock export made by `fdm` (public/mock/export); Vite answers a missing one with index.html. */
-async function mockExport(name: string) {
-  const response = await fetch(`/mock/export/${name}`);
-  if (!response.ok || response.headers.get("content-type")?.includes("html")) {
-    throw new Error(`The mock has ${name.endsWith(".parquet") ? "no Parquet export" : "exports of c172-pattern only"}; the desktop app exports every flight.`);
-  }
-  return download(await response.blob(), name);
-}
-
-const params = new URLSearchParams(window.location.search);
-// Real backend output wins over the synthetic sample (scripts/make-sample-mock.mjs); `?samples` shows only the sample.
-const mockFiles = (name: string) => (params.has("samples") ? [`/mock/sample-${name}`] : [`/mock/${name}`, `/mock/sample-${name}`]);
-/** `?many=150` repeats the mock list to that length, to try search and sort at scale. Copies open their original's debrief. */
-const many = Number(params.get("many") ?? 0);
-const COPY = "~";
-/** Mock flights "deleted" in this page session. */
-const deleted = new Set<string>();
-
-const mockApi: Api = {
-  live: false,
-  async listFlights() {
-    const flights = await firstJson<FlightSummary[]>(mockFiles("flights.json"));
-    if (!(many > flights.length)) return flights.filter((f) => !deleted.has(f.id));
-    return Array.from({ length: many }, (_, index) => {
-      const base = flights[index % flights.length]!;
-      if (index < flights.length) return base;
-      const started = base.started_utc ? new Date(Date.parse(base.started_utc) - index * 86_400_000 * 0.7).toISOString() : undefined;
-      return { ...base, id: `${base.id}${COPY}${index}`, started_utc: started };
-    }).filter((f) => !deleted.has(f.id));
-  },
-  /** The sample, narrowed to the filter: its landings, counts and mean score follow; the other tables stay as sampled. */
-  async trends({ aircraft, airport, days }) {
-    const all = await firstJson<Trends>(["/mock/trends.json"]);
-    const newest = Date.parse(all.landings.at(-1)?.started_utc ?? "") || 0;
-    const rows = all.landings.filter((l) => (!aircraft || l.aircraft === aircraft) && (!airport || l.icao === airport)
-      && (days === undefined || Date.parse(l.started_utc ?? "") >= newest - days * 86_400_000));
-    const scores = rows.filter((l) => l.score !== undefined && l.full_stop).map((l) => l.score!);
-    const mean = scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : null;
-    const keep = (rows.length === all.landings.length);
-    return { ...all, filter: { aircraft, airport, days }, flights: rows.length, recordings: keep ? all.recordings : { total: rows.length, counted: rows.length, ground_only: 0, too_short: 0, partial: 0 }, landing_count: rows.length, scored: scores.length, hours: Math.round(rows.length * 9.5) / 10,
-      landings: rows, score: keep ? all.score : { mean, median: mean, recent: null, earlier: null },
-      by_aircraft: all.by_aircraft.filter((r) => !aircraft || r.icao === aircraft), by_airport: all.by_airport.filter((r) => !airport || r.icao === airport) };
-  },
-  async deleteFlight(id) {
-    deleted.add(id);
-  },
-  debrief: (id) => firstJson<Debrief>(mockFiles(`debrief-${id.split(COPY)[0]}.json`)),
-  async recorderStatus() {
-    const state = params.get("status");
-    if (state === "recording") return { state, flight_id: "flight-mock", elapsed_s: 754 };
-    if (state === "connected") return { state };
-    if (state === "error") return { state, message: "SimConnect closed the connection" };
-    return { state: "waiting_for_sim" };
-  },
-  checkUpdate: async () => null,
-  async installUpdate() {
-    throw new Error("Updating needs the desktop app.");
-  },
-  async openFlightsFolder() {
-    throw new Error("Opening the flights folder needs the desktop app.");
-  },
-  async storageUsage() {
-    const flights = await firstJson<FlightSummary[]>(mockFiles("flights.json"));
-    return { flights: flights.length, bytes: flights.length * 1_800_000, folder: "Documents\\FOQA-Sim\\flights" };
-  },
-  exportFlight: (id, format) => mockExport(`${id.split(COPY)[0]}.${format}`),
-  exportLogbook: () => mockExport("logbook.csv"),
-  saveImage: async (png, name) => download(png, name),
-  ...mockSetup(params.get("setup")),
-  ...mockChallenges(params.get("status")),
-  ...mockSites(params.get("sites")),
-  on: async () => () => {},
-};
-
-export const api: Api = isTauri() ? tauriApi : mockApi;
+export const api: Api = isTauri() ? tauriApi : lazyMock();

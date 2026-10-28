@@ -7,6 +7,8 @@ type: AT76
 name: ATR 72-600
 class: transport
 scoring_class: turboprop
+airframe: { kind: airplane, engine: turboprop, engines: 2, gear: retractable }
+mlw: { value: 49272 lb, source: "ATR 72-600 factsheet, Weights: max landing weight (basic) 22,350 kg, https://www.atr-aircraft.com/wp-content/uploads/2020/07/Factsheets_-_ATR_72-600.pdf", note: "the factsheet text extraction is column-shifted; read against the usual ATR 72-600 weights (MTOW 22,800/23,000, MZFW 20,800/21,000 kg)" }
 vmo: { value: 250 kt, source: &stuvia "Stuvia ATR 72-600 limitations study aid, https://www.stuvia.com/doc/6586170/atr-72-600-limitations-questions-and-answers-complete-solutions", approximate: true, note: "study aid, not a primary document; EASA TCDS EASA.A.084 Issue 14 only says refer to the AFM" }
 vle: { value: 185 kt, source: *stuvia, approximate: true, note: "study aid value, not a primary document" }
 vlo: { value: 160 kt, source: *stuvia, approximate: true, note: "extend 170, retract 160 (lower given); study aid value" }

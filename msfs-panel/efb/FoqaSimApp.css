@@ -87,7 +87,7 @@
 .foqa.history .phrow .name { color: #e8f0f6; }
 .foqa.history .phrow .trigger { grid-column: 2; font-size: 13px; color: var(--muted); }
 .foqa.history .bounces { margin-top: 6px; font-size: 15px; font-family: var(--mono); color: var(--medium); }
-/* landing-2: the score before the grade, six domain mini-bars and the top deduction (debrief-api.md). */
+/* landing-3: the score before the grade, six domain mini-bars and the top deduction (debrief-api.md). */
 .foqa.history .assess .score { margin-right: 12px; font-size: 30px; font-family: var(--mono); color: var(--fg); }
 .foqa.history .assess .score .of { font-size: 14px; color: var(--muted); }
 .foqa.history .mbars { display: grid; grid-template-columns: repeat(3, 1fr); column-gap: 14px; row-gap: 6px; margin-top: 10px; }

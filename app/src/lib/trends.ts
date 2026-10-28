@@ -24,3 +24,12 @@ export const scoredLandings = (landings: TrendLanding[]) => landings.filter((l) 
 export const levelTone = (mean: number): Grade => (mean < 0.75 ? "good" : mean < 1.5 ? "fair" : "poor");
 
 export const GRADE_VAR: Record<Grade, string> = { good: "--success", fair: "--warning", poor: "--danger" };
+
+/** Flights (or scored landings) a comparison of the newer half with the older needs: 5 in each (docs/trends.md). */
+export const TREND_MIN = 10;
+
+/** Why there is no trend arrow yet, or null when there can be one. `count` is what the comparison halves: flights, or scored landings. */
+export const trendNeeds = (count: number, noun: string) => count >= TREND_MIN ? null : `Arrows need ${TREND_MIN} ${noun}, 5 in each half; ${count === 0 ? "none yet" : `${count} so far`}.`;
+
+/** A chart's height for its width, so a wide window gives a wider, not a flatter, chart. */
+export const chartHeight = (width: number, min: number, max: number, ratio = 0.3) => Math.round(Math.min(max, Math.max(min, width * ratio)));

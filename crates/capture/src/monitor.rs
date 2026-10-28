@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use analyzer::{LiveInput, LivePoint, LiveTrack, Phase};
 use debrief::Station;
-use fdm_core::{Lfl, SimTime, Ssm};
+use fdm_core::{AircraftId, Lfl, SimTime, Ssm};
 use recorder::{Acquisition, Conditioned, SimEvent, Telemetry};
 use rules::expr::Values;
 use rules::{Aircraft, FLAP_TOLERANCE_DEG, Profile, ProfileField, Rule, Selection, Side, Var};
@@ -78,7 +78,7 @@ pub struct Monitor {
     track: LiveTrack,
     frame: Option<Conditioned>,
     t0: Option<f64>,
-    icao: Option<String>,
+    aircraft: Option<AircraftId>,
     /// Heaviest gross weight so far: the class when the type has no profile.
     weight_lb: f64,
     /// Each gate's checks as they stood when it was passed, this approach.
@@ -93,7 +93,7 @@ impl Monitor {
             track: LiveTrack::default(),
             frame: None,
             t0: None,
-            icao: None,
+            aircraft: None,
             weight_lb: f64::NAN,
             passed: [None, None],
         }
@@ -102,7 +102,7 @@ impl Monitor {
     /// Follows one recorded item.
     pub fn record(&mut self, item: &Telemetry) {
         match item {
-            Telemetry::Event(SimEvent::Aircraft(id)) => self.icao = id.icao_type(),
+            Telemetry::Event(SimEvent::Aircraft(id)) => self.aircraft = Some(id.clone()),
             Telemetry::Frame(raw) => {
                 if let Some(frame) = self.acquisition.condition(raw) {
                     self.step(frame);
@@ -187,13 +187,13 @@ impl Monitor {
         })
     }
 
-    /// The aircraft as graded: its type profile, else the class by the
-    /// heaviest weight so far.
+    /// The aircraft as the debrief will grade it: its type profile, else
+    /// the class by the sim's facts or the heaviest weight so far.
     fn selection(&self) -> Selection<'_> {
         let weight = finite(self.weight_lb).map(Aircraft::by_weight);
         self.station
             .profiles()
-            .select_type(self.icao.clone(), || weight)
+            .identify(self.aircraft.as_ref(), || weight)
     }
 
     fn at<'a>(&'a self, frame: &'a Conditioned, point: LivePoint) -> At<'a> {
@@ -314,7 +314,7 @@ impl Values<Var> for At<'_> {
             Var::Vs => finite(self.point.vs_fpm),
             Var::Height => finite(self.point.aal_ft),
             Var::Ra => finite(self.point.ra_ft),
-            Var::Td(_) => None,
+            Var::Td(_) | Var::Takeoff(_) => None,
             Var::Profile(field) => self
                 .profile?
                 .value(field, || param(self.frame, "flap.te_angle")),
@@ -355,6 +355,7 @@ mod tests {
             atc_model: "ATCCOM.AC_MODEL C172.0.text".into(),
             atc_type: String::new(),
             atc_id: String::new(),
+            facts: Default::default(),
         };
         m.record(&Telemetry::Event(SimEvent::Aircraft(id)));
         let ground = [("SIM ON GROUND", 1.0), ("PRESSURE ALTITUDE", 0.0)];

@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use analyzer::{Flight, RunwayFix, TRACK_HZ, Track, Window};
 use assess::{Height, Speeds};
 pub use rules::Level;
-use rules::{Domain, ScoringClass, Sourced};
+use rules::{Airframe, Domain, Identified, ScoringClass, Selection, Sourced};
 use serde::{Deserialize, Serialize};
 
 use crate::trends::{r1, r2};
@@ -68,6 +68,21 @@ pub struct FlightSummary {
     /// What was flown, which decides whether trends count the recording.
     #[serde(default)]
     pub flown: Flown,
+    /// `flown` judged by the trends rule, so the list can set the rest apart.
+    #[serde(default)]
+    pub kind: RecordingKind,
+}
+
+/// What a recording was (docs/trends.md): a flight trends count, or not.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RecordingKind {
+    Flight,
+    /// Never airborne; also a summary from before `flown` existed.
+    #[default]
+    GroundOnly,
+    /// Airborne, but under the rule.
+    TooShort,
 }
 
 /// How much of a recording was real flying (docs/trends.md), from the
@@ -194,7 +209,7 @@ pub struct RuleCount {
 }
 
 /// The flight graded as a whole, as the flight list shows it: by
-/// `landing-2` (docs/scoring.md) when a landing was scored, else by points.
+/// `landing-3` (docs/scoring.md) when a landing was scored, else by points.
 /// `points` and `findings` are the points method's (each rule it broke
 /// counts once, at its worst level: high 4 points, medium 2, low 1,
 /// advisories none), kept for one release.
@@ -204,7 +219,7 @@ pub struct Assessment {
     pub points: u32,
     /// Rules broken at low or above.
     pub findings: usize,
-    /// `landing-2`, or `points`.
+    /// `landing-3`, or `points`.
     #[serde(default = "points_method")]
     pub method: String,
     /// 0-100, with a scored landing.
@@ -263,7 +278,7 @@ pub struct GradeBand {
 /// the points method's parts and bands.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct AssessmentDetail {
-    /// `landing-2`, or `points` without a scored landing.
+    /// `landing-3`, or `points` without a scored landing.
     pub method: String,
     pub score: Option<f64>,
     pub grade: Grade,
@@ -283,7 +298,7 @@ pub struct AssessmentDetail {
     pub legacy_findings: usize,
     pub parts: Vec<AssessmentPart>,
     pub bands: [GradeBand; 3],
-    /// landing-2's grade edges: Good from `good`, Fair from `fair`.
+    /// landing-3's grade edges: Good from `good`, Fair from `fair`.
     pub grades: ScoreBands,
 }
 
@@ -338,7 +353,7 @@ pub struct LandingAssessment {
     pub caps: Vec<CapNote>,
     pub stable_from_ft: Option<f64>,
     /// The height splitting the approach window into its two halves, by
-    /// class (`windows` of scoring/landing-2.yaml); `None` when insufficient.
+    /// class (`windows` of scoring/landing-3.yaml); `None` when insufficient.
     pub split_ft: Option<f64>,
     pub speeds: Option<Speeds>,
     pub domains: Vec<DomainAssessment>,
@@ -378,7 +393,7 @@ pub struct ApproachProfile {
     pub loc_dot: Vec<f64>,
     pub path_deg: f64,
     pub tch_ft: f64,
-    /// The window's top and bottom heights (`windows` of scoring/landing-2.yaml).
+    /// The window's top and bottom heights (`windows` of scoring/landing-3.yaml).
     pub top_ft: f64,
     pub bottom_ft: f64,
 }
@@ -576,6 +591,31 @@ impl From<&AssessmentDetail> for Assessment {
     }
 }
 
+/// How the aircraft was identified and what that left unchecked.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Identification {
+    /// The step of the chain that matched (docs/rules.md, "Identification").
+    pub matched: Identified,
+    pub airframe: Airframe,
+    /// The type-limit checks that could not run for want of a profile
+    /// value, in words.
+    pub unchecked: Vec<&'static str>,
+    /// `false` for a helicopter or a glider: no landing score and no runway
+    /// rules.
+    pub runway_landing: bool,
+}
+
+impl From<&Selection<'_>> for Identification {
+    fn from(s: &Selection) -> Self {
+        Self {
+            matched: s.identified,
+            airframe: s.airframe,
+            unchecked: s.unchecked(),
+            runway_landing: s.airframe.runway_landing(),
+        }
+    }
+}
+
 /// `Debrief.flight`: the summary plus how the flight was graded.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct FlightHeader {
@@ -586,6 +626,7 @@ pub struct FlightHeader {
     /// `light` or `transport`: the profile's class, else the class by weight.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub class: Option<String>,
+    pub identification: Identification,
     /// The type profile's values that do not depend on the flight state,
     /// by their `profile.<name>` in rules.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
@@ -1029,12 +1070,12 @@ mod grade_band_tests {
             outcome: Default::default(),
             partial: Vec::new(),
         };
-        Method::landing_2().unwrap().score(&m).score
+        Method::landing_3().unwrap().score(&m).score
     }
 
     #[test]
     fn single_findings_keep_todays_grade() {
-        let method = Method::landing_2().unwrap();
+        let method = Method::landing_3().unwrap();
         assert_eq!(landing(&[]), 100.0);
         for domain in assess::DOMAINS {
             for level in [Low, Medium, High] {

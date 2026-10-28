@@ -4,6 +4,10 @@
 type: PC12
 name: Pilatus PC-12 NGX
 class: light
+airframe: { kind: airplane, engine: turboprop, engines: 1, gear: retractable }
+mlw: { value: 9921 lb, source: "EASA TCDS EASA.A.089 Issue 11 (07 Jul 2025), Section D PC-12/47E item 12 Maximum Masses: landing 4500 kg (9921 lbs), https://www.easa.europa.eu/en/downloads/7348/en" }
+mmo: { value: 0.48 M, source: "EASA TCDS EASA.A.089 Issue 11, Section D PC-12/47E item 9: MMO 0.48", note: "0.49 with the Note 12 changes (Section D.IV)" }
+aliases: [PC-12 NGX]
 vmo: { value: 240 kt, source: &tcds "EASA TCDS EASA.A.089 Issue 11 (07 Jul 2025), https://www.easa.europa.eu/de/downloads/7348/en", note: "VMO 240 KCAS; TCDS speeds are KCAS, AFM KIAS may differ slightly" }
 vle: { value: 240 kt, source: *tcds, note: "VLE 240 KCAS" }
 vlo: { value: 180 kt, source: *tcds, note: "VLO 180 KCAS; TCDS gives a single VLO, PC-12/45, /47, /47E, /47G (NGX) same table" }

@@ -13,6 +13,9 @@ pub enum Phase {
     Taxi,
     /// Takeoff roll to 35 ft above the runway.
     Takeoff,
+    /// A takeoff roll that slowed again without a liftoff (CICTT TOF
+    /// subphase "rejected takeoff").
+    RejectedTakeoff,
     /// 35 ft to `climb_end_ft` above the aerodrome (or the top of a lower
     /// climb).
     InitialClimb,
@@ -27,10 +30,11 @@ pub enum Phase {
 }
 
 impl Phase {
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 9] = [
         Self::Standing,
         Self::Taxi,
         Self::Takeoff,
+        Self::RejectedTakeoff,
         Self::InitialClimb,
         Self::EnRoute,
         Self::Approach,
@@ -44,6 +48,7 @@ impl Phase {
             Self::Standing => "Standing",
             Self::Taxi => "Taxi",
             Self::Takeoff => "Takeoff",
+            Self::RejectedTakeoff => "RejectedTakeoff",
             Self::InitialClimb => "InitialClimb",
             Self::EnRoute => "EnRoute",
             Self::Approach => "Approach",
@@ -75,6 +80,10 @@ pub struct PhaseConfig {
     /// Ground speed from which a ground run is a takeoff or landing roll:
     /// above any taxi speed, below every liftoff speed, kt.
     pub roll_kt: f64,
+    /// A ground run past `roll_kt` that reaches this speed and slows under
+    /// `roll_kt` again without a liftoff is a rejected takeoff, kt; at least
+    /// `roll_kt`.
+    pub rto_kt: f64,
     /// The initial climb ends this high above the aerodrome, ft.
     pub climb_end_ft: f64,
     /// The approach starts descending through this height above the
@@ -92,17 +101,23 @@ pub struct PhaseConfig {
 impl PhaseConfig {
     /// CICTT puts both the end of the initial climb and the start of the
     /// approach at 1000 ft; the flare from 50 ft, also the threshold
-    /// crossing height.
+    /// crossing height. A rejected takeoff reaches 40 kt: 10 kt (a tailwind)
+    /// above the 30 kt straight-line taxi limit of the Boeing and Airbus
+    /// FCTMs, so no taxi or line-up is taken for one.
     pub const TRANSPORT: Self = Self {
         roll_kt: 30.0,
+        rto_kt: 40.0,
         climb_end_ft: 1000.0,
         approach_ft: 1000.0,
         flare_ft: 50.0,
         go_around_rise_ft: 200.0,
         go_around_drop_ft: 50.0,
     };
-    /// A light aircraft flares from about 10–20 ft.
+    /// A light aircraft flares from about 10–20 ft, and taxis at a walking
+    /// pace (FAA-H-8083-3 ch. 2), far under the 30 kt roll speed, which a
+    /// rejected takeoff need only reach.
     pub const LIGHT: Self = Self {
+        rto_kt: 30.0,
         flare_ft: 20.0,
         ..Self::TRANSPORT
     };
@@ -127,7 +142,8 @@ pub enum Trigger {
     Stopped,
     /// Moving on the ground under the roll speed.
     Moving,
-    /// On the ground at roll speed and continuing to liftoff.
+    /// On the ground at roll speed: a takeoff roll, continuing to liftoff
+    /// or rejected.
     Roll,
     /// The lowest ground speed of a landing roll that runs into a liftoff:
     /// takeoff power applied, which ends a touch-and-go landing (CICTT).
@@ -172,22 +188,34 @@ pub struct Span {
 
 pub(crate) const STANDING_MAX_GS_KT: f64 = 2.0;
 pub(crate) const TAKEOFF_END_FT: f64 = 35.0;
+/// Rotation: the pitch this far above its value at the start of the roll.
+const ROTATION_PITCH_DEG: f64 = 1.0;
+/// Pitch (recorded at 4 Hz) is read over this many track points, 0.5 s, for
+/// its rate.
+const PITCH_RATE_LAG: usize = 4;
 /// A gap in ground speed this long (2 s at the track rate) still belongs to
 /// a roll; a longer one ends it.
 const ROLL_MAX_GAP: usize = 2 * TRACK_HZ as usize;
 
 /// The phase at every track point.
 pub fn phase_labels(track: &Track, cfg: &PhaseConfig) -> Vec<Phase> {
-    Labels::of(track, cfg).into_iter().map(|(p, _)| p).collect()
+    segments(track, cfg)
+        .into_iter()
+        .flatten()
+        .map(|(p, _)| p)
+        .collect()
 }
 
-/// Contiguous phase spans covering the whole track, each with its cause.
+/// Contiguous phase spans covering the whole track, each with its cause; a
+/// break ends one (`Track::segments`).
 pub fn phases(track: &Track, cfg: &PhaseConfig) -> Vec<Span> {
     let mut spans: Vec<Span> = Vec::new();
-    for (i, (phase, cause)) in Labels::of(track, cfg).into_iter().enumerate() {
+    let labels = (segments(track, cfg).into_iter())
+        .flat_map(|s| s.into_iter().enumerate().map(|(k, l)| (l, k == 0)));
+    for (i, ((phase, cause), fresh)) in labels.enumerate() {
         let t = track.t[i];
         match spans.last_mut() {
-            Some(last) if last.phase == phase => last.end = t,
+            Some(last) if last.phase == phase && !fresh => last.end = t,
             last => {
                 if let Some(last) = last {
                     last.end = t;
@@ -202,6 +230,21 @@ pub fn phases(track: &Track, cfg: &PhaseConfig) -> Vec<Span> {
         }
     }
     spans
+}
+
+/// Peak pitch rate of the rotation in the takeoff `roll` (track points to
+/// 35 ft), deg/s: from the pitch `ROTATION_PITCH_DEG` above its value at the
+/// start of the roll, over 0.5 s; `None` without a rotation.
+pub fn rotation_rate(track: &Track, roll: Range<usize>) -> Option<f64> {
+    let pitch = &track.pitch_deg;
+    let start = roll
+        .clone()
+        .find(|&i| pitch[i] - pitch[roll.start] >= ROTATION_PITCH_DEG)?;
+    let rate = |i: usize| (pitch[i] - pitch[i - PITCH_RATE_LAG]) * TRACK_HZ / PITCH_RATE_LAG as f64;
+    (start.max(PITCH_RATE_LAG)..roll.end)
+        .map(rate)
+        .filter(|r| r.is_finite())
+        .max_by(f64::total_cmp)
 }
 
 /// Height above the runway: calibrated RA where valid, else AAL.
@@ -224,6 +267,18 @@ fn cause(track: &Track, trigger: Trigger, i: usize, threshold: f64) -> Cause {
         value,
         threshold,
         basis,
+    }
+}
+
+/// Every point's phase with its cause, labelled stretch by stretch between
+/// the sim's breaks, each as a recording of its own: no phase runs across a
+/// slew or teleport.
+fn segments(track: &Track, cfg: &PhaseConfig) -> Vec<Vec<(Phase, Cause)>> {
+    match track.breaks.is_empty() {
+        true => vec![Labels::of(track, cfg)],
+        false => (track.segments().into_iter())
+            .map(|r| Labels::of(&track.slice(r), cfg))
+            .collect(),
     }
 }
 
@@ -250,7 +305,27 @@ impl<'a> Labels<'a> {
         for leg in &track.legs {
             labels.leg(leg);
         }
+        labels.rejected();
         labels.label
+    }
+
+    /// Ground runs left as taxi that accelerate from under `roll_kt` to
+    /// `rto_kt` and slow under `roll_kt` again: no leg follows them, so the
+    /// takeoff was rejected. A run cut by a speed dropout or the recording's
+    /// edge is not decided and stays taxi.
+    fn rejected(&mut self) {
+        let (t, cfg) = (self.track, self.cfg);
+        let gs = &t.gs_kt;
+        let slow = |i: Option<usize>| i.and_then(|i| gs.get(i)).is_some_and(|&g| g < cfg.roll_kt);
+        let fast: Vec<_> = runs(t.len(), |i| {
+            t.on_ground[i] && self.label[i].0 == Phase::Taxi && gs[i] >= cfg.roll_kt
+        })
+        .filter(|r| slow(r.start.checked_sub(1)) && slow(Some(r.end)))
+        .filter(|r| r.clone().any(|i| gs[i] >= cfg.rto_kt))
+        .collect();
+        for r in fast {
+            self.set(r, Phase::RejectedTakeoff, Trigger::Roll, cfg.roll_kt);
+        }
     }
 
     /// Labels `r` as `phase`, opened by `trigger` at its first point.
@@ -272,13 +347,16 @@ impl<'a> Labels<'a> {
             .rev()
             .take_while(|&i| t.on_ground[i] && taxiing(self.label[i].0));
         let roll = a - roll_len(before.map(|i| t.gs_kt[i]), cfg.roll_kt);
+        // Airborne at the first point (the recording, or the stretch after a
+        // break, starts in the air): no takeoff or initial climb.
+        let took_off = a > 0;
         let mut i = a;
-        while i < b && runway_height(t, i).0 < TAKEOFF_END_FT {
+        while took_off && i < b && runway_height(t, i).0 < TAKEOFF_END_FT {
             i += 1;
         }
         self.set(roll..i, Takeoff, Trigger::Roll, cfg.roll_kt);
         let mut j = i;
-        while j < b && j <= leg.peak && aal[j] < cfg.climb_end_ft {
+        while took_off && j < b && j <= leg.peak && aal[j] < cfg.climb_end_ft {
             j += 1;
         }
         self.set(i..j, InitialClimb, Trigger::Liftoff, TAKEOFF_END_FT);
@@ -504,6 +582,41 @@ mod tests {
         assert_eq!(sequence(&spans), seq);
     }
 
+    /// Down to 300 ft, then teleported to 900 ft and down to a landing:
+    /// the climb is the sim's, no go-around; the break and the stretch
+    /// after it start afresh, in the air.
+    #[test]
+    fn no_phase_runs_across_a_break() {
+        use Phase::*;
+        let mut air = up_and_down(1500)[..28].to_vec();
+        let k = 10 + air.len();
+        air.extend(up_and_down(900)[9..].iter().copied());
+        let mut t = circuit(&air);
+        assert!(phase_labels(&t, &T).contains(&GoAround));
+        t.breaks.push(k..k + 2);
+        let spans = phases(&t, &T);
+        let seq = [
+            Takeoff,
+            InitialClimb,
+            EnRoute,
+            Approach,
+            EnRoute,
+            Approach,
+            EnRoute,
+            Approach,
+            Landing,
+            Taxi,
+        ];
+        assert_eq!(sequence(&spans), seq);
+        assert_eq!((spans[4].start, spans[6].start), (t.t[k], t.t[k + 2]));
+        assert!(
+            [4, 6]
+                .iter()
+                .all(|&s| spans[s].cause.trigger == Trigger::Airborne)
+        );
+        assert_eq!(phase_labels(&t, &T).len(), t.len());
+    }
+
     #[test]
     fn the_flare_height_follows_the_config() {
         // 100 ft steps down to 0: the last point at or above the flare
@@ -593,6 +706,64 @@ mod tests {
             peak: n - 1,
         };
         (track(aal, gs, on_ground, vec![leg]), a)
+    }
+
+    /// On the ground throughout: `gs` at 8 Hz, no legs.
+    fn ground_run(gs: Vec<f64>) -> Track {
+        let n = gs.len();
+        track(vec![0.0; n], gs, vec![true; n], vec![])
+    }
+
+    /// Up from 5 kt to `top` and back, 1 kt per point.
+    fn accelerate_and_stop(top: u32) -> Vec<f64> {
+        let up = (5..=top).map(f64::from);
+        up.clone().chain(up.rev()).collect()
+    }
+
+    #[test]
+    fn a_roll_that_slows_without_liftoff_is_a_rejected_takeoff() {
+        use Phase::*;
+        let spans = phases(&ground_run(accelerate_and_stop(70)), &T);
+        assert_eq!(sequence(&spans), [Taxi, RejectedTakeoff, Taxi]);
+        let rto = spans[1].cause;
+        assert_eq!(
+            (rto.trigger, rto.value, rto.threshold),
+            (Trigger::Roll, 30.0, 30.0)
+        );
+    }
+
+    #[test]
+    fn a_fast_taxi_or_a_line_up_is_no_rejected_takeoff() {
+        // A transport taxiing at 38 kt (over the roll speed, under 40 kt).
+        let spans = phases(&ground_run(accelerate_and_stop(38)), &T);
+        assert_eq!(sequence(&spans), [Phase::Taxi]);
+        // Lined up and stopped, then a roll that ends in a liftoff.
+        let mut gs = vec![10.0, 5.0, 0.0, 0.0];
+        gs.extend((0..=60).map(f64::from));
+        let (t, _) = takeoff(gs);
+        assert!(!phase_labels(&t, &T).contains(&Phase::RejectedTakeoff));
+        // A light aircraft rejects from its 30 kt roll speed.
+        let light = phases(&ground_run(accelerate_and_stop(32)), &PhaseConfig::LIGHT);
+        assert_eq!(light[1].phase, Phase::RejectedTakeoff);
+    }
+
+    #[test]
+    fn a_ground_run_at_the_recording_edge_is_not_decided() {
+        let mut gs = accelerate_and_stop(70);
+        gs.truncate(80);
+        assert_eq!(sequence(&phases(&ground_run(gs), &T)), [Phase::Taxi]);
+    }
+
+    #[test]
+    fn rotation_rate_is_the_peak_pitch_rate_from_rotation() {
+        let mut t = Track::blank(40);
+        // Level for 1 s, then 3 deg/s to 6 deg, held.
+        t.pitch_deg = (0..40)
+            .map(|i: i32| (f64::from(i - 8) * 3.0 / 8.0).clamp(0.0, 6.0))
+            .collect();
+        assert!((rotation_rate(&t, 0..40).unwrap() - 3.0).abs() < 1e-9);
+        t.pitch_deg = vec![0.5; 40];
+        assert_eq!(rotation_rate(&t, 0..40), None);
     }
 
     #[test]

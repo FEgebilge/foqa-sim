@@ -1,0 +1,18 @@
+{
+  "title": "Dropdown menu",
+  "description": "A focused list of actions anchored to a trigger.",
+  "category": "Actions",
+  "kind": "component",
+  "dependencies": [
+    "@radix-ui/react-dropdown-menu",
+    "lucide-react",
+    "motion"
+  ],
+  "requires": [],
+  "tags": [
+    "menu",
+    "action"
+  ],
+  "source": "arc",
+  "canvas": []
+}

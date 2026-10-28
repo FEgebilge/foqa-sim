@@ -6,6 +6,10 @@
 type: B38M
 name: Boeing 737 MAX 8
 class: transport
+airframe: { kind: airplane, engine: jet, engines: 2, gear: retractable }
+mlw: { value: 152800 lb, source: "Boeing, Aerodrome Reference Code and Approach Speeds, Rev A, table row 737-8: MLW 152,800 lb (69308 kg), https://www.boeing.com/content/dam/boeing/v2/airports/faq/arcandapproachspeeds.pdf" }
+mmo: { value: 0.82 M, source: "737 NG/MAX FCOM limitations (340 KCAS/0.82M), same secondary source as vmo; EASA TCDS IM.A.120 Issue 29 defers to the AFM", approximate: true, note: "not read from a primary document" }
+aliases: [737 MAX 8]
 tail_contact:
   takeoff: { value: 11.0 deg, source: &fctm "Boeing 737 FCTM, takeoff tail clearance table, 737-8 row, e.g. Copa 737 FCTM section 3.35, https://cmpva.org/descargas/B737_FCTM.pdf", note: "struts extended, wheels on runway" }
   landing: { value: 9.2 deg, source: "Boeing 737 FCTM, landing body/tail-skid contact chart, 737-8 with one-position tail skid, +-0.1 deg, Copa 737 FCTM p. 6.14, https://cmpva.org/descargas/B737_FCTM.pdf#page=276", note: "struts compressed; MSFS skid configuration unverified" }
@@ -15,6 +19,12 @@ vle: { value: 320 kt, source: &ng "b737.org.uk/limitations.htm + Boeing 737 NG f
 vlo: { value: 235 kt, source: *ng, approximate: true, note: "737 NG retract 235 kt, extend 270 kt; lower value given, assumed same on the MAX" }
 max_crosswind: { value: 33 kt, source: "Boeing 737 FCTM max demonstrated crosswind (dry runway, 10 m wind), from memory", approximate: true, note: "demonstrated value, not a limitation; not re-verified online" }
 max_tailwind: { value: 15 kt, source: "EASA TCDS IM.A.120 Issue 29, https://www.easa.europa.eu/en/downloads/7297/en", note: "TCDS 'Max takeoff and landing tailwind 15 knots'; EASA operational approval only up to 10 kt without further approval" }
+vref:
+  source: "Boeing, Aerodrome Reference Code and Approach Speeds, Rev A, table row 737-8: approach speed 141 kt, MLW 69,308 kg, https://www.boeing.com/content/dam/boeing/v2/airports/faq/arcandapproachspeeds.pdf"
+  approximate: true
+  note: "published value is the ICAO threshold speed at maximum landing weight and the maximum certificated landing flap; lighter weights scaled by sqrt(W/MLW) (Vref is 1.3 Vs and Vs goes with sqrt(W) at constant CL max); other landing flaps read a few kt higher, not published"
+  flaps:
+    - { flap: 40 deg, weights_kg: [45100, 52000, 58900, 69308], ias: [114 kt, 122 kt, 130 kt, 141 kt] }
 flaps:
   - { up_to: 5 deg, vfe: { value: 250 kt, source: *ng, approximate: true, note: "737 NG flaps 1, 2, 5; assumed same on the MAX" } }
   - { up_to: 10 deg, vfe: { value: 210 kt, source: *ng, approximate: true, note: "737 NG flaps 10; assumed same on the MAX" } }

@@ -20,7 +20,7 @@ export function LevelBadge({ level, size = "sm" }: { level?: Level; size?: "sm" 
 
 const GRADE_TONE = { good: "success", fair: "warning", poor: "danger" } as const satisfies Record<Grade, string>;
 
-/** The flight's grade with its landing-2 score beside it (the points of a flight without a scored landing); the tooltip says what it is. */
+/** The flight's grade with its landing-3 score beside it (the points of a flight without a scored landing); the tooltip says what it is. */
 export function GradeBadge({ assessment, size = "sm" }: { assessment: Assessment; size?: "sm" | "md" }) {
   const scored = assessment.score !== undefined;
   return (

@@ -16,6 +16,7 @@ const ROWS: Row[] = [
   { phase: "Standing", starts: "on the ground, under 2 kt", ends: "the aircraft moves", keys: [] },
   { phase: "Taxi", starts: "moving on the ground, under {roll_kt}", ends: "a takeoff roll starts, or it stops", keys: ["roll_kt"] },
   { phase: "Takeoff", starts: "on the ground, above {roll_kt}", ends: "35 ft above the runway", keys: ["roll_kt"] },
+  { phase: "RejectedTakeoff", starts: "a ground run past {rto_kt} that slows under {roll_kt} without lifting off", ends: "under {roll_kt}", keys: ["rto_kt", "roll_kt"] },
   { phase: "InitialClimb", starts: "35 ft above the runway", ends: "{climb_end_ft} above the aerodrome", keys: ["climb_end_ft"] },
   { phase: "EnRoute", starts: "the initial climb ends", ends: "descending through {approach_ft} above the aerodrome", keys: ["approach_ft"] },
   { phase: "Approach", starts: "descending through {approach_ft} above the aerodrome", ends: "below {flare_ft} above the runway", keys: ["approach_ft", "flare_ft"] },

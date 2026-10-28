@@ -1,10 +1,11 @@
 import type { CSSProperties, ReactNode } from "react";
 import { Activity, Fuel, Gauge, Info, Plane, Waves } from "lucide-react";
 import { Tooltip } from "@ui/components/tooltip/tooltip";
-import { duration, number, phaseName } from "../../lib/format";
+import { duration, fuelUnit, fuelValue, number, phaseName } from "../../lib/format";
 import { BANK_LIMIT_DEG, RIDE_BANDS, ROTATION_RATE_DPS, percent, rideStepOf } from "../../lib/skills";
 import type { Skills } from "../../types";
 import { Measure } from "../Measure";
+import { Term } from "../Term";
 
 const dot = (phase: string): CSSProperties => ({ background: `var(--phase-${phase}, var(--phase-unknown))` });
 const allNull = (...values: unknown[]) => values.every((v) => v === null || v === undefined);
@@ -53,7 +54,7 @@ function Section({ icon, title, means, source, children }: { icon: ReactNode; ti
   );
 }
 
-function Stat({ label, value, unit, tip, className = "", children }: { label: string; value: unknown; unit?: string; tip?: string; className?: string; children: ReactNode }) {
+function Stat({ label, value, unit, tip, className = "", children }: { label: ReactNode; value: unknown; unit?: ReactNode; tip?: string; className?: string; children: ReactNode }) {
   return (
     <div className={`min-w-0 ${className}`}>
       <dt className="text-[11px] text-fg-3">{label}</dt>
@@ -72,7 +73,7 @@ function AutomationBody({ a }: { a: Skills["automation"] }) {
       <Stats>
         <Stat label="Autopilot engaged" value={ap}>{percent(ap ?? 0)}</Stat>
         <Stat label="Autothrottle engaged" value={at}>{percent(at ?? 0)}</Stat>
-        <Stat label="Autopilot off at" value={a.autoland ? 0 : a.ap_off_ft} tip="not recorded, or the autopilot was not on in the final approach" unit={a.autoland ? undefined : "ft RA"}>{a.autoland ? "autoland" : number(a.ap_off_ft ?? 0)}</Stat>
+        <Stat label="Autopilot off at" value={a.autoland ? 0 : a.ap_off_ft} tip="not recorded, or the autopilot was not on in the final approach" unit={a.autoland ? undefined : <>ft <Term id="ra">RA</Term></>}>{a.autoland ? <Term id="autoland">autoland</Term> : number(a.ap_off_ft ?? 0)}</Stat>
         <Stat label="Hand-flown final" value={a.manual_final_s}>{duration(a.manual_final_s ?? 0)}</Stat>
       </Stats>
       {a.by_phase.length ? (
@@ -117,21 +118,21 @@ function RideBody({ r }: { r: Skills["ride"] }) {
           <span className="text-fg-2">Vertical ride{" "}
             <Tooltip content="A band-limited comfort proxy, not an ISO 2631 measurement."><span className="cursor-help rounded-sm border border-dashed border-line px-1 text-[10px] text-fg-3" tabIndex={0}>comfort proxy</span></Tooltip>
           </span>
-          <Measure value={r.vertical_rms}><span className="readout"><b className="font-semibold">{number(r.vertical_rms ?? 0, 2)}</b> <span className="text-fg-3">m/s² RMS{step >= 0 ? ` · ${RIDE_BANDS[step]!.band}` : ""}</span></span></Measure>
+          <Measure value={r.vertical_rms}><span className="readout"><b className="font-semibold">{number(r.vertical_rms ?? 0, 2)}</b> <span className="text-fg-3">m/s² <Term id="rms">RMS</Term>{step >= 0 ? ` · ${RIDE_BANDS[step]!.band}` : ""}</span></span></Measure>
         </div>
         <ol className="grid grid-cols-6 gap-px" aria-label="ISO 2631-1 comfort bands">
           {RIDE_BANDS.map((b, i) => (
             <li key={b.band} className="flex min-w-0 flex-col items-center gap-0.5" aria-current={i === step || undefined} title={`${b.band}: ${b.range} m/s²`}>
               <span className="h-2 w-full rounded-[2px]" style={{ background: b.color, opacity: step < 0 || i === step ? 1 : 0.28 }} />
               <span className={`h-1.5 text-[9px] leading-none ${i === step ? "text-fg" : "text-transparent"}`} aria-hidden="true">▲</span>
-              <span className={`w-full truncate text-center text-[9.5px] ${i === step ? "font-semibold text-fg" : "text-fg-3"}`}>{b.short}</span>
+              <span className={`w-full truncate text-center text-[10px] ${i === step ? "font-semibold text-fg" : "text-fg-3"}`}>{b.short}</span>
             </li>
           ))}
         </ol>
       </div>
       <Stats>
-        <Stat label="Lateral load RMS" value={r.lateral_rms} unit="m/s²">{number(r.lateral_rms ?? 0, 2)}</Stat>
-        <Stat label="Sideslip RMS" value={r.sideslip_rms_deg} unit="°" tip="not recorded (measured below 10,000 ft, outside the rolls)">{number(r.sideslip_rms_deg ?? 0, 1)}</Stat>
+        <Stat label={<>Lateral load <Term id="rms">RMS</Term></>} value={r.lateral_rms} unit="m/s²">{number(r.lateral_rms ?? 0, 2)}</Stat>
+        <Stat label={<>Sideslip <Term id="rms">RMS</Term></>} value={r.sideslip_rms_deg} unit="°" tip="not recorded (measured below 10,000 ft, outside the rolls)">{number(r.sideslip_rms_deg ?? 0, 1)}</Stat>
       </Stats>
       <div className="flex flex-col gap-1">
         <div className="text-[11px] text-fg-3">Peak bank per phase · line at {BANK_LIMIT_DEG}° (estimate)</div>
@@ -167,10 +168,10 @@ function FuelBody({ f }: { f: Skills["fuel"] }) {
   const levels = f.descent_levels === null ? "" : `in ${f.descent_levels} ${f.descent_levels === 1 ? "level segment" : "level segments"}`;
   return (
     <Stats>
-      <Stat label="Fuel used" value={f.fuel_used_kg} unit="kg" tip="not recorded, or fuel rose during the flight (refuelled or slewed)">{number(f.fuel_used_kg ?? 0)}</Stat>
-      <Stat label="Burn rate" value={f.fuel_kg_h} unit="kg/h">{number(f.fuel_kg_h ?? 0)}</Stat>
-      <Stat label="Per distance" value={f.fuel_kg_nm} unit="kg/nm">{number(f.fuel_kg_nm ?? 0, 1)}</Stat>
-      <Stat label="Taxi fuel" value={f.taxi_fuel_kg} unit="kg">{number(f.taxi_fuel_kg ?? 0)}</Stat>
+      <Stat label="Fuel used" value={f.fuel_used_kg} unit={fuelUnit()} tip="not recorded, or fuel rose during the flight (refuelled or slewed)">{fuelValue(f.fuel_used_kg ?? 0)}</Stat>
+      <Stat label="Burn rate" value={f.fuel_kg_h} unit={fuelUnit("h")}>{fuelValue(f.fuel_kg_h ?? 0)}</Stat>
+      <Stat label="Per distance" value={f.fuel_kg_nm} unit={fuelUnit("nm")}>{fuelValue(f.fuel_kg_nm ?? 0, 1)}</Stat>
+      <Stat label="Taxi fuel" value={f.taxi_fuel_kg} unit={fuelUnit()}>{fuelValue(f.taxi_fuel_kg ?? 0)}</Stat>
       <Stat className="col-span-2" label="Level-offs in descent" value={f.descent_level_s} unit={levels} tip="not recorded, or the flight has no descent">{duration(f.descent_level_s ?? 0)}</Stat>
     </Stats>
   );

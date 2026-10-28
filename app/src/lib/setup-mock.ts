@@ -46,7 +46,7 @@ export function mockSetup(scenario: string | null) {
     }
     checks.push(
       { id: "flights", title: "Flights folder", state: "pass", detail: "Writable, 7 flights recorded.", paths: ["C:\\Users\\pilot\\Documents\\FOQA-Sim\\flights"] },
-      { id: "recorder", title: "Recorder", state: "pass", detail: "Waiting for MSFS 2024; connects on its own when it starts." },
+      { id: "recorder", title: "Recorder", state: "pass", detail: "Waiting for MSFS; connects on its own when it starts." },
       { id: "sim_running", title: "MSFS 2024 not running", state: "pass", detail: "Installed packages load the next time it starts." },
     );
     return { checks, sims, community, choice };

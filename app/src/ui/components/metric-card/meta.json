@@ -1,0 +1,18 @@
+{
+  "title": "Metric card",
+  "description": "A compact summary for a number that needs context.",
+  "category": "Data",
+  "kind": "component",
+  "dependencies": [
+    "motion"
+  ],
+  "requires": [
+    "animated-counter"
+  ],
+  "tags": [
+    "data",
+    "summary"
+  ],
+  "source": "arc",
+  "canvas": []
+}

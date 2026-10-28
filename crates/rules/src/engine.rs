@@ -1,19 +1,26 @@
 use std::ops::Range;
 
 use analyzer::{
-    Flight, Phase, RunwayFix, Touchdown, Track, phase_labels, runs, touchdowns, wind_components,
+    Flight, Phase, RunwayFix, Touchdown, Track, phase_labels, rotation_rate, runs, touchdowns,
+    wind_components,
 };
 use fdm_core::{SimTime, Unit};
 
 use crate::expr::{Expr, Values};
 use crate::profile::{Profile, ProfileField, Selection};
-use crate::rule::{Aircraft, Level, Limits, Rule, Side, TdField, Trigger, Var};
+use crate::rule::{Aircraft, Level, Limits, Rule, Side, TakeoffField, TdField, Trigger, Var};
 
 const FEET_PER_METRE: f64 = 3.280_839_895;
 /// A gate re-arms when more than this passes between two points of its
 /// phases (about 5 s out of phase at 8 Hz); a shorter gap is a phase flicker,
 /// not a new approach.
 const REARM_AFTER_US: i64 = 5_000_000;
+/// Two points at a level this close in time are one run, whatever lies
+/// between: a value hovering at a threshold, recorded at 1-2 Hz and
+/// interpolated, dips under it for a fraction of a second at a time and is
+/// one exceedance, not several short ones or none (the exit hysteresis of
+/// FDM event detection).
+const MAX_DIP_US: i64 = 1_000_000;
 
 /// One rule exceedance, with everything needed to explain it.
 #[derive(Debug, Clone, PartialEq)]
@@ -60,11 +67,11 @@ pub fn evaluate(
     track: &Track,
 ) -> Vec<Event> {
     let phases = phase_labels(track, &selection.phases);
+    let takeoffs = Takeoffs::new(flight, track, &phases);
     let tds = touchdowns(flight, track);
-    let class = selection.class.unwrap_or(Aircraft::Transport);
     let mut events: Vec<Event> = rules
         .iter()
-        .filter(|r| r.aircraft.is_none_or(|a| a == class))
+        .filter(|r| applies(r, selection))
         .flat_map(|rule| {
             Evaluation {
                 rule,
@@ -72,6 +79,7 @@ pub fn evaluate(
                 flight,
                 track,
                 phases: &phases,
+                takeoffs: &takeoffs,
             }
             .run(&tds)
         })
@@ -80,11 +88,51 @@ pub fn evaluate(
     events
 }
 
+/// Whether `rule` grades the aircraft of `s`: its class (transport where
+/// unknown), its engine where known, and runway rules only for what lands
+/// on a runway.
+pub fn applies(rule: &Rule, s: &Selection) -> bool {
+    let class = s.class.unwrap_or(Aircraft::Transport);
+    let engine = s.airframe.engine;
+    rule.aircraft.is_none_or(|a| a == class)
+        && (rule.engine.is_empty() || engine.is_none_or(|e| rule.engine.contains(&e)))
+        && (!rule.runway || s.airframe.runway_landing())
+}
+
+/// `takeoff.*` at every track point, `NaN` outside a takeoff.
+#[derive(Default)]
+struct Takeoffs {
+    rotation_dps: Vec<f64>,
+    flap_deg: Vec<f64>,
+}
+
+impl Takeoffs {
+    /// Each takeoff roll's values over it and the initial climb after it.
+    fn new(flight: &Flight, track: &Track, phases: &[Phase]) -> Self {
+        let n = track.len();
+        let mut out = Self {
+            rotation_dps: vec![f64::NAN; n],
+            flap_deg: vec![f64::NAN; n],
+        };
+        for roll in runs(n, |i| phases[i] == Phase::Takeoff) {
+            let climb = (roll.end..n).take_while(|&i| phases[i] == Phase::InitialClimb);
+            let end = climb.last().map_or(roll.end, |i| i + 1);
+            let liftoff = roll.clone().find(|&i| !track.on_ground[i]);
+            let flap = liftoff.and_then(|i| flight.at("flap.te_angle", track.t[i]));
+            let start = roll.start;
+            out.rotation_dps[start..end].fill(rotation_rate(track, roll).unwrap_or(f64::NAN));
+            out.flap_deg[start..end].fill(flap.unwrap_or(f64::NAN));
+        }
+        out
+    }
+}
+
 /// The values one expression evaluation sees.
 struct Point<'a> {
     profile: Option<&'a Profile>,
     flight: &'a Flight,
     track: &'a Track,
+    takeoffs: &'a Takeoffs,
     i: usize,
     td: Option<&'a Touchdown>,
 }
@@ -113,6 +161,10 @@ impl Values<Var> for Point<'_> {
             Var::Vs => finite(self.track.vs_fpm[self.i]),
             Var::Height => finite(self.track.aal_ft[self.i]),
             Var::Ra => finite(self.track.ra_ft[self.i]),
+            Var::Takeoff(field) => finite(match field {
+                TakeoffField::RotationRate => self.takeoffs.rotation_dps[self.i],
+                TakeoffField::Flap => self.takeoffs.flap_deg[self.i],
+            }),
             Var::Profile(field @ (ProfileField::Vref | ProfileField::Vapp)) => {
                 let flight = self.flight;
                 let speeds = self
@@ -177,6 +229,7 @@ struct Evaluation<'a> {
     flight: &'a Flight,
     track: &'a Track,
     phases: &'a [Phase],
+    takeoffs: &'a Takeoffs,
 }
 
 impl<'a> Evaluation<'a> {
@@ -199,6 +252,7 @@ impl<'a> Evaluation<'a> {
             profile: self.profile,
             flight: self.flight,
             track: self.track,
+            takeoffs: self.takeoffs,
             i,
             td,
         }
@@ -362,15 +416,16 @@ impl<'a> Evaluation<'a> {
     }
 }
 
-/// Exceedance episodes of `levels` (one per unbroken stretch of known
-/// levels) as (level, whole episode, the longest run at that level that
-/// satisfies `sustain_us`); episodes that sustain no level are dropped.
+/// Exceedance episodes of `levels` (one per stretch of known levels, dips
+/// of up to `MAX_DIP_US` bridged) as (level, whole episode, the longest run
+/// at that level that satisfies `sustain_us`); episodes that sustain no
+/// level are dropped.
 fn episodes<'a>(
     t: &'a [SimTime],
     levels: &'a [Option<Level>],
     sustain_us: i64,
 ) -> impl Iterator<Item = (Level, Range<usize>, Range<usize>)> + 'a {
-    runs(levels.len(), |i| levels[i].is_some()).filter_map(move |span| {
+    bridged(t, 0..levels.len(), |i| levels[i].is_some()).filter_map(move |span| {
         Level::ALL.into_iter().rev().find_map(|level| {
             let run = longest_run(t, levels, &span, level, sustain_us)?;
             Some((level, span.clone(), run))
@@ -378,8 +433,8 @@ fn episodes<'a>(
     })
 }
 
-/// The longest unbroken stretch within `span` at or above `level` that lasts
-/// at least `sustain_us` (any single point if it is 0); the first on a tie.
+/// The longest run within `span` at or above `level` that lasts at least
+/// `sustain_us` (any single point if it is 0); the first on a tie.
 fn longest_run(
     t: &[SimTime],
     levels: &[Option<Level>],
@@ -387,12 +442,27 @@ fn longest_run(
     level: Level,
     sustain_us: i64,
 ) -> Option<Range<usize>> {
-    runs(span.len(), |k| {
-        levels[span.start + k].is_some_and(|l| l >= level)
-    })
-    .map(|r| span.start + r.start..span.start + r.end)
-    .filter(|r| t[r.end - 1].us_since(t[r.start]) >= sustain_us)
-    .reduce(|best, r| if r.len() > best.len() { r } else { best })
+    bridged(t, span.clone(), |i| levels[i].is_some_and(|l| l >= level))
+        .filter(|r| t[r.end - 1].us_since(t[r.start]) >= sustain_us)
+        .reduce(|best, r| if r.len() > best.len() { r } else { best })
+}
+
+/// Runs of the points of `span` where `at` holds, those whose points are at
+/// most `MAX_DIP_US` apart joined into one.
+fn bridged(
+    t: &[SimTime],
+    span: Range<usize>,
+    at: impl Fn(usize) -> bool,
+) -> impl Iterator<Item = Range<usize>> {
+    let mut joined: Vec<Range<usize>> = Vec::new();
+    for r in runs(span.len(), |k| at(span.start + k)) {
+        let r = span.start + r.start..span.start + r.end;
+        match joined.last_mut() {
+            Some(prev) if t[r.start].us_since(t[prev.end - 1]) <= MAX_DIP_US => prev.end = r.end,
+            _ => joined.push(r),
+        }
+    }
+    joined.into_iter()
 }
 
 #[cfg(test)]
@@ -422,6 +492,7 @@ mod tests {
             flight: &flight_from_journal(&[]),
             track,
             phases,
+            takeoffs: &Takeoffs::default(),
         }
         .run(&[])
     }
@@ -467,6 +538,21 @@ mod tests {
             (e.level, e.value, e.threshold),
             (Level::Low, Some(500.0), Some(100.0))
         );
+    }
+
+    #[test]
+    fn a_value_hovering_at_the_threshold_is_one_event() {
+        // 6 s over the low level with a 1/8 s dip under it every second.
+        let hovering: Vec<f64> = (0..49)
+            .map(|i| if i % 8 == 4 { 50.0 } else { 150.0 })
+            .collect();
+        assert_eq!(continuous("sustain: 5 s", &hovering).len(), 1);
+        // A dip longer than 1 s ends the run: two 3 s runs, neither 5 s.
+        let mut split = vec![150.0; 24];
+        split.extend([50.0; 9]);
+        split.extend([150.0; 24]);
+        assert_eq!(continuous("sustain: 5 s", &split), []);
+        assert_eq!(continuous("sustain: 2 s", &split).len(), 2);
     }
 
     fn gate(phases: &[Phase], aal: &[f64], ra: &[f64], vs: &[f64]) -> Vec<Event> {
@@ -535,6 +621,60 @@ mod tests {
     }
 
     #[test]
+    fn rules_follow_the_class_the_engine_and_the_kind() {
+        use crate::profile::{Airframe, Engine, Kind, ProfileSet};
+        let td = "rule: x\nversion: 1\ntitle: x\ndomain: other\nat: touchdown\n";
+        let rule = |rest: &str| load(&format!("{td}{rest}")).unwrap().remove(0);
+        let jet =
+            rule("aircraft: transport\nengine: [jet]\nmeasure: td.peak_g\nabove: { low: 2 g }");
+        let runway = rule("measure: abs(td.cross)\nabove: { low: 25 ft }");
+        let set = ProfileSet::load([]).unwrap();
+        let with = |kind, engine| Selection {
+            airframe: Airframe {
+                kind,
+                engine,
+                ..Airframe::default()
+            },
+            ..set.select_type(None, || None)
+        };
+        // Unknown class and engine: graded as a transport jet, as before.
+        assert!(applies(&jet, &with(None, None)));
+        assert!(applies(&jet, &with(None, Some(Engine::Jet))));
+        assert!(!applies(&jet, &with(None, Some(Engine::Turboprop))));
+        assert!(!applies(
+            &jet,
+            &set.select_type(None, || Some(Aircraft::Light))
+        ));
+        assert!(applies(&runway, &with(Some(Kind::SeaplaneAmphibian), None)));
+        assert!(!applies(&runway, &with(Some(Kind::Helicopter), None)));
+        assert!(!applies(&runway, &with(Some(Kind::Glider), None)));
+        assert!(applies(&jet, &with(Some(Kind::Helicopter), None)));
+    }
+
+    #[test]
+    fn a_profile_unreliable_signal_reads_as_no_data() {
+        use crate::profile::ProfileSet;
+        let yaml = "type: TEST\nname: x\nclass: light\nunreliable: [roll]\n";
+        let set = ProfileSet::load([("TEST", yaml)]).unwrap();
+        let (roll, pitch) = (
+            Lfl::V1.by_name("roll").unwrap().id,
+            Lfl::V1.by_name("pitch").unwrap().id,
+        );
+        let t = SimTime::from_micros(0);
+        let mut flight =
+            flight_from_journal(&[Sample::new(t, roll, 40.0), Sample::new(t, pitch, 5.0)]);
+        set.select_type(Some("TEST".into()), || None)
+            .mask(&mut flight);
+        assert_eq!(
+            (flight.value(roll, t), flight.value(pitch, t)),
+            (None, Some(5.0))
+        );
+        // Without a profile nothing is masked.
+        set.select_type(None, || None).mask(&mut flight);
+        assert_eq!(flight.value(pitch, t), Some(5.0));
+    }
+
+    #[test]
     fn a_non_finite_parameter_is_unknown() {
         let id = Lfl::V1.by_name("roll").unwrap().id;
         let flight = flight_from_journal(&[Sample::new(SimTime::from_micros(0), id, NAN)]);
@@ -543,6 +683,7 @@ mod tests {
             profile: None,
             flight: &flight,
             track: &track,
+            takeoffs: &Takeoffs::default(),
             i: 0,
             td: None,
         };

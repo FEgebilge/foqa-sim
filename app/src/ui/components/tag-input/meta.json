@@ -1,0 +1,17 @@
+{
+  "title": "Tag input",
+  "description": "Turn short text values into removable tags.",
+  "category": "Inputs",
+  "kind": "component",
+  "dependencies": [
+    "lucide-react",
+    "motion"
+  ],
+  "requires": [],
+  "tags": [
+    "field",
+    "tags"
+  ],
+  "source": "arc",
+  "canvas": []
+}

@@ -21,7 +21,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
     let dir = PathBuf::from(args.pop().unwrap_or_else(|| "flights".into()));
     fs::create_dir_all(&dir)?;
-    debrief::compact_all(debrief::journals(&dir));
+    capture::recover(&dir, capture::backlog(&dir));
     let acquisition = Acquisition::new(&Lfl::V1);
     let mut source = LiveSource::open(&acquisition)?;
     eprintln!("recording flights to {}", dir.display());
@@ -30,7 +30,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             debrief::compact_all([journal.to_owned()]);
         }
         ControlFlow::Continue(None)
-    })?;
+    });
     eprintln!("simulator closed");
     Ok(())
 }

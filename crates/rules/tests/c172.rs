@@ -62,22 +62,28 @@ fn core_rules_flag_the_unstable_approach() {
     assert_eq!(found, expected.map(|(r, l)| (r.to_owned(), l)));
 }
 
-/// Graded as the light aircraft it is, the approach is judged from the
-/// 500 ft VMC gate (FSF ALAR) and the bank from 300 ft: the steep, banked
-/// descent above 500 ft is no light finding, and below it the sink and bank
-/// were not held long enough. Only the gate notes remain.
+/// Graded as the light aircraft it is: the 42 deg turn through 1000 ft is
+/// past the 30 deg of a shallow-to-medium pattern turn, and the ~2800 fpm
+/// dive past the 2000 fpm medium level; below 500 ft the sink and bank were
+/// not held long enough, so the gate notes remain. The fixed gear reads
+/// down: no gear event.
 #[test]
-fn light_boundaries_judge_from_the_vmc_gate() {
+fn light_rules_flag_the_pattern_dive_and_turn() {
     let profiles = ProfileSet::shipped().unwrap();
     let light = profiles.select_type(None, || Some(Aircraft::Light));
     let rules: Vec<_> = graded(CORE, &light)
         .into_iter()
         .map(|(rule, level, _)| (rule, level))
         .collect();
-    let gate = |rule: &str| (rule.to_owned(), Level::Advisory);
+    let found = |rule: &str, level| (rule.to_owned(), level);
     assert_eq!(
         rules,
-        [gate("unstable-sink-500"), gate("unstable-bank-500")]
+        [
+            found("bank-light-above-300", Level::Low),
+            found("high-sink-light-above-500", Level::Medium),
+            found("unstable-sink-500", Level::Advisory),
+            found("unstable-bank-500", Level::Advisory),
+        ]
     );
 }
 

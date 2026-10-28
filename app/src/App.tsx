@@ -1,48 +1,57 @@
-import { useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState, type MouseEvent } from "react";
 import { Newspaper, PackageCheck, Plane, TrendingUp, TriangleAlert, Trophy } from "lucide-react";
 import { Badge } from "@ui/components/badge/badge";
 import { Button } from "@ui/components/button/button";
 import { Tooltip } from "@ui/components/tooltip/tooltip";
 import { ThemeSwitch } from "@ui/components/theme-switch/theme-switch";
-import { api } from "./api";
-import { AutostartToggle } from "./components/AutostartToggle";
-import { ChallengesScreen } from "./components/challenges/ChallengesScreen";
 import { DeepLinkDialog } from "./components/challenges/DeepLinkDialog";
-import { DevlogScreen } from "./components/devlog/DevlogScreen";
 import { WhatsNewDialog } from "./components/devlog/WhatsNewDialog";
 import { DebriefScreen } from "./components/debrief/DebriefScreen";
 import { FlightsScreen } from "./components/flights/FlightsScreen";
+import { SettingsDialog } from "./components/SettingsDialog";
 import { RecorderStatusPill } from "./components/RecorderStatusPill";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { UpdateNotice } from "./components/UpdateNotice";
-import { SetupScreen } from "./components/setup/SetupScreen";
-import { TrendsScreen } from "./components/trends/TrendsScreen";
 import { appVersion } from "./lib/devlog";
-import { measured, number } from "./lib/format";
+import { useKnownFlight } from "./lib/flight-names";
+import { flightLabel, measured, number } from "./lib/format";
+import { useUnits } from "./lib/prefs";
 import { LOGO } from "./lib/logo";
 import { CHALLENGES_HREF, challengeHref, DEVLOG_HREF, FLIGHTS_HREF, flightHref, openFlight, openSetup, SETUP_HREF, TRENDS_HREF, useRoute } from "./lib/route";
 import { useNotify, useTheme } from "./lib/context";
+import { failing as failingChecks, GROUPS } from "./components/setup/setup-groups";
 import { useBackendEvent, useRecorderStatus, useSetup } from "./lib/use-backend";
 import { useUpdater } from "./lib/use-updater";
 import type { LandingNotice, OpenFlight } from "./types";
+
+// The flights list and the debrief open first; the other screens load when asked for.
+const ChallengesScreen = lazy(() => import("./components/challenges/ChallengesScreen").then((m) => ({ default: m.ChallengesScreen })));
+const DevlogScreen = lazy(() => import("./components/devlog/DevlogScreen").then((m) => ({ default: m.DevlogScreen })));
+const SetupScreen = lazy(() => import("./components/setup/SetupScreen").then((m) => ({ default: m.SetupScreen })));
+const TrendsScreen = lazy(() => import("./components/trends/TrendsScreen").then((m) => ({ default: m.TrendsScreen })));
 
 export default function App() {
   const route = useRoute();
   const recorder = useRecorderStatus();
   const { theme, setTheme } = useTheme();
   const notify = useNotify();
+  const prefs = useUnits();
   const setup = useSetup(recorder?.value.state);
   const updater = useUpdater(recorder?.value.state === "recording");
-  const failing = setup.state.status === "ready" ? setup.state.data.checks.filter((check) => check.state === "fail").length : 0;
+  // Only checks that stop something this pilot uses: without MSFS 2024 the panel steps are optional (setup-groups.ts).
+  const issues = setup.state.status === "ready" ? failingChecks(setup.state.data) : [];
+  const failing = issues.length;
+  const required = issues.some((check) => GROUPS[0].has(check.id));
 
-  // The first time a check fails (a fresh install: no packages in the sim yet), open the Installation screen once.
+  // The first time a required check fails (recording blocked), open Setup once; missing packages are the first-run stepper's.
   useEffect(() => {
-    if (!failing || route.screen !== "flights") return;
+    if (!required || route.screen !== "flights") return;
     try {
       if (localStorage.getItem(SETUP_SHOWN)) return;
       localStorage.setItem(SETUP_SHOWN, "1");
     } catch { return; }
     openSetup();
-  }, [failing, route.screen]);
+  }, [required, route.screen]);
 
   // A click on the Windows landing notification asks the app to show that flight.
   useBackendEvent("open-flight", useCallback((payload: OpenFlight) => openFlight(payload.flight_id), []));
@@ -59,6 +68,7 @@ export default function App() {
 
   return (
     <div className="flex min-h-full flex-col">
+      <a href="#main" className="sr-only z-50 rounded-[var(--radius-control)] bg-raised px-3 py-2 text-sm text-fg no-underline shadow-[var(--shadow-floating)] focus:not-sr-only focus:fixed focus:top-2 focus:left-2" onClick={skipToContent}>Skip to content</a>
       <header className="sticky top-0 z-40 border-b border-line bg-[color-mix(in_oklab,var(--background)_88%,transparent)] backdrop-blur">
         <div className="flex h-14 w-full items-center gap-3 px-4 sm:gap-4 sm:px-6 2xl:px-8">
           <div className="flex shrink-0 items-baseline gap-2">
@@ -71,11 +81,11 @@ export default function App() {
           {route.screen === "debrief" ? (
             <nav aria-label="Breadcrumb" className="hidden min-w-0 items-center gap-2 text-sm text-fg-3 md:flex">
               <span>/</span><a className="text-fg-2 no-underline hover:text-fg" href="#/">Flights</a><span>/</span>
-              <a className="readout truncate text-fg no-underline" href={flightHref(route.id)} aria-current="page" title={route.id}>{route.id}</a>
+              <FlightCrumb id={route.id} />
             </nav>
           ) : route.screen === "setup" ? (
             <nav aria-label="Breadcrumb" className="hidden min-w-0 items-center gap-2 text-sm text-fg-3 md:flex">
-              <span>/</span><a className="text-fg no-underline" href={SETUP_HREF} aria-current="page">Installation</a>
+              <span>/</span><a className="text-fg no-underline" href={SETUP_HREF} aria-current="page">Setup</a>
             </nav>
           ) : route.screen === "challenges" ? (
             <nav aria-label="Breadcrumb" className="hidden min-w-0 items-center gap-2 text-sm text-fg-3 md:flex">
@@ -92,40 +102,51 @@ export default function App() {
           ) : null}
           <div className="ml-auto flex shrink-0 items-center gap-1 md:gap-2">
             {failing ? (
-              <a href={SETUP_HREF} className="no-underline" aria-label={`${failing} installation check${failing > 1 ? "s" : ""} failing`}>
+              <a href={SETUP_HREF} className="no-underline" aria-label={`${failing} setup check${failing > 1 ? "s" : ""} failing`}>
                 <Badge tone="danger" size="sm" icon={<TriangleAlert size={12} aria-hidden="true" />}>{failing}<span className="hidden sm:inline">&nbsp;setup issue{failing > 1 ? "s" : ""}</span></Badge>
               </a>
             ) : null}
             <RecorderStatusPill status={recorder} />
-            <Button href={FLIGHTS_HREF} variant={route.screen === "flights" || route.screen === "debrief" ? "secondary" : "ghost"} size="sm" aria-label="Flights" aria-current={route.screen === "flights" ? "page" : undefined}>
-              <Plane size={16} aria-hidden="true" /><span className="hidden lg:inline">Flights</span>
-            </Button>
-            <Button href={TRENDS_HREF} variant={route.screen === "trends" ? "secondary" : "ghost"} size="sm" aria-label="Trends" aria-current={route.screen === "trends" ? "page" : undefined}>
-              <TrendingUp size={16} aria-hidden="true" /><span className="hidden lg:inline">Trends</span>
-            </Button>
-            <Button href={CHALLENGES_HREF} variant={route.screen === "challenges" ? "secondary" : "ghost"} size="sm" aria-label="Challenges" aria-current={route.screen === "challenges" ? "page" : undefined}>
-              <Trophy size={16} aria-hidden="true" /><span className="hidden lg:inline">Challenges</span>
-            </Button>
+            <Tooltip content="Flights" side="bottom">
+              <Button href={FLIGHTS_HREF} variant={route.screen === "flights" || route.screen === "debrief" ? "secondary" : "ghost"} size="sm" aria-label="Flights" aria-current={route.screen === "flights" ? "page" : undefined}>
+                <Plane size={16} aria-hidden="true" /><span className="hidden lg:inline">Flights</span>
+              </Button>
+            </Tooltip>
+            <Tooltip content="Trends" side="bottom">
+              <Button href={TRENDS_HREF} variant={route.screen === "trends" ? "secondary" : "ghost"} size="sm" aria-label="Trends" aria-current={route.screen === "trends" ? "page" : undefined}>
+                <TrendingUp size={16} aria-hidden="true" /><span className="hidden lg:inline">Trends</span>
+              </Button>
+            </Tooltip>
+            <Tooltip content="Challenges" side="bottom">
+              <Button href={CHALLENGES_HREF} variant={route.screen === "challenges" ? "secondary" : "ghost"} size="sm" aria-label="Challenges" aria-current={route.screen === "challenges" ? "page" : undefined}>
+                <Trophy size={16} aria-hidden="true" /><span className="hidden lg:inline">Challenges</span>
+              </Button>
+            </Tooltip>
             <Tooltip content="What's new" side="bottom">
               <Button href={DEVLOG_HREF} variant={route.screen === "devlog" ? "secondary" : "ghost"} size="sm" iconOnly label="What's new" aria-current={route.screen === "devlog" ? "page" : undefined}>
                 <Newspaper size={16} aria-hidden="true" />
               </Button>
             </Tooltip>
-            <Tooltip content="Installation status" side="bottom">
-              <Button href={SETUP_HREF} variant={route.screen === "setup" ? "secondary" : "ghost"} size="sm" iconOnly label="Installation status" aria-current={route.screen === "setup" ? "page" : undefined}>
+            <Tooltip content="Setup" side="bottom">
+              <Button href={SETUP_HREF} variant={route.screen === "setup" ? "secondary" : "ghost"} size="sm" iconOnly label="Setup" aria-current={route.screen === "setup" ? "page" : undefined}>
                 <PackageCheck size={16} aria-hidden="true" />
               </Button>
             </Tooltip>
-            {api.live ? <AutostartToggle /> : null}
+            <SettingsDialog />
             <ThemeSwitch theme={theme} iconOnly onThemeChange={(next) => setTheme(next)} />
           </div>
         </div>
       </header>
+      {/* Units and time are read while rendering, so the screen is built again when one changes. */}
+      <ErrorBoundary key={`${route.screen === "debrief" ? route.id : route.screen}|${prefs.fuel}${prefs.distance}${prefs.time}${prefs.locale}`}>
+      <Suspense fallback={<main className="w-full px-6 py-5 2xl:px-8"><div className="h-32 animate-pulse rounded-[var(--radius-panel)] bg-muted" aria-label="Loading" /></main>}>
       {route.screen === "debrief" ? <DebriefScreen key={route.id} id={route.id} />
         : route.screen === "setup" ? <SetupScreen setup={setup} />
         : route.screen === "challenges" ? <ChallengesScreen selected={route.key} recorder={recorder} />
         : route.screen === "trends" ? <TrendsScreen />
-        : route.screen === "devlog" ? <DevlogScreen updater={updater} /> : <FlightsScreen recorder={recorder} />}
+        : route.screen === "devlog" ? <DevlogScreen updater={updater} /> : <FlightsScreen recorder={recorder} setup={setup} />}
+      </Suspense>
+      </ErrorBoundary>
       <WhatsNewDialog />
       <UpdateNotice updater={updater} />
       <DeepLinkDialog />
@@ -134,6 +155,21 @@ export default function App() {
 }
 
 const SETUP_SHOWN = "foqa-sim.setup-shown";
+
+/** The hash is the router, so the skip link cannot be an anchor: it moves focus to the screen's <main> instead. */
+function skipToContent(event: MouseEvent) {
+  event.preventDefault();
+  const main = document.querySelector("main");
+  main?.setAttribute("tabindex", "-1");
+  main?.focus();
+}
+
+/** The open flight in the breadcrumb: its title, or date, route and aircraft; the id only until the flight is loaded. */
+function FlightCrumb({ id }: { id: string }) {
+  const flight = useKnownFlight(id);
+  const name = flight ? flightLabel(flight) : id;
+  return <a className="truncate text-fg no-underline" href={flightHref(id)} aria-current="page" title={`${name} (${id})`}>{name}</a>;
+}
 
 /** The running version beside the name, as desktop apps show it; it opens the release notes. */
 function AppVersion() {

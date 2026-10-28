@@ -4,7 +4,7 @@ Three files, mirroring the aircraft side of a real flight data chain:
 
 | File | Real-world analogue | Content |
 |---|---|---|
-| Raw capture (`.raw.jsonl.gz`) | Sensor bus traffic | Every sim frame, before wiring and sampling |
+| Raw capture (`.raw.jsonl.gz`) | Sensor bus traffic | Every streamed sim frame, before wiring and sampling: all of them on the ground and below 2000 ft radio height, at least 16 Hz of sim time above 2500 ft (`crates/capture/src/live.rs`) |
 | Journal (`.fqj`) | QAR / ARINC 767 recording | Parameters at LFL rates, as the FDAU recorded them |
 | Compact flight (`.fqz`) | Archived download from the QAR | The same records of a closed journal, column-wise and compressed |
 
@@ -12,7 +12,17 @@ The raw capture is optional (`foqa-rec --raw`, `FOQA_RAW=1` for the app).
 The recorder compacts each journal when its flight closes, and the journals
 of earlier runs at start-up; `fdm compact` does it by hand. Readers accept
 both journal and compact flight.
-A recording that is not a flight is deleted when it closes instead (journal and raw capture, never listed): under 10 s of frames (the sim also streams them in its menus), or every position at the menu placeholder (lat 0, lon 90, within 0.01 deg). A ground-only session at a real position is kept. Constants in `crates/capture/src/discard.rs`.
+A recording that is not a flight is deleted when it closes instead (journal and raw capture, never listed): under 10 s of frames (the sim also streams them in its menus), or every position at the menu placeholder (lat 0, lon 90, within 0.01 deg). A ground-only session at a real position is kept. A journal an earlier run left open (the app or the PC stopped mid-flight) gets the same verdict at start-up. Constants in `crates/capture/src/discard.rs`.
+A flight closes at flight end or the main menu, when a flight file loads
+(MSFS 2024 flow event, or in MSFS 2020 the `FlightLoaded` system event),
+before a teleport, time skip or back-on-track jump (the next one opens when
+it is done; the app's own challenge placement stays in the flight), and on
+an aircraft swap (title or ATC model), so one flight has one aircraft and
+no jump. It also closes when the sim quits or its connection is lost (a
+crash). A flight whose files cannot be written (disk full, folder locked)
+is closed with what it has; recording resumes 10 s later, doubling to 5 min
+while it keeps failing. A new flight never takes an existing flight's name:
+a taken `flight-<unix seconds>` moves on a second.
 The ground station also keeps a [flight index](#flight-index), a cache of
 the flight list.
 
@@ -145,7 +155,8 @@ thresholds, not overruns), `width_m`, and `primary` / `secondary` ends, each
 The user aircraft's identification SimVars, so the ground segment can pick
 the type profile and its limits. `foqa-rec` records it into every flight,
 shortly after the flight opens, and again whenever it changes (aircraft
-swapped). The latest one in a flight applies. One JSON object of strings,
+swapped, which also closes the flight and opens a new one). The latest
+one in a flight applies. One JSON object of strings,
 exactly as the sim reports them:
 
 | Key | SimVar | Example (MSFS 2024, Cessna 172) |
@@ -160,13 +171,26 @@ reports as a localisation key; older builds wrote
 `TT:ATCCOM.AC_MODEL_C172.0.text`, and some aircraft give the bare
 designator.
 
+Since 0.11 the object may also carry what the sim says about the airframe,
+each key only where the sim gave a value in its documented range (older
+recordings have none, and readers treat a missing key as unknown):
+
+| Key | SimVar | Value |
+|---|---|---|
+| `category` | `CATEGORY` | `Airplane`, `Helicopter`, ... (string) |
+| `engine_type` | `ENGINE TYPE` | 0 piston, 1 jet, 2 none, 3 helicopter turbine, 4 unsupported, 5 turboprop |
+| `engines` | `NUMBER OF ENGINES` | 0–4 |
+| `retractable`, `floats`, `skids` | `IS GEAR RETRACTABLE`, `IS GEAR FLOATS`, `IS GEAR SKIDS` | true / false |
+| `max_gross_lb` | `MAX GROSS WEIGHT` | lb, whole |
+
 ### Ordering and integrity
 
 - Packets carry their own time and are **not** in time order. The touchdown
   pre-trigger buffer is written when the touchdown is detected, after
   later regular samples. Readers sort by `t`.
-- The recorder flushes after every sim frame. A killed process leaves at
-  most one cut-off packet at the end. Readers stop at the first packet that
+- The recorder flushes about once a second, at once after an event, and
+  when the flight closes. A killed process loses at most about the last
+  second and leaves at most one cut-off packet at the end. Readers stop at the first packet that
   is short or fails its CRC and report its offset. Everything before it is
   intact.
 - A packet with a valid CRC but an unknown kind or unknown event code is
@@ -189,11 +213,13 @@ the gear is down and an always-retracted one is 0 on either scale.
 
 ## Compact flight v1
 
-A closed, intact journal regrouped by parameter. Written next to the
+A closed journal regrouped by parameter. Written next to the
 journal under a temporary name, read back and compared with it, and only
 then moved into place, after which the journal is deleted. A journal with a
-cut-off or corrupt tail is not compacted. Records of an unknown kind or event code are
-not carried over.
+cut-off or corrupt tail keeps the records before the damage, all a reader
+gets from it. A temporary file left by a quit while compacting is deleted at
+the next start-up. Records of an unknown kind or event code are not carried
+over.
 
 ### Header (8 bytes)
 
@@ -275,7 +301,7 @@ stale file is rebuilt from the flights, and it can be deleted at any time.
 ```
 
 - `station`: hash of the rule set, the type profiles, the landing
-  assessment method (`scoring/landing-2.yaml`) and the analysis source
+  assessment method (`scoring/landing-3.yaml`) and the analysis source
   (`crates/debrief/build.rs`). Any change drops every entry, so new rules,
   bands or code regrade every flight.
 

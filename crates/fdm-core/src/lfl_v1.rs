@@ -81,4 +81,7 @@ pub(crate) const SIGNALS: &[S] = &[
     S::truth(60, "sim.rate", Ratio, 1.0),
     S::truth(61, "sim.slew", Discrete, 1.0),
     S::truth(62, "sim.paused", Discrete, 1.0),
+    // Appended in 0.11
+    S::fdr(63, "heading.true", Degrees, 1.0, "4"), // the true-heading reference of item 4
+    S::foqa(64, "mach", Mach, 1.0),
 ];

@@ -1,11 +1,13 @@
 import { useState } from "react";
-import { Check, ChevronRight, ExternalLink, History, RefreshCw, X } from "lucide-react";
+import { Check, ChevronRight, ExternalLink, History, PlaneLanding, RefreshCw, ServerCrash, X } from "lucide-react";
 import { Badge, type BadgeTone } from "@ui/components/badge/badge";
 import { Button } from "@ui/components/button/button";
 import { EmptyState } from "@ui/components/empty-state/empty-state";
 import { api } from "../../api";
+import { partLabel } from "../../lib/challenge-flow";
+import { openFlight } from "../../lib/route";
 import { RETRYABLE, SITE_STATE, type SiteAttempt } from "../../lib/sites";
-import { flightDate, flightTimeUtc, measured, number } from "../../lib/format";
+import { flightDate, flightTimeUtc, GRADE_LABEL, measured, number } from "../../lib/format";
 import type { AttemptLogLine, AttemptResult, AttemptState, AttemptView } from "../../types";
 
 const STATE: Record<AttemptState, { label: string; tone: BadgeTone }> = {
@@ -38,13 +40,10 @@ const reason = (r: unknown) => (typeof r === "string" ? REASON[r] ?? r : "");
 const CHECK: Record<string, string> = {
   aircraft: "Aircraft", runway: "Runway", gate: "Gate", sim_rate: "Sim rate", slew: "Slew", pause: "Pause",
   continuity: "Continuous data", wind: "Wind", crosswind: "Crosswind", tailwind: "Tailwind", autopilot: "Autopilot",
-  stop_on_runway: "Stopped on the runway",
-};
-const PART: Record<string, string> = {
-  touchdown_point: "Touchdown point", sink_rate: "Sink rate", centreline: "Centreline", stability: "Stability from the gate",
-  peak_g: "Peak g", bounce: "Bounce", rollout: "Rollout",
+  stop_on_runway: "Stopped on the runway", go_around: "No go-around", data: "Recorded data",
 };
 const words = (name: string, known: Record<string, string>) => known[name] ?? name.replace(/_/g, " ");
+const sentence = (text: string) => `${text[0]!.toUpperCase()}${text.slice(1)}`;
 
 /** The live stages of an attempt, as a stepper: placed, landed, graded. */
 export function Stages({ attempt }: { attempt: AttemptView }) {
@@ -64,15 +63,20 @@ export function Stages({ attempt }: { attempt: AttemptView }) {
 /** How many of the stepper's stages a state has reached. */
 const STAGE_RANK: Partial<Record<AttemptState, number>> = { flying: 1, approach: 1, rollout: 2, finished: 3, graded_local: 4, sliced: 4, done: 4 };
 
+/** Attempts still loading, or not readable: the list says so instead of showing "No attempts yet". */
+export type AttemptsState = { loading: true } | { error: string; retry: () => void };
+
 /** The attempts at one challenge, newest first; each opens to its checks, score parts and log. */
-export function AttemptList({ attempts, sites }: { attempts: AttemptView[]; sites?: Map<string, SiteAttempt> }) {
+export function AttemptList({ attempts, sites, state }: { attempts: AttemptView[]; sites?: Map<string, SiteAttempt>; state?: AttemptsState }) {
   return (
     <section aria-label="Attempts" className="flex flex-col gap-2">
       <div className="flex items-baseline justify-between gap-3">
         <h2 className="font-display text-sm font-semibold">Attempts</h2>
         <span className="readout text-xs text-fg-3">{attempts.length ? `${attempts.length} on this PC` : ""}</span>
       </div>
-      {attempts.length ? (
+      {state && "loading" in state ? <div className="panel h-20 animate-pulse" aria-label="Loading attempts" /> : state ? (
+        <div className="panel"><EmptyState size="sm" icon={<ServerCrash size={18} />} title="Could not read the attempts" description={state.error} action={<Button variant="secondary" size="sm" onClick={state.retry}>Try again</Button>} /></div>
+      ) : attempts.length ? (
         <ul className="panel divide-y divide-line overflow-hidden">
           {attempts.map((attempt, i) => <AttemptRow key={attempt.id} attempt={attempt} site={sites?.get(attempt.id)} initiallyOpen={i === 0 && attempt.result !== null} />)}
         </ul>
@@ -109,7 +113,8 @@ function AttemptRow({ attempt, site, initiallyOpen }: { attempt: AttemptView; si
         <div className="grid gap-5 border-t border-line-subtle bg-[color-mix(in_oklab,var(--surface-muted)_40%,transparent)] px-4 py-4 lg:grid-cols-2 2xl:grid-cols-3">
           {site ? <SitePart site={site} /> : null}
           {result ? <Checks result={result} /> : null}
-          {result?.score ? <ScoreParts score={result.score} /> : result ? <p className="text-sm text-fg-2">No score: no landing on the challenge's runway after its gate.</p> : null}
+          {result?.score ? <ScoreParts score={result.score} assessment={result.assessment} /> : result ? <p className="text-sm text-fg-2">No score: no landing on the challenge's runway after its gate.</p> : null}
+          {attempt.flight_id && result ? <div className="lg:col-span-2 2xl:col-span-3"><Button variant="secondary" size="sm" onClick={() => openFlight(attempt.flight_id!)}><PlaneLanding size={14} aria-hidden="true" />Open the debrief</Button></div> : null}
           <Timeline log={site ? [...attempt.log, ...site.log.map((l) => ({ ...l, site: true }))].sort((a, b) => a.at.localeCompare(b.at)) : attempt.log} />
         </div>
       ) : null}
@@ -133,7 +138,7 @@ function Checks({ result }: { result: AttemptResult }) {
   );
 }
 
-function ScoreParts({ score }: { score: NonNullable<AttemptResult["score"]> }) {
+function ScoreParts({ score, assessment }: { score: NonNullable<AttemptResult["score"]>; assessment?: AttemptResult["assessment"] }) {
   return (
     <div className="min-w-0">
       <h3 className="eyebrow mb-2">Score · {score.version}</h3>
@@ -141,15 +146,21 @@ function ScoreParts({ score }: { score: NonNullable<AttemptResult["score"]> }) {
         {score.parts.map((part) => (
           <li key={part.name} className="text-sm">
             <div className="flex items-baseline justify-between gap-2">
-              <span>{words(part.name, PART)}{part.value !== null ? <span className="readout text-xs text-fg-3"> · {measured(part.value, part.unit || undefined)}</span> : null}</span>
-              <span className="readout text-xs text-fg-2">{number(part.weight * part.score, 1)} / {part.weight}</span>
+              <span>{sentence(partLabel(score.version, part.name))}{part.value !== null ? <span className="readout text-xs text-fg-3"> · {measured(part.value, part.unit || undefined)}</span> : null}</span>
+              <span className="readout text-xs text-fg-2">{number(part.weight * part.score, 1)} / {number(part.weight, 1)}</span>
             </div>
-            <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted" role="meter" aria-valuemin={0} aria-valuemax={part.weight} aria-valuenow={part.weight * part.score} aria-label={words(part.name, PART)}>
+            <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted" role="meter" aria-valuemin={0} aria-valuemax={part.weight} aria-valuenow={part.weight * part.score} aria-label={sentence(partLabel(score.version, part.name))}>
               <div className="h-full rounded-full" style={{ width: `${part.score * 100}%`, background: part.score >= 0.8 ? "var(--success)" : part.score >= 0.4 ? "var(--warning)" : "var(--danger)" }} />
             </div>
           </li>
         ))}
       </ul>
+      {assessment ? (
+        <div className="mt-3 text-sm">
+          <p><span className="font-medium">{GRADE_LABEL[assessment.grade]}</span> <span className="text-fg-3">· {assessment.confidence === "partial" ? "partial data" : "full data"}</span></p>
+          {assessment.caps.length ? <ul className="mt-1 flex flex-col gap-1 text-xs text-fg-2">{assessment.caps.map((cap, i) => <li key={i}><span className="font-medium">{cap.title}.</span> {cap.reason}</li>)}</ul> : null}
+        </div>
+      ) : null}
     </div>
   );
 }

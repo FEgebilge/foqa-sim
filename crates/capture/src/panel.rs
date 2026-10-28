@@ -9,6 +9,9 @@
 //! events and landings every few seconds, a reply to a query for a few
 //! seconds.
 
+use std::panic::{self, AssertUnwindSafe};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -51,6 +54,13 @@ const NOTE_MAX_BYTES: usize = 1000;
 /// Wait between attempts to open the feed's own SimConnect connection.
 const RECONNECT: Duration = Duration::from_secs(5);
 const TICK: Duration = Duration::from_millis(250);
+/// The tick while the sim is not running: nothing goes out then, and each
+/// message still wakes the feed at once.
+const IDLE_TICK: Duration = Duration::from_secs(5);
+/// A view sends `watch` every 10 s while it is open (foqa-board.js); the
+/// open flight's live values and analysis go out only while one did within
+/// this long, so a sim without an open view pays for neither.
+const WATCH_FOR: Duration = Duration::from_secs(30);
 /// The strip of an attempt nothing more will happen to goes on this long.
 const ATTEMPT_LINGER: Duration = Duration::from_secs(10 * 60);
 
@@ -134,6 +144,8 @@ enum Request {
     Query(Query),
     /// For the app (challenge attempts).
     App(AppCommand),
+    /// A view is open; never acked.
+    Watch,
 }
 
 impl Request {
@@ -168,6 +180,9 @@ impl Request {
         }
         if v["v"] != VERSION {
             return Err(fail("unsupported version"));
+        }
+        if cmd == "watch" {
+            return Ok(Self::Watch);
         }
         Ok(Self::Command(match cmd {
             "start_flight" => ViewCommand::StartFlight,
@@ -308,11 +323,13 @@ impl WeatherResult {
 
 /// The feed's channels: what it shows comes in on `rx`; happenings go on
 /// to `out`, recorder commands to `commands`, attempt commands to `app`.
+/// `watched` tells the recorder whether a view is open (`WATCH_FOR`).
 pub(crate) struct Tee {
     pub rx: Receiver<Msg>,
     pub out: Sender<Happening>,
     pub commands: Sender<ViewCommand>,
     pub app: Sender<AppCommand>,
+    pub watched: Arc<AtomicBool>,
 }
 
 /// Forwards happenings to `out`, mirrors them into the sim panel on its own
@@ -325,27 +342,21 @@ pub(crate) fn tee(tee: Tee, mut history: History) {
         out,
         commands,
         app,
+        watched,
     } = tee;
     thread::spawn(move || {
         let (mut board, mut link) = (Board::default(), Link::default());
-        loop {
-            match rx.recv_timeout(TICK) {
-                Ok(msg) => {
-                    board.take(&msg, Instant::now());
-                    if let Msg::Happening(h) = msg {
-                        // The receiver is gone only when the app is closing.
-                        let _ = out.send(h);
-                    }
-                }
-                Err(RecvTimeoutError::Timeout) => {}
-                Err(RecvTimeoutError::Disconnected) => break,
-            }
+        forward(rx, out, move |msg| {
             let now = Instant::now();
+            if let Some(msg) = msg {
+                board.take(&msg, now);
+            }
             for reply in history.poll() {
                 board.reply(reply, now);
             }
             for data in link.send(board.due(now), board.sim_up(), now) {
                 match Request::parse(&data) {
+                    Ok(Request::Watch) => board.watched = Some(now),
                     Ok(Request::Query(query)) => history.ask(query),
                     Ok(Request::App(cmd)) => {
                         if let Err(e) = app.send(cmd) {
@@ -365,8 +376,46 @@ pub(crate) fn tee(tee: Tee, mut history: History) {
                     Err(ack) => board.take(&Msg::Ack(ack), now),
                 }
             }
-        }
+            watched.store(board.watching(now), Ordering::Relaxed);
+            if board.sim_up() { TICK } else { IDLE_TICK }
+        });
     });
+}
+
+/// Passes each happening on `rx` to `out`, and every message (`None` each
+/// tick without one, as long as the `panel` last asked) to the `panel`.
+/// Happenings go first, so a panel that panics cannot hold back a landing
+/// or a saved flight: it is reported as an error status and dropped, and
+/// forwarding goes on.
+fn forward(rx: Receiver<Msg>, out: Sender<Happening>, panel: impl FnMut(Option<Msg>) -> Duration) {
+    let mut panel = Some(panel);
+    let mut tick = TICK;
+    loop {
+        let msg = match rx.recv_timeout(tick) {
+            Ok(msg) => Some(msg),
+            Err(RecvTimeoutError::Timeout) => None,
+            Err(RecvTimeoutError::Disconnected) => break,
+        };
+        if let Some(Msg::Happening(h)) = &msg {
+            // The receiver is gone only when the app is closing.
+            let _ = out.send(h.clone());
+        }
+        let Some(step) = &mut panel else {
+            continue;
+        };
+        match panic::catch_unwind(AssertUnwindSafe(|| step(msg))) {
+            Ok(next) => tick = next,
+            Err(panic) => {
+                let why = (panic.downcast_ref::<&str>().copied())
+                    .or(panic.downcast_ref::<String>().map(String::as_str))
+                    .unwrap_or("panic");
+                let message = format!("the in-sim panel stopped: {why}");
+                eprintln!("error: {message}");
+                let _ = out.send(Happening::Status(RecorderStatus::Error { message }));
+                panel = None;
+            }
+        }
+    }
 }
 
 /// Whether a view command goes to the recorder: with a flight open any
@@ -401,6 +450,8 @@ struct Board {
     snapshot: Option<Snapshot>,
     /// Sent once, with the next status.
     ack: Option<Ack>,
+    /// When a view last sent `watch`.
+    watched: Option<Instant>,
     /// The latest reply on each event, while it repeats.
     replies: Vec<Repeat>,
     /// The app's attempt strip, and until when it goes out once final.
@@ -488,6 +539,12 @@ impl Board {
         }
     }
 
+    /// A view sent `watch` within `WATCH_FOR`.
+    fn watching(&self, now: Instant) -> bool {
+        self.watched
+            .is_some_and(|t| now.duration_since(t) < WATCH_FOR)
+    }
+
     /// The recorder is connected to the sim, so the feed can be too.
     fn sim_up(&self) -> bool {
         matches!(
@@ -539,7 +596,7 @@ impl Board {
         if let Some(live) = self.live.take() {
             due.push((LIVE, json!(live).to_string()));
         }
-        if let Some(s) = &self.snapshot {
+        if let Some(s) = self.snapshot.as_ref().filter(|_| self.watching(now)) {
             if is_due(&mut self.next_events, REPEAT_EVERY) {
                 let msg = json!({
                     "v": VERSION,
@@ -644,6 +701,24 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn a_panel_panic_is_reported_and_happenings_still_go_through() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (out, got) = std::sync::mpsc::channel();
+        let connected = Happening::Status(RecorderStatus::Connected);
+        for _ in 0..2 {
+            tx.send(Msg::Happening(connected.clone())).unwrap();
+        }
+        drop(tx);
+        forward(rx, out, |_| panic!("board broke"));
+        let message = "the in-sim panel stopped: board broke".into();
+        let error = Happening::Status(RecorderStatus::Error { message });
+        assert_eq!(
+            got.try_iter().collect::<Vec<_>>(),
+            [connected.clone(), error, connected]
+        );
+    }
+
     fn notice() -> LandingNotice {
         LandingNotice {
             flight_id: "flight-1".into(),
@@ -690,6 +765,7 @@ mod tests {
                 skills: Default::default(),
                 rule_counts: BTreeMap::new(),
                 flown: Default::default(),
+                kind: Default::default(),
             },
             events: vec![],
             landings: vec![notice(); landings],
@@ -733,6 +809,7 @@ mod tests {
     #[test]
     fn status_tells_the_flight_while_recording() {
         let (mut board, t0) = (Board::default(), Instant::now());
+        board.watched = Some(t0);
         board.take(&recording(42.0), t0);
         board.take(&Msg::Snapshot(snapshot(2)), t0);
         let due = parsed(&board.due(t0));
@@ -756,6 +833,7 @@ mod tests {
     #[test]
     fn landings_are_the_last_three_newest_first() {
         let (mut board, t0) = (Board::default(), Instant::now());
+        board.watched = Some(t0);
         board.take(&recording(1.0), t0);
         let mut s = snapshot(4);
         for (i, l) in s.landings.iter_mut().enumerate() {
@@ -857,6 +935,23 @@ mod tests {
             Request::parse(&long).unwrap_err().message.as_deref(),
             Some("request too long")
         );
+    }
+
+    #[test]
+    fn a_watching_view_counts_for_thirty_seconds() {
+        let watch = Request::parse("{\"v\":2,\"cmd\":\"watch\"} ");
+        assert_eq!(watch, Ok(Request::Watch));
+        let (mut board, t0) = (Board::default(), Instant::now());
+        assert!(!board.watching(t0));
+        board.watched = Some(t0);
+        assert!(board.watching(t0 + Duration::from_secs(29)));
+        assert!(!board.watching(t0 + WATCH_FOR));
+        // Unwatched, the flight's events and landings stay home.
+        board.take(&recording(1.0), t0);
+        board.take(&Msg::Snapshot(snapshot(1)), t0);
+        let due = parsed(&board.due(t0 + WATCH_FOR));
+        assert!(named(&due, EVENTS).is_none() && named(&due, LANDINGS).is_none());
+        assert!(named(&due, STATUS).is_some());
     }
 
     #[test]

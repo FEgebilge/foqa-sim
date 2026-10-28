@@ -5,6 +5,7 @@ type: SF34
 name: Saab 340B
 class: transport
 scoring_class: turboprop
+airframe: { kind: airplane, engine: turboprop, engines: 2, gear: retractable }
 vmo: { value: 250 kt, source: "Airliners.net https://www.airliners.net/forum/viewtopic.php?t=745789 and brainscape Saab 340 limitations flashcards", approximate: true, note: "250 KIAS up to 16,000 ft, decreasing to about 210 kt at FL250; forum/flashcards, EASA TCDS A.068 Issue 26 only says refer to the AFM" }
 vle: { value: 200 kt, source: &cards "brainscape Saab 340 FCOM ch.2 flashcards https://www.brainscape.com/flashcards/saab-340-limitations-memory-items-fcom-c-14356168/packs/21679145", approximate: true, note: "flashcard value, not a primary document" }
 vlo: { value: 150 kt, source: *cards, approximate: true, note: "retract 150, extend 200 (lower given); flashcard value" }

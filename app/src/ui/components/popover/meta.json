@@ -1,0 +1,16 @@
+{
+  "title": "Popover",
+  "description": "A small anchored surface for contextual information.",
+  "category": "Disclosure",
+  "kind": "component",
+  "dependencies": [
+    "@radix-ui/react-popover"
+  ],
+  "requires": [],
+  "tags": [
+    "overlay",
+    "menu"
+  ],
+  "source": "arc",
+  "canvas": []
+}

@@ -1,0 +1,22 @@
+# Cessna 152 type profile (ICAO C152, Doc 8643). Schema: docs/rules.md.
+#
+# Figures are from the 1 July 1979 Cessna 152 Information Manual, a copy of the
+# POH (the file says it is for training reference only, not kept current).
+# No vle/vlo: fixed gear. No tail_contact, hard_landing_g, max_tailwind: not
+# published in it.
+type: C152
+name: Cessna 152
+class: light
+airframe: { kind: airplane, engine: piston, engines: 1, gear: fixed }
+mlw: { value: 1670 lb, source: "Cessna 152 Information Manual (1 Jul 1979), Section 2 Weight Limits: Maximum Landing Weight 1670 lbs, https://www.touringmachine.com/PDFs-Txt/Cessna-152_POH.pdf" }
+vmo: { value: 149 kt, source: &poh "Cessna 152 Information Manual (1 Jul 1979), Section 2, Fig. 2-1 Airspeed Limitations p. 2-3, https://www.touringmachine.com/PDFs-Txt/Cessna-152_POH.pdf", note: "VNE 149 KIAS (145 KCAS); Vno 111 KIAS; Va 104 KIAS at 1670 lb" }
+max_crosswind: { value: 12 kt, source: "Cessna 152 Information Manual (1 Jul 1979), Section 4, Airspeeds for Normal Operation, p. 4-3, same URL", note: "maximum demonstrated, not a limitation" }
+flaps:
+  - { vfe: { value: 85 kt, source: *poh, note: "VFE 85 KIAS at any flap setting (0 to 30 deg)" } }
+vso: { value: 35 kt, source: "Cessna 152 Information Manual (1 Jul 1979), Section 2, Fig. 2-2 Airspeed Indicator Markings p. 2-4, same URL", note: "white arc 35-85 KIAS: lower limit is maximum weight VSO in landing configuration" }
+approach_speed:
+  source: "Cessna 152 Information Manual (1 Jul 1979), Section 4, Airspeeds for Normal Operation, Landing Approach, p. 4-3, same URL"
+  note: "Normal Approach, Flaps UP 60-70 KIAS, Flaps 30 deg 55-65 KIAS (short field 54 KIAS, flaps 30 deg); maximum flap is 30 deg"
+  flaps:
+    - { flap: 0 deg, ias: [60 kt, 70 kt] }
+    - { flap: 30 deg, ias: [55 kt, 65 kt] }

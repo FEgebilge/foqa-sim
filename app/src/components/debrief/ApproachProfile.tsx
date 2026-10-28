@@ -5,7 +5,7 @@ import { departures, crossing, halves, linesOf, pathHeight, segments, type Segme
 import { LINE, REF } from "../../lib/palette";
 import { number } from "../../lib/format";
 import { useTheme } from "../../lib/context";
-import { useElementWidth, useHover, type TimeBus } from "../../lib/time";
+import { useElementWidth, useHover, usePlaced, type TimeBus } from "../../lib/time";
 import type { Debrief, LandingAssessment } from "../../types";
 
 const LEFT = 52, RIGHT = 10;
@@ -16,7 +16,6 @@ interface Props {
   landing: LandingAssessment;
   index: number;
   bus: TimeBus;
-  focus: number | null;
   /** Puts the replay cursor at a time. */
   onFocus: (t: number) => void;
 }
@@ -58,7 +57,7 @@ function domain(values: Num[], landing: LandingAssessment, id: string, side: "ab
   return [lo - pad, hi + pad];
 }
 
-export function ApproachProfile({ debrief, landing, index, bus, focus, onFocus }: Props) {
+export function ApproachProfile({ debrief, landing, index, bus, onFocus }: Props) {
   const { theme } = useTheme();
   const p = landing.profile!;
   const lines = useMemo(() => linesOf(debrief.series, p, landing.speeds?.vapp_kt ?? null), [debrief.series, p, landing.speeds]);
@@ -66,6 +65,7 @@ export function ApproachProfile({ debrief, landing, index, bus, focus, onFocus }
   const [host, width] = useElementWidth<HTMLDivElement>();
   const [hover, setHover] = useState<number | null>(null);
   useHover(bus, setHover);
+  const focus = usePlaced(bus);
 
   const known = (v: Num[]) => v.filter((x): x is number => x !== null);
   const dists = known(p.dist_nm);

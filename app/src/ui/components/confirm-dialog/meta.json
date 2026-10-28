@@ -1,0 +1,21 @@
+{
+  "title": "Confirm dialog",
+  "description": "A question that waits for a decision, with a pending state, an inline error and an optional typed confirmation.",
+  "category": "Disclosure",
+  "kind": "component",
+  "dependencies": [],
+  "requires": [
+    "alert",
+    "button",
+    "dialog",
+    "input"
+  ],
+  "tags": [
+    "confirm",
+    "alertdialog",
+    "modal",
+    "promise"
+  ],
+  "source": "egebilge",
+  "canvas": []
+}

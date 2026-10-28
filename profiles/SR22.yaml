@@ -6,8 +6,18 @@
 type: SR22
 name: Cirrus SR22 (G6)
 class: light
+airframe: { kind: airplane, engine: piston, engines: 1, gear: fixed }
+aliases: [Cirrus SR22]
 vmo: { value: 208 kt, source: &tcds "EASA TCDS EASA.IM.A.007 Issue 19 (22 Apr 2026), SR22 serials 3915+, https://www.easa.europa.eu/en/downloads/7512/en", note: "VNE 208 KCAS; earlier serials 204 KCAS; Vno 179 KCAS" }
-max_crosswind: { value: 21 kt, source: "Boldmethod list gives SR22T G6 21 kt; SR20 checklist 21 kt", approximate: true, note: "derived from the SR22T/SR20; SR22 itself not found" }
+max_crosswind: { value: 21 kt, source: "Cirrus SR22 POH/AFM P/N 13772-006 (Perspective+, serial 4435 and subsequent), Section 4 Airspeeds for Normal Operation: maximum demonstrated crosswind velocity, takeoff or landing, 21 knots, https://www.copa.fyi/manuals/legacy/SR22%20Perspective%2B%204435%20and%20Subsequent.pdf", note: "demonstrated, not a limitation" }
 flaps:
   - { up_to: 16 deg, vfe: { value: 150 kt, source: *tcds, approximate: true, note: "VFE (50%) 150 KIAS, serials 3915+; the 16 deg angle for 50% flap is from secondary sources/memory, not the TCDS" } }
   - { vfe: { value: 110 kt, source: *tcds, approximate: true, note: "VFE (100%) 110 KIAS, serials 3915+; the 32 deg angle for 100% flap is not in the TCDS" } }
+vso: { value: 64 kt, source: "Cirrus SR22 POH/AFM P/N 13772-006, Section 5 Stall Speeds: flaps 100%, 3600 lb, most forward CG, 0 deg bank: 64 KIAS (61 KCAS), https://www.copa.fyi/manuals/legacy/SR22%20Perspective%2B%204435%20and%20Subsequent.pdf", note: "power-off, maximum weight" }
+approach_speed:
+  source: "Cirrus SR22 POH/AFM P/N 13772-006, Section 4 Airspeeds for Normal Operation, Landing Approach, https://www.copa.fyi/manuals/legacy/SR22%20Perspective%2B%204435%20and%20Subsequent.pdf"
+  note: "Normal Approach flaps UP 90-95 KIAS, 50% 85-90, 100% 80-85; short field flaps 100% VREF 79 KIAS; based on 3600 lb and usable at any lesser weight. The flap angles (50% = 16 deg, 100% = 32 deg) are the ones of the flap bands above, from secondary sources, not the POH"
+  flaps:
+    - { flap: 0 deg, ias: [90 kt, 95 kt] }
+    - { flap: 16 deg, ias: [85 kt, 90 kt] }
+    - { flap: 32 deg, ias: [80 kt, 85 kt] }

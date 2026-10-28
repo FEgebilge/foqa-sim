@@ -1,17 +1,35 @@
 use std::io::{self, Read};
+use std::ops::Range;
 
-use fdm_core::{AircraftId, Airport, Lfl, Sample, SignalDef, SignalId, SimTime, Unit};
-use recorder::{FlightRecords, Record, SimEvent, read_records};
+use fdm_core::geo::distance_m;
+use fdm_core::{AircraftId, Airport, Lfl, Sample, SignalDef, SignalId, SimTime, Ssm, Unit};
+use recorder::{FlightRecords, FlowEvent, Record, SimEvent, read_records};
 
 /// Parameters whose value wraps around, as (name, lowest value, period).
 /// Interpolating across the wrap-around must take the short way round
 /// (359 deg to 1 deg passes through 0, not 180).
-const WRAPPING: [(&str, f64, f64); 4] = [
+const WRAPPING: [(&str, f64, f64); 5] = [
     ("heading.mag", 0.0, 360.0),
+    ("heading.true", 0.0, 360.0),
     ("sel.heading", 0.0, 360.0),
     ("wind.dir", 0.0, 360.0),
     ("pos.lon", -180.0, 360.0),
 ];
+
+/// Positions that stand for an FDR discrete, read as their last sample like
+/// one: `gear.extended` is the gear position of 14 CFR 121.344 Appendix M
+/// item 36 (up, in transit, down and locked), sampled every 4 s. A line
+/// between two samples would invent a transit the recorder never saw (0 to
+/// 100 % across 4 s) and give short-sustain rules (gear operated above VLO,
+/// 1 s) a 4 s ramp to fire on.
+const STEPPED: [&str; 1] = ["gear.extended"];
+/// An aircraft the sim placed (spawn, slew, teleport) settles on its gear
+/// within this long: no touchdown in it is a landing.
+pub(crate) const SETTLE_US: i64 = 5_000_000;
+/// Faster over the ground than any aircraft flies (Concorde cruised at
+/// ~1,200 kt): a position that moved faster jumped (teleport, flight
+/// reload), the only trace of one in recordings without flow events. m/s.
+const JUMP_MS: f64 = 2000.0 * 1852.0 / 3600.0;
 
 /// Recordings made before the wiring scaled `GEAR TOTAL PCT EXTENDED` (a
 /// 0-1 fraction in MSFS 2024, docs/format.md) hold `gear.extended` as 0-1
@@ -80,6 +98,15 @@ impl Flight {
         &self.series[usize::from(self.def(name).id.0)]
     }
 
+    /// Marks every sample of parameter `id` failed: a parameter known to be
+    /// wrong on this aircraft reads as no data, as a ground station flags
+    /// it in the LFL for that tail.
+    pub fn invalidate(&mut self, id: SignalId) {
+        if let Some(s) = self.series.get_mut(usize::from(id.0)) {
+            s.iter_mut().for_each(|s| s.ssm = Ssm::Failure);
+        }
+    }
+
     /// Every parameter with its samples, in LFL order.
     pub fn parameters(&self) -> impl Iterator<Item = (&'static SignalDef, &[Sample])> {
         self.lfl
@@ -116,6 +143,67 @@ impl Flight {
         })
     }
 
+    /// Where the sim, not the pilot, moved the aircraft: slew, a teleport,
+    /// a flight (re)load, skip or back-on-track (flow events), or a position
+    /// jump; each with `SETTLE_US` after it. No touchdown in one is a
+    /// landing, and no approach or rollout is graded across one. A pause is
+    /// none: the recorder drops frames whose sim time stands still, so it
+    /// leaves no samples and no jump.
+    pub fn breaks(&self) -> Vec<Range<SimTime>> {
+        let Some((_, end)) = self.span() else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        let mut open: Option<SimTime> = None;
+        for s in self.series("sim.slew").iter().filter(|s| s.is_valid()) {
+            match (open, s.value >= 0.5) {
+                (None, true) => open = Some(s.t),
+                (Some(from), false) => {
+                    out.push(from..s.t);
+                    open = None;
+                }
+                _ => {}
+            }
+        }
+        out.extend(open.take().map(|from| from..end));
+        for &(t, ref e) in &self.events {
+            use FlowEvent::*;
+            match e {
+                SimEvent::Flow(FltLoad | TeleportStart | BackOnTrackStart | SkipStart) => {
+                    open.get_or_insert(t);
+                }
+                SimEvent::Flow(FltLoaded | TeleportDone | BackOnTrackDone | SkipDone)
+                | SimEvent::FlightLoaded(_) => out.push(open.take().unwrap_or(t)..t),
+                _ => {}
+            }
+        }
+        out.extend(open.map(|from| from..end));
+        let fixes: Vec<_> = (self.series("pos.lat").iter())
+            .filter(|s| s.is_valid())
+            .filter_map(|s| Some((s.t, (s.value, self.at("pos.lon", s.t)?))))
+            .collect();
+        out.extend(
+            fixes
+                .windows(2)
+                .filter(|w| {
+                    distance_m(w[0].1, w[1].1) > JUMP_MS * w[1].0.us_since(w[0].0) as f64 / 1e6
+                })
+                .map(|w| w[0].0..w[1].0),
+        );
+        for b in &mut out {
+            b.end = b.end.add_us(SETTLE_US);
+        }
+        out
+    }
+
+    /// When the sim reported a crash: its `Crashed` system event or the
+    /// `PlaneCrash` flow event, sent only with crash detection on.
+    pub fn crashes(&self) -> impl Iterator<Item = SimTime> + '_ {
+        (self.events.iter())
+            .filter(|(_, e)| matches!(e, SimEvent::Crashed | SimEvent::Flow(FlowEvent::PlaneCrash)))
+            .map(|&(t, _)| t)
+    }
+
     pub fn lfl_version(&self) -> u16 {
         self.lfl.version
     }
@@ -138,11 +226,17 @@ impl Flight {
     }
 
     /// Value at `t`: interpolated between valid neighbours for continuous
-    /// parameters, the last value for discrete ones. `None` outside the
+    /// parameters, the last value for discrete and `STEPPED` ones. `None` outside the
     /// recording, across invalid (non-`Normal`) samples, or across a gap of
     /// more than two missed samples.
     pub fn at(&self, name: &str, t: SimTime) -> Option<f64> {
         self.value(self.def(name).id, t)
+    }
+
+    /// `at` for a parameter this build's LFL may lack (a row appended
+    /// later): `None` then, as for a recording made before the row.
+    pub fn try_at(&self, name: &str, t: SimTime) -> Option<f64> {
+        self.value(self.lfl.by_name(name)?.id, t)
     }
 
     /// `at` over `times`, `NaN` where a parameter has no valid value.
@@ -164,7 +258,7 @@ impl Flight {
         if prev.t == t {
             return Some(prev.value);
         }
-        if matches!(def.unit, Unit::Discrete | Unit::Index) {
+        if matches!(def.unit, Unit::Discrete | Unit::Index) || STEPPED.contains(&def.name) {
             return (t.us_since(prev.t) <= max_gap).then_some(prev.value);
         }
         let next = s
@@ -297,6 +391,7 @@ pub(crate) mod tests {
             atc_model: "ATCCOM.AC_MODEL C172.0.text".into(),
             atc_type: "ATCCOM.ATC_NAME CESSNA.0.text".into(),
             atc_id: "BILGE".into(),
+            facts: Default::default(),
         };
         let mut f = flight(&[]);
         assert_eq!(f.aircraft(), None);
@@ -308,6 +403,27 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn an_invalidated_parameter_reads_as_no_data() {
+        let mut f = flight(&[ok("sel.speed", 0.0, 140.0), ok("ias", 0.0, 150.0)]);
+        f.invalidate(Lfl::V1.by_name("sel.speed").unwrap().id);
+        assert_eq!(f.at("sel.speed", SimTime::ZERO), None);
+        assert_eq!(f.at("ias", SimTime::ZERO), Some(150.0));
+    }
+
+    #[test]
+    fn gear_position_holds_its_last_sample() {
+        let f = flight(&[
+            ok("gear.extended", 0.0, 0.0),
+            ok("gear.extended", 4.0, 100.0),
+        ]);
+        let at = |s| f.at("gear.extended", SimTime::from_secs_f64(s));
+        assert_eq!(
+            (at(2.0), at(3.9), at(4.0)),
+            (Some(0.0), Some(0.0), Some(100.0))
+        );
+    }
+
+    #[test]
     fn angles_interpolate_the_short_way_round() {
         assert!((at("heading.mag", 359.0, 1.0, 0.5) - 0.0).abs() < 1e-9);
         assert!((at("heading.mag", 350.0, 10.0, 0.25) - 355.0).abs() < 1e-9);
@@ -316,5 +432,14 @@ pub(crate) mod tests {
         assert!((at("pos.lon", 179.0, -179.0, 0.75) + 179.5).abs() < 1e-9);
         // Ordinary parameters are untouched.
         assert!((at("pitch", 359.0, 1.0, 0.5) - 180.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_parameter_without_samples_or_row_is_unknown() {
+        let f = flight(&[ok("pitch", 0.0, 1.0), ok("pitch", 1.0, 1.0)]);
+        let t = SimTime::from_secs_f64(1.0);
+        assert_eq!(f.try_at("pitch", t), Some(1.0));
+        assert_eq!(f.try_at("heading.true", t), None);
+        assert_eq!(f.try_at("no.such", t), None);
     }
 }

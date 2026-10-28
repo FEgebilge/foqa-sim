@@ -1,0 +1,17 @@
+{
+  "title": "Confirm morph",
+  "description": "A destructive button that morphs into an inline confirmation, a spinner, and a result with undo.",
+  "category": "Actions",
+  "kind": "component",
+  "dependencies": [
+    "lucide-react",
+    "motion"
+  ],
+  "requires": [],
+  "tags": [
+    "actions",
+    "new"
+  ],
+  "source": "arc",
+  "canvas": []
+}

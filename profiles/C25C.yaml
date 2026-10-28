@@ -3,14 +3,26 @@
 # Class transport although certified Part 23 commuter category: classes
 # here are by weight (above 12,500 lb, `rules::aircraft`), and the CJ4 weighs
 # about 17,000 lb.
-# No max_crosswind/max_tailwind: not in the TCDS; only an unverified forum claim.
+# No max_tailwind: not published.
 type: C25C
 name: Cessna Citation CJ4 (525C)
 class: transport
+airframe: { kind: airplane, engine: jet, engines: 2, gear: retractable }
+mlw: { value: 15660 lb, source: "EASA TCDS EASA.IM.A.078 Issue 19 (07-May-2026), https://www.easa.europa.eu/en/downloads/7368/en, Section D 525C item 13 Maximum Weights: landing 7103 kg (15,660 lbs)" }
+mmo: { value: 0.77 M, source: "EASA TCDS EASA.IM.A.078 Issue 19 (07-May-2026), https://www.easa.europa.eu/en/downloads/7368/en, Section D 525C item 10 Air Speeds: MMO 0.77 above 28,000 ft" }
+aliases: [Citation CJ4]
 vmo: { value: 260 kt, source: "EASA TCDS EASA.IM.A.078 Issue 19 sec D 525C, https://www.easa.europa.eu/en/downloads/7368/en", note: "VMO 260 KIAS below 8000 ft (305 KIAS from 8000 to 28000 ft); the low-altitude value is the one used" }
 vle: { value: 200 kt, source: "EASA TCDS EASA.IM.A.078 Issue 19 (VLE 200 KIAS)" }
 vlo: { value: 200 kt, source: "EASA TCDS EASA.IM.A.078 Issue 19", note: "VLO 200 KIAS extending and retracting (199 KCAS retract)" }
+max_crosswind: { value: 20 kt, source: "Cessna Model 525C AFM 525CFM-05 Rev 5 (Jun 2015), https://pdfcoffee.com/cj4-afm-rev5-jun2015-pdf-free.html, Section IV Performance, Demonstrated Crosswind: 20 knots, measured at 10 m above the runway", note: "demonstrated, not a limitation" }
 flaps:
   - up_to: 15 deg
     vfe: { value: 200 kt, source: &spec "Cessna Citation CJ4 specification SD-CJ4 Unit 0200 to TBD, Oct 2015, Limit Speeds p. 7, https://tadistributors.com/wp-content/uploads/2016/03/SD-CJ4-Unit-0200-to-TBD-2015-Oct.pdf" }
   - vfe: { value: 160 kt, source: *spec, note: "15 to 35 deg" }
+vref:
+  source: "Cessna Model 525C AFM 525CFM-05 Rev 5 (Jun 2015), https://pdfcoffee.com/cj4-afm-rev5-jun2015-pdf-free.html, Section III Abnormal Procedures, Adjusted VREF table (KIAS by weight and flaps; 113 KIAS at 15,660 lb, flaps 35 deg, the VREF the AFM landing examples use)"
+  note: "the AFM's weight-indexed VREF table, listed with the abnormal procedures; the 17,110 lb overweight-emergency column is left out. Flaps 15 deg is the approach setting"
+  flaps:
+    - { flap: 0 deg, weights_kg: [4763, 5443, 6123, 6577, 7103], ias: [106 kt, 113 kt, 119 kt, 124 kt, 129 kt] }
+    - { flap: 15 deg, weights_kg: [4763, 5443, 6123, 6577, 7103], ias: [99 kt, 105 kt, 112 kt, 116 kt, 120 kt] }
+    - { flap: 35 deg, weights_kg: [4763, 5443, 6123, 6577, 7103], ias: [92 kt, 98 kt, 104 kt, 108 kt, 113 kt] }

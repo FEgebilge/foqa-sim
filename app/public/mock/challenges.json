@@ -40,11 +40,11 @@
       "title": "Izmir 16L, calm morning",
       "airport": "LTBJ",
       "runway": "16L",
-      "aircraft": { "classes": ["light"] },
+      "aircraft": { "classes": ["light"], "types": ["C172"] },
       "start": { "distance_nm": 5, "height_ft": 1500, "ias_kt": 90, "gear_down": true, "flaps": 0.33, "mode": "teleport" },
       "gate": { "distance_nm": 2 },
       "rules": { "stop_on_runway": true },
-      "scoring": { "version": "landing-1" }
+      "scoring": { "version": "landing-3" }
     }
   },
   {

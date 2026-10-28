@@ -13,7 +13,7 @@ mod signal;
 mod time;
 mod unit;
 
-pub use aircraft::AircraftId;
+pub use aircraft::{AircraftId, SimFacts};
 pub use airport::{Airport, Designator, Runway, RunwayEnd};
 pub use sample::{Sample, Ssm};
 pub use signal::{Channel, Lfl, SignalDef, SignalId};

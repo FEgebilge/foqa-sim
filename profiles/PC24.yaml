@@ -5,6 +5,9 @@
 type: PC24
 name: Pilatus PC-24
 class: transport
+airframe: { kind: airplane, engine: jet, engines: 2, gear: retractable }
+mlw: { value: 17340 lb, source: "EASA TCDS EASA.A.594 PC-24 Issue 08 (13 Oct 2023), https://www.easa.europa.eu/sites/default/files/dfu/TCDS_EASA_A_594_PC-24_Issue_8.pdf, Section A.III item 11 Maximum Weights: landing 7,865 kg (17,340 lbs) with the Design Weight Increase (MSN 501 on); 7,665 kg (16,900 lbs) for the earlier configurations", note: "the higher value, so a heavier-weight aircraft is not flagged" }
+mmo: { value: 0.74 M, source: "EASA TCDS EASA.A.594 PC-24 Issue 08 (13 Oct 2023), https://www.easa.europa.eu/sites/default/files/dfu/TCDS_EASA_A_594_PC-24_Issue_8.pdf, Section A.III item 8: MMO 0.74" }
 vmo: { value: 290 kt, source: &tcds "EASA TCDS EASA.A.594 PC-24 Issue 08, https://www.easa.europa.eu/en/downloads/44366/en", approximate: true, note: "TCDS gives VMO 290 KEAS (MMO 0.74); at low altitude EAS is within 1-2 kt of IAS" }
 vle: { value: 250 kt, source: *tcds, approximate: true, note: "TCDS gives VLE 250 KEAS; KEAS taken as KIAS" }
 vlo: { value: 200 kt, source: *tcds, approximate: true, note: "TCDS VLO extension 250 KEAS, retraction 200 KEAS; lower given, KEAS taken as KIAS" }

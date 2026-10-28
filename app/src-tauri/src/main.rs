@@ -10,13 +10,16 @@ mod attempts;
 mod commands;
 #[cfg(feature = "connect")]
 mod connect;
+mod diag;
 mod exports;
 mod insim;
 mod library;
 mod links;
 mod setup;
+mod store;
 mod updated;
 
+use std::panic::{self, AssertUnwindSafe};
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
@@ -28,10 +31,11 @@ use capture::{Happening, Service};
 use commands::{Shared, lock};
 use library::Library;
 use serde::Serialize;
+use serde_json::json;
 use setup::Setup;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Emitter, Manager, WindowEvent, Wry};
+use tauri::{AppHandle, Emitter, Manager, RunEvent, WebviewWindowBuilder, Wry};
 use tauri_plugin_notification::NotificationExt;
 
 /// How long Quit waits for the recorder to close an open flight's files.
@@ -48,7 +52,11 @@ macro_rules! handler {
             commands::list_flights,
             commands::debrief,
             commands::trends,
-            commands::delete_flight,
+            commands::delete_flights,
+            commands::restore_flights,
+            commands::purge_trash,
+            commands::flight_meta_get,
+            commands::flight_meta_set,
             commands::place_challenge,
             commands::challenges_list,
             commands::challenge_import,
@@ -63,6 +71,7 @@ macro_rules! handler {
             commands::recorder_status,
             commands::open_flights_folder,
             commands::storage_usage,
+            commands::open_log_folder,
             commands::setup_status,
             commands::setup_install,
             commands::setup_remove,
@@ -71,7 +80,8 @@ macro_rules! handler {
             exports::export_flight,
             exports::export_logbook,
             exports::save_image,
-            updated::update_mark
+            updated::update_mark,
+            updated::update_mark_clear
             $(, $extra)*
         ]
     };
@@ -134,109 +144,167 @@ fn main() {
         ))
         .invoke_handler(commands)
         .setup(|app| {
-            let station = Arc::new(Station::core()?);
-            let dir = app.path().document_dir()?.join("FOQA-Sim").join("flights");
-            // FOQA_RAW=1 also keeps raw captures, to replay through a changed chain.
-            let mut service = Service::new(dir.clone(), Arc::clone(&station))?
-                .raw(std::env::var_os("FOQA_RAW").is_some());
-            let (stopper, index, sim) =
-                (service.stopper(), service.index(), service.sim_requests());
-            let (views, view_commands) = (service.views(), service.app_commands());
-            let (tx, rx) = mpsc::channel();
-            let recorder = thread::Builder::new()
-                .name("recorder".into())
-                .spawn(move || service.run(tx))?;
-            let setup = Setup::new(app.path().app_config_dir()?, app.path().resource_dir().ok());
-            // Challenges and attempts live with the app's data, out of synced Documents.
-            let data = app.path().app_data_dir()?;
-            let library = Library::new(data.join("challenges"))?;
-            let handle = app.handle().clone();
-            #[cfg(feature = "connect")]
-            let connect = connect::Connect::start(
-                data.clone(),
-                app.path().app_config_dir()?,
-                data.join("attempts"),
-                handle.clone(),
-            )?;
-            #[cfg(feature = "connect")]
-            let site = Arc::clone(&connect);
-            let (changed, strip) = mpsc::channel();
-            let attempts = Attempts::new(data.join("attempts"))?.on_change(move |record| {
-                if let Err(e) = handle.emit("attempt-changed", record) {
-                    eprintln!("event not sent: {e}");
-                }
-                let _ = changed.send(());
-                #[cfg(feature = "connect")]
-                site.attempt_changed(record);
-            });
-            let shared = Shared::new(
-                station, dir, stopper, index, recorder, setup, sim, library, attempts, views,
-            );
-            #[cfg(feature = "connect")]
-            let shared = shared.with_hooks(Arc::clone(&connect) as Arc<dyn commands::AttemptHooks>);
-            let shared = Arc::new(shared);
-            shared.in_sim(strip, view_commands);
-            #[cfg(feature = "connect")]
+            if let Ok(dir) = app.path().app_log_dir() {
+                diag::init(&dir);
+            }
+            start(app).inspect_err(|e| diag::start_failed(app.handle(), e))
+        })
+        .build(tauri::generate_context!())
+        // The dialog is shown (`start_failed`); a panic here would add nothing.
+        .unwrap_or_else(|e| {
+            eprintln!("error while running FOQA-Sim: {e}");
+            std::process::exit(1)
+        })
+        // Closing the window destroys it (its WebView is the app's biggest
+        // memory cost; `show` builds it again) and the app keeps recording
+        // from the tray: only Quit (`exit(0)`) ends it.
+        .run(|_, event| {
+            if let RunEvent::ExitRequested {
+                api, code: None, ..
+            } = event
             {
-                use tauri_plugin_deep_link::DeepLinkExt;
-                let links = app.deep_link();
-                // The installer registers the scheme; registering again at
-                // start-up repairs an install that missed it (B2).
-                if let Err(e) = links.register(::connect::deeplink::SCHEME) {
-                    eprintln!("deep links not registered: {e}");
-                }
-                // A link that started the app.
-                links::in_args(std::env::args()).for_each(|link| connect.open_url(&link));
-                app.manage(connect);
+                api.prevent_exit();
             }
-            #[cfg(not(feature = "connect"))]
-            links::arrived(app.handle(), std::env::args());
-            app.manage(Arc::clone(&shared));
-            let recover = Arc::clone(&shared);
-            thread::spawn(move || recover.recover());
-            // After an update, the in-sim packages follow the app's version.
-            let refresh = Arc::clone(&shared);
-            thread::spawn(move || {
-                for (name, result) in refresh.setup.refresh() {
-                    match result {
-                        Ok(()) => eprintln!("{name}: brought up to date"),
-                        Err(e) => eprintln!("{name}: could not be brought up to date: {e}"),
-                    }
-                }
-            });
-            // Brings the flight list's index up to date before it is asked for.
-            let warm = Arc::clone(&shared);
-            thread::spawn(move || warm.summaries());
+        });
+}
 
-            let handle = app.handle().clone();
-            app.notification().on_action(move |action| {
-                let extra = |key| action.notification()?.extra().get(key)?.as_str();
-                if action.action_id() != "tap" {
-                    return;
-                }
-                show(&handle, extra(FLIGHT_ID));
-                if let Some(key) = extra(CHALLENGE_KEY) {
-                    let _ = handle.emit("open-challenge", OpenChallenge { key });
-                }
-            })?;
-            let tray = Tray::new(app.handle())?;
-            // The installer restarts the app like any start, hidden in the tray: after an update, show it.
-            if updated::take() {
-                show(app.handle(), None);
+type Failure = Box<dyn std::error::Error>;
+
+/// Puts the calling thread in Windows' background mode: the lowest CPU, disk
+/// and memory priority, for as long as it lives.
+fn background() {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::System::Threading::{
+            GetCurrentThread, SetThreadPriority, THREAD_MODE_BACKGROUND_BEGIN,
+        };
+        // SAFETY: neither call takes a pointer, and the pseudo handle needs no closing.
+        unsafe { SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN) };
+    }
+}
+
+/// Opens the folders and starts the recorder and the shared state.
+fn start(app: &mut tauri::App) -> Result<(), Failure> {
+    let station = Arc::new(Station::core()?);
+    // FOQA_FLIGHTS_DIR: a test run's own folder, not the user's flights.
+    let dir = match std::env::var_os("FOQA_FLIGHTS_DIR") {
+        Some(dir) => dir.into(),
+        None => app.path().document_dir()?.join("FOQA-Sim").join("flights"),
+    };
+    // FOQA_RAW=1 also keeps raw captures, to replay through a changed chain.
+    let mut service = Service::new(dir.clone(), Arc::clone(&station))?
+        .raw(std::env::var_os("FOQA_RAW").is_some());
+    let (stopper, index, sim) = (service.stopper(), service.index(), service.sim_requests());
+    let (views, view_commands) = (service.views(), service.app_commands());
+    let (tx, rx) = mpsc::channel();
+    let recorder = thread::Builder::new()
+        .name("recorder".into())
+        .spawn(move || supervise(service, tx))?;
+    let setup = Setup::new(app.path().app_config_dir()?, app.path().resource_dir().ok());
+    // Challenges and attempts live with the app's data, out of synced Documents.
+    let data = app.path().app_data_dir()?;
+    let library = Library::new(data.join("challenges"))?;
+    let handle = app.handle().clone();
+    #[cfg(feature = "connect")]
+    let connect = connect::Connect::start(
+        data.clone(),
+        app.path().app_config_dir()?,
+        data.join("attempts"),
+        handle.clone(),
+    )?;
+    #[cfg(feature = "connect")]
+    let site = Arc::clone(&connect);
+    let (changed, strip) = mpsc::channel();
+    let attempts = Attempts::new(data.join("attempts"))?.on_change(move |record| {
+        if let Err(e) = handle.emit("attempt-changed", record) {
+            eprintln!("event not sent: {e}");
+        }
+        let _ = changed.send(());
+        #[cfg(feature = "connect")]
+        site.attempt_changed(record);
+    });
+    let shared = Shared::new(
+        station, dir, stopper, index, recorder, setup, sim, library, attempts, views,
+    );
+    #[cfg(feature = "connect")]
+    let shared = shared.with_hooks(Arc::clone(&connect) as Arc<dyn commands::AttemptHooks>);
+    let shared = Arc::new(shared);
+    // Flights deleted more than `TRASH_KEEP` ago go for good.
+    shared
+        .store()
+        .purge(store::TRASH_KEEP, std::time::SystemTime::now());
+    shared.in_sim(strip, view_commands);
+    #[cfg(feature = "connect")]
+    {
+        use tauri_plugin_deep_link::DeepLinkExt;
+        let links = app.deep_link();
+        // The installer registers the scheme; registering again at
+        // start-up repairs an install that missed it (B2).
+        if let Err(e) = links.register(::connect::deeplink::SCHEME) {
+            eprintln!("deep links not registered: {e}");
+        }
+        // A link that started the app.
+        links::in_args(std::env::args()).for_each(|link| connect.open_url(&link));
+        app.manage(connect);
+    }
+    #[cfg(not(feature = "connect"))]
+    links::arrived(app.handle(), std::env::args());
+    app.manage(Arc::clone(&shared));
+    let recover = Arc::clone(&shared);
+    thread::spawn(move || recover.recover());
+    // After an update, the in-sim packages follow the app's version.
+    let refresh = Arc::clone(&shared);
+    thread::spawn(move || {
+        for (name, result) in refresh.setup.refresh() {
+            match result {
+                Ok(()) => eprintln!("{name}: brought up to date"),
+                Err(e) => eprintln!("{name}: could not be brought up to date: {e}"),
             }
-            let handle = app.handle().clone();
-            thread::spawn(move || relay(&handle, &shared, &tray, rx));
-            Ok(())
-        })
-        // The window only hides: the app keeps recording from the tray.
-        .on_window_event(|window, event| {
-            if let WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                let _ = window.hide();
-            }
-        })
-        .run(tauri::generate_context!())
-        .expect("error while running FOQA-Sim");
+        }
+    });
+    // Brings the flight list's index up to date before it is asked for, in the
+    // background: after an update it analyses every flight, maybe beside a running sim.
+    let warm = Arc::clone(&shared);
+    thread::spawn(move || warm.summaries_with(&background));
+
+    let handle = app.handle().clone();
+    app.notification().on_action(move |action| {
+        let extra = |key| action.notification()?.extra().get(key)?.as_str();
+        if action.action_id() != "tap" {
+            return;
+        }
+        let flight = extra(FLIGHT_ID).map(Open::Flight);
+        show(
+            &handle,
+            flight.or(extra(CHALLENGE_KEY).map(Open::Challenge)),
+        );
+    })?;
+    let tray = Tray::new(app.handle())?;
+    // The installer restarts the app like any start, hidden in the tray: after an update, show it.
+    if updated::take() {
+        show(app.handle(), None);
+    }
+    let handle = app.handle().clone();
+    thread::spawn(move || relay(&handle, &shared, &tray, rx));
+    Ok(())
+}
+
+/// Runs the recorder; if it panics, says so as an error status (shown by the
+/// tray and the window) rather than leaving recording silently stopped. No
+/// restart: the panic consumed the service, and its journal is repaired at
+/// the next start.
+fn supervise(service: Service, out: mpsc::Sender<Happening>) {
+    let mine = out.clone();
+    if let Err(panic) = panic::catch_unwind(AssertUnwindSafe(move || service.run(out))) {
+        let why = panic
+            .downcast_ref::<&str>()
+            .copied()
+            .or_else(|| panic.downcast_ref::<String>().map(String::as_str))
+            .unwrap_or("unknown");
+        eprintln!("recorder panicked: {why}");
+        let message = "Recording stopped unexpectedly. Restart FOQA-Sim.".to_owned();
+        let _ = mine.send(Happening::Status(RecorderStatus::Error { message }));
+    }
 }
 
 /// Hands what the recorder reports to the tray, the window and the
@@ -299,17 +367,65 @@ fn notify(app: &AppHandle, notice: &LandingNotice) {
     }
 }
 
-/// Brings the debrief window up, on a flight if one is named: the frontend
-/// opens it on the `open-flight` event.
-pub(crate) fn show(app: &AppHandle, flight_id: Option<&str>) {
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.unminimize();
-        let _ = window.show();
-        let _ = window.set_focus();
+/// What the window opens on.
+pub(crate) enum Open<'a> {
+    Flight(&'a str),
+    Challenge(&'a str),
+}
+
+/// Brings the debrief window up, on `open` if given: the open window's
+/// frontend follows the `open-flight` and `open-challenge` events, a window
+/// built anew starts on it (`create`).
+pub(crate) fn show(app: &AppHandle, open: Option<Open>) {
+    let Some(window) = app.get_webview_window("main") else {
+        return create(app, open);
+    };
+    let _ = window.unminimize();
+    let _ = window.show();
+    let _ = window.set_focus();
+    let sent = match open {
+        Some(Open::Flight(flight_id)) => app.emit("open-flight", OpenFlight { flight_id }),
+        Some(Open::Challenge(key)) => app.emit("open-challenge", OpenChallenge { key }),
+        None => Ok(()),
+    };
+    if let Err(e) = sent {
+        eprintln!("event not sent: {e}");
     }
-    if let Some(flight_id) = flight_id {
-        let _ = app.emit("open-flight", OpenFlight { flight_id });
-    }
+}
+
+/// Builds the window the config describes (`"create": false`) and shows it.
+/// The frontend takes its route from the URL hash, and a link or the
+/// recorder status it asks for when it starts, so nothing pushed is missed.
+/// On a thread of its own: a window built inside an event handler can
+/// deadlock on Windows.
+fn create(app: &AppHandle, open: Option<Open>) {
+    let route = open.map(|open| match open {
+        Open::Flight(id) => ("flight", id),
+        Open::Challenge(key) => ("challenges", key),
+    });
+    let script = route.map(|(screen, id)| {
+        format!(
+            "location.hash = '/{screen}/' + encodeURIComponent({});",
+            json!(id)
+        )
+    });
+    let app = app.clone();
+    thread::spawn(move || {
+        let built = || {
+            let config = app.config().app.windows.first().cloned();
+            let config = config.ok_or(tauri::Error::WindowNotFound)?;
+            let mut builder = WebviewWindowBuilder::from_config(&app, &config)?
+                .visible(true)
+                .focused(true);
+            if let Some(script) = script {
+                builder = builder.initialization_script(script);
+            }
+            builder.build()
+        };
+        if let Err(e) = built() {
+            eprintln!("window not built: {e}");
+        }
+    });
 }
 
 #[derive(Clone, Serialize)]

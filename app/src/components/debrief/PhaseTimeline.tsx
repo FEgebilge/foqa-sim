@@ -1,4 +1,4 @@
-import { useCallback, useRef, type MouseEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, type MouseEvent, type ReactNode } from "react";
 import { Tooltip } from "@ui/components/tooltip/tooltip";
 import { clock, LEVEL_LABEL, phaseName } from "../../lib/format";
 import { contacts, groupLandings } from "../../lib/landings";
@@ -7,7 +7,7 @@ import { tickStep, useElementWidth, useHover, type TimeBus, type TimeRange } fro
 import type { Debrief, FlightEvent, PhaseSpan, Touchdown } from "../../types";
 import { PhasesPanel } from "./PhasesPanel";
 
-const CODES: Record<string, string> = { Standing: "STD", Taxi: "TXI", Takeoff: "TOF", InitialClimb: "ICL", EnRoute: "ENR", Approach: "APR", Landing: "LDG", GoAround: "GA" };
+const CODES: Record<string, string> = { Standing: "STD", Taxi: "TXI", Takeoff: "TOF", RejectedTakeoff: "RTO", InitialClimb: "ICL", EnRoute: "ENR", Approach: "APR", Landing: "LDG", GoAround: "GA" };
 
 interface Props {
   phases: PhaseSpan[];
@@ -16,7 +16,6 @@ interface Props {
   events: FlightEvent[];
   touchdowns: Touchdown[];
   range: TimeRange;
-  focus: number | null;
   view: TimeRange | null;
   selected: number | null;
   bus: TimeBus;
@@ -31,9 +30,10 @@ interface Props {
  * The flight at a glance: contiguous CICTT phases on one bar, events above it, touchdowns below.
  * Click the bar to put the cursor at a time; click a phase name to zoom the charts to it.
  */
-export function PhaseTimeline({ phases, phaseValues, events, touchdowns, range, focus, view, selected, bus, onFocus, onZoom, onSelectEvent, controls }: Props) {
+export function PhaseTimeline({ phases, phaseValues, events, touchdowns, range, view, selected, bus, onFocus, onZoom, onSelectEvent, controls }: Props) {
   const [barRef, width] = useElementWidth<HTMLDivElement>();
   const hoverRef = useRef<HTMLDivElement>(null);
+  const cursorRef = useRef<HTMLDivElement>(null);
   const [t0, t1] = range;
   const span = Math.max(1, t1 - t0);
   const pct = (t: number) => `${((Math.min(t1, Math.max(t0, t)) - t0) / span) * 100}%`;
@@ -46,6 +46,18 @@ export function PhaseTimeline({ phases, phaseValues, events, touchdowns, range, 
     node.style.display = t === null ? "none" : "block";
     if (t !== null) node.style.left = `${((t - t0) / span) * 100}%`;
   }, [t0, span]));
+
+  // The placed cursor moves by hand: playback ticks must not re-render the timeline.
+  useEffect(() => {
+    const move = () => {
+      const node = cursorRef.current, t = bus.placed;
+      if (!node) return;
+      node.style.display = t === null ? "none" : "block";
+      if (t !== null) node.style.left = `${((Math.min(t1, Math.max(t0, t)) - t0) / span) * 100}%`;
+    };
+    move();
+    return bus.onPlace(move);
+  }, [bus, t0, t1, span]);
 
   const timeAt = (event: MouseEvent<HTMLElement>) => {
     const box = event.currentTarget.getBoundingClientRect();
@@ -102,8 +114,8 @@ export function PhaseTimeline({ phases, phaseValues, events, touchdowns, range, 
           const w = px(phase.end_s - phase.start_s);
           return (
             <Tooltip key={index} content={<PhaseTip phase={phase} />}>
-              <div tabIndex={0} aria-label={`${phaseName(phase.phase)}, ${clock(phase.start_s)} to ${clock(phase.end_s)}. Started: ${phase.trigger}`}
-                className="absolute inset-y-0 flex items-center overflow-hidden border-r border-[var(--surface)] px-1.5 outline-offset-[-2px] focus-visible:outline-2 focus-visible:outline-[var(--foreground)]"
+              {/* Hover only: the bar is one image to a screen reader, and the legend chips below are the keyboard's way in. */}
+              <div className="absolute inset-y-0 flex items-center overflow-hidden border-r border-[var(--surface)] px-1.5"
                 style={{ left: pct(phase.start_s), width: share(phase.end_s - phase.start_s), background: `color-mix(in oklab, var(--phase-${phase.phase}, var(--phase-unknown)) 78%, var(--surface))` }}>
                 <span className="readout truncate text-[11px] font-semibold text-[oklch(18%_.03_258)]">{w > 90 ? phaseName(phase.phase) : w > 30 ? CODES[phase.phase] ?? "" : ""}</span>
               </div>
@@ -114,7 +126,7 @@ export function PhaseTimeline({ phases, phaseValues, events, touchdowns, range, 
         {selectedEvent ? (
           <div className="pointer-events-none absolute inset-y-0 min-w-[3px]" style={{ left: pct(selectedEvent.start_s), width: share(selectedEvent.end_s - selectedEvent.start_s), background: levelVar(selectedEvent.level), opacity: 0.85 }} />
         ) : null}
-        {focus !== null ? <div className="pointer-events-none absolute inset-y-0 w-0.5 -translate-x-1/2 bg-[var(--foreground)]" style={{ left: pct(focus) }} /> : null}
+        <div ref={cursorRef} className="pointer-events-none absolute inset-y-0 hidden w-0.5 -translate-x-1/2 bg-[var(--foreground)]" />
         <div ref={hoverRef} className="pointer-events-none absolute inset-y-0 hidden w-px bg-[var(--foreground)] opacity-60" />
       </div>
 
@@ -138,7 +150,7 @@ export function PhaseTimeline({ phases, phaseValues, events, touchdowns, range, 
             className="inline-flex items-center gap-1.5 rounded-full border border-line px-2 py-0.5 text-xs text-fg-2 hover:border-line-strong hover:text-fg"
             title={`Zoom the charts to ${phaseName(phase.phase)} (${clock(phase.start_s)}–${clock(phase.end_s)})`}>
             <span className="size-2 rounded-full" style={{ background: `var(--phase-${phase.phase}, var(--phase-unknown))` }} aria-hidden="true" />
-            {phaseName(phase.phase)}
+            {phaseName(phase.phase)}{CODES[phase.phase] ? <span className="readout text-fg-3" aria-hidden="true">· {CODES[phase.phase]}</span> : null}
             <span className="readout text-fg-3">{clock(phase.end_s - phase.start_s)}</span>
           </button>
         ))}

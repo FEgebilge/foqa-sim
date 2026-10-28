@@ -77,12 +77,14 @@ export function mockChallenges(status: string | null): ChallengesApi {
       const lines: PreflightLine[] = recording
         ? [
           { name: "sim", state: "ok", text: "MSFS connected, recording flight-mock." },
-          types.length || definition.aircraft?.classes?.length
-            ? { name: "aircraft", state: "fail", text: `A C172 (light) is loaded; this challenge needs a ${types.join(" or ") || "transport aircraft"}.`, fix: "Load one; flown as it is, the attempt won't count." }
-            : { name: "aircraft", state: "ok", text: "Any aircraft." },
+          !(types.length || definition.aircraft?.classes?.length)
+            ? { name: "aircraft", state: "ok", text: "Any aircraft." }
+            : types.includes("C172") || (!types.length && definition.aircraft?.classes?.includes("light"))
+              ? { name: "aircraft", state: "ok", text: "C172 (light): fits this challenge." }
+              : { name: "aircraft", state: "fail", text: `A C172 (light) is loaded; this challenge needs a ${types.join(" or ") || "transport aircraft"}.`, fix: "Load one; flown as it is, the attempt won't count." },
         ]
         : [
-          { name: "sim", state: "fail", text: "MSFS isn't connected.", fix: "Start MSFS 2024, then load a flight." },
+          { name: "sim", state: "fail", text: "MSFS isn't connected.", fix: "Start MSFS, then load a flight." },
           { name: "aircraft", state: "unknown", text: "Checked once a flight is loaded." },
         ];
       const weather = definition.conditions && (definition.conditions.wind || definition.conditions.crosswind_kt || definition.conditions.tailwind_kt);

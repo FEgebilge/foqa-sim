@@ -1,0 +1,18 @@
+{
+  "title": "Dialog",
+  "description": "A focused surface for decisions that need attention.",
+  "category": "Disclosure",
+  "kind": "component",
+  "dependencies": [
+    "@radix-ui/react-dialog",
+    "lucide-react",
+    "motion"
+  ],
+  "requires": [],
+  "tags": [
+    "modal",
+    "overlay"
+  ],
+  "source": "arc",
+  "canvas": []
+}

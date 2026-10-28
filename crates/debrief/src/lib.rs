@@ -119,17 +119,12 @@ pub fn journals(dir: &Path) -> Vec<PathBuf> {
 }
 
 /// Compacts each journal (see `recorder::compact_file`), reporting on stderr.
-/// A journal that fails or is cut off stays as it is. Returns how many did
-/// not compact.
+/// A journal that fails stays as it is. Returns how many did not compact.
 pub fn compact_all(journals: impl IntoIterator<Item = PathBuf>) -> usize {
     let mut left = 0;
     for journal in journals {
         match recorder::compact_file(&journal) {
-            Ok(Some(dest)) => eprintln!("compacted: {}", dest.display()),
-            Ok(None) => {
-                left += 1;
-                eprintln!("{}: cut off, left as is", journal.display());
-            }
+            Ok(dest) => eprintln!("compacted: {}", dest.display()),
             Err(e) => {
                 left += 1;
                 eprintln!("{}: compaction failed: {e}", journal.display());
@@ -164,13 +159,18 @@ pub fn storage_usage(dir: &Path) -> StorageUsage {
     }
 }
 
-/// Deletes the stored files of flight `id` in `dir`: its journal, compact
-/// flight and raw capture, those exact names and nothing else. Returns how
-/// many were there.
+/// The names of flight `id`'s stored files that may exist: its raw capture,
+/// journal and compact flight, those exact names and nothing else.
+pub fn flight_file_names(id: &str) -> [String; 3] {
+    suffixes().map(|ext| format!("{id}{ext}"))
+}
+
+/// Deletes the stored files of flight `id` in `dir` (`flight_file_names`).
+/// Returns how many were there.
 pub fn delete_flight(dir: &Path, id: &str) -> io::Result<usize> {
     let mut deleted = 0;
-    for ext in suffixes() {
-        match fs::remove_file(dir.join(format!("{id}{ext}"))) {
+    for name in flight_file_names(id) {
+        match fs::remove_file(dir.join(name)) {
             Ok(()) => deleted += 1,
             Err(e) if e.kind() == io::ErrorKind::NotFound => {}
             Err(e) => return Err(e),
@@ -183,7 +183,7 @@ pub fn delete_flight(dir: &Path, id: &str) -> io::Result<usize> {
 pub struct Station {
     rules: Vec<Rule>,
     profiles: ProfileSet,
-    /// The landing assessment (`scoring/landing-2.yaml`).
+    /// The landing assessment (`scoring/landing-3.yaml`).
     method: Method,
     /// Hash of the rules, the profiles, the scoring method and the analysis
     /// code (`build.rs`): a summary made by another station is stale.
@@ -193,7 +193,7 @@ pub struct Station {
 impl Station {
     pub fn new(rules: Vec<Rule>) -> Result<Self, Error> {
         let profiles = ProfileSet::shipped()?;
-        let method = Method::landing_2()?;
+        let method = Method::landing_3()?;
         let mut h = DefaultHasher::new();
         format!("{rules:?}{profiles:?}{method:?}{}", env!("SOURCE_HASH")).hash(&mut h);
         Ok(Self {
@@ -221,10 +221,12 @@ impl Station {
         &self.profiles
     }
 
-    /// `None` when the flight has no air/ground data to analyse.
-    pub fn analyse(&self, id: String, flight: Flight) -> Option<Analysis<'_>> {
-        let track = Track::new(&flight)?;
+    /// `None` when the flight has no air/ground data to analyse. The type
+    /// profile's unreliable signals are read as no data throughout.
+    pub fn analyse(&self, id: String, mut flight: Flight) -> Option<Analysis<'_>> {
         let selection = self.profiles.select(&flight);
+        selection.mask(&mut flight);
+        let track = Track::new(&flight)?;
         Some(Analysis {
             events: rules::evaluate(&self.rules, &selection, &flight, &track),
             touchdowns: touchdowns(&flight, &track),
@@ -284,6 +286,10 @@ impl Analysis<'_> {
         skills: SkillsSummary,
     ) -> FlightSummary {
         let t = &self.track.t;
+        let flown = Flown::of(
+            &self.track,
+            &self.flight.resample("sim.slew", &self.track.t),
+        );
         let mut event_counts: BTreeMap<_, usize> = Level::ALL.map(|l| (l, 0)).into();
         for e in events {
             *event_counts.entry(e.level).or_default() += 1;
@@ -310,10 +316,8 @@ impl Analysis<'_> {
             assessment: detail.into(),
             landings_detail: self.landings_detail(detail),
             skills,
-            flown: Flown::of(
-                &self.track,
-                &self.flight.resample("sim.slew", &self.track.t),
-            ),
+            kind: RecordingKind::of(&flown),
+            flown,
             rule_counts: detail
                 .parts
                 .iter()
@@ -354,6 +358,7 @@ impl Analysis<'_> {
                 lfl_version: self.flight.lfl_version(),
                 profile: self.selection.to_string(),
                 class: self.selection.class.map(|c| c.to_string()),
+                identification: (&self.selection).into(),
                 profile_limits: self.profile_limits(),
                 phase_values: PhaseField::ALL
                     .map(|f| (f.name(), self.selection.phase_value(f)))
@@ -800,6 +805,14 @@ mod tests {
         assert!(!json.contains("NaN") && !json.contains("inf"));
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         let flight = &v["flight"];
+        // The capture predates the identity: nothing is known, every type
+        // limit is off, and it is still taken for an airplane.
+        let id = &flight["identification"];
+        assert_eq!(
+            (id["matched"].as_str(), id["runway_landing"].as_bool()),
+            (Some("unknown"), Some(true))
+        );
+        assert_eq!(id["unchecked"].as_array().unwrap().len(), 9);
         assert_eq!(flight["profile"], "no aircraft identity, unknown class");
         assert_eq!(flight["worst_level"], "medium");
 

@@ -1,4 +1,4 @@
-//! The debrief's landing-2 assessment of a synthetic landing (`testkit`),
+//! The debrief's landing-3 assessment of a synthetic landing (`testkit`),
 //! against a snapshot of its wire form. `UPDATE_SNAPSHOTS=1` rewrites it.
 
 use std::fs;
@@ -52,18 +52,18 @@ fn analysed() -> debrief::Debrief {
 fn the_assessment_matches_its_snapshot() {
     let d = analysed();
     let a = &d.flight.assessment_detail;
-    assert_eq!(a.method, "landing-2");
+    assert_eq!(a.method, "landing-3");
     assert_eq!(a.graded_by, Some(0));
     let [landing] = &a.landings[..] else {
         panic!("{:?}", a.landings)
     };
     assert_eq!(landing.status, "scored");
     assert_eq!(landing.domains.len(), 6);
-    // The summary carries the flight's landing-2 grade and score.
+    // The summary carries the flight's landing-3 grade and score.
     let s = &d.flight.summary.assessment;
     assert_eq!(
         (s.method.as_str(), s.score, s.grade),
-        ("landing-2", a.score, a.grade)
+        ("landing-3", a.score, a.grade)
     );
     // Every finding names its event; every domain that lost points says why.
     for dom in &landing.domains {

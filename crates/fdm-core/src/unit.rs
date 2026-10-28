@@ -7,6 +7,8 @@ pub enum Unit {
     Feet,
     Knots,
     Degrees,
+    /// Angular rate, e.g. the pitch rate at rotation.
+    DegreesPerSecond,
     /// Acceleration in multiples of standard gravity.
     G,
     FeetPerMinute,
@@ -19,6 +21,8 @@ pub enum Unit {
     Seconds,
     /// Dimensionless ratio, e.g. simulation rate.
     Ratio,
+    /// Mach number: true airspeed over the local speed of sound.
+    Mach,
     /// Two-state value recorded as 0.0 / 1.0.
     Discrete,
     /// Detent position, e.g. flap handle index.
@@ -31,6 +35,7 @@ impl Unit {
             Self::Feet => "ft",
             Self::Knots => "kt",
             Self::Degrees => "deg",
+            Self::DegreesPerSecond => "deg/s",
             Self::G => "g",
             Self::FeetPerMinute => "fpm",
             Self::Dots => "dot",
@@ -39,6 +44,7 @@ impl Unit {
             Self::Hectopascal => "hPa",
             Self::Pounds => "lb",
             Self::Seconds => "s",
+            Self::Mach => "M",
             Self::Ratio | Self::Discrete | Self::Index => "",
         }
     }

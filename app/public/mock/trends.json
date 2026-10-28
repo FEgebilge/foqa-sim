@@ -797,6 +797,56 @@
    "per_100": 5,
    "earlier_per_100": 10,
    "recent_per_100": 0
+  },
+  {
+   "rule": "rejected-takeoff",
+   "title": "Rejected takeoff",
+   "level": "high",
+   "flights": 1,
+   "count": 1,
+   "per_100": 5,
+   "earlier_per_100": 0,
+   "recent_per_100": 10
+  },
+  {
+   "rule": "rotation-rate",
+   "title": "Rotation rate out of range",
+   "level": "medium",
+   "flights": 3,
+   "count": 3,
+   "per_100": 15,
+   "earlier_per_100": 20,
+   "recent_per_100": 10
+  },
+  {
+   "rule": "early-flap-retraction",
+   "title": "Flaps retracted below 400 ft after takeoff",
+   "level": "low",
+   "flights": 2,
+   "count": 2,
+   "per_100": 10,
+   "earlier_per_100": 10,
+   "recent_per_100": 10
+  },
+  {
+   "rule": "mmo-exceedance",
+   "title": "Maximum operating Mach exceeded",
+   "level": "advisory",
+   "flights": 1,
+   "count": 1,
+   "per_100": 5,
+   "earlier_per_100": 0,
+   "recent_per_100": 10
+  },
+  {
+   "rule": "overweight-landing",
+   "title": "Landing above the maximum landing weight",
+   "level": "low",
+   "flights": 1,
+   "count": 1,
+   "per_100": 5,
+   "earlier_per_100": 0,
+   "recent_per_100": 10
   }
  ],
  "by_aircraft": [

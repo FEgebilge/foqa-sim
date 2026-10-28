@@ -1,6 +1,6 @@
 [package]
 name = "assess"
-description = "Landing assessment landing-2: a standards-based score of each approach and landing."
+description = "Landing assessment landing-3: a standards-based score of each approach and landing."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

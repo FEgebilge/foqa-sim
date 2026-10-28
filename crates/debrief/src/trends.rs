@@ -10,7 +10,7 @@ use rules::{Domain, Level};
 use serde::{Deserialize, Serialize};
 
 use crate::assessment::{domain_short, domain_title};
-use crate::{FlightSummary, Flown, LandingFacts, SkillsSummary, Station, iso_utc};
+use crate::{FlightSummary, Flown, LandingFacts, RecordingKind, SkillsSummary, Station, iso_utc};
 
 /// A comparison of the newest half with the older half needs this many in
 /// each, else it is `None`.
@@ -74,10 +74,10 @@ impl Recordings {
     fn of(recordings: &[&FlightSummary]) -> Self {
         let (mut ground_only, mut too_short, mut partial) = (0, 0, 0);
         for f in recordings {
-            match (counts(&f.flown), f.flown.airborne_s > 0.0) {
-                (false, false) => ground_only += 1,
-                (false, true) => too_short += 1,
-                (true, _) => {
+            match RecordingKind::of(&f.flown) {
+                RecordingKind::GroundOnly => ground_only += 1,
+                RecordingKind::TooShort => too_short += 1,
+                RecordingKind::Flight => {
                     partial += usize::from(f.flown.started_airborne || f.flown.ended_airborne)
                 }
             }
@@ -96,6 +96,16 @@ impl Recordings {
 /// practice from final or a flight left in the air counts.
 fn counts(f: &Flown) -> bool {
     f.airborne_s >= MIN_FLOWN_S && f.distance_nm >= MIN_FLOWN_NM && f.max_gs_kt >= MIN_FLOWN_GS_KT
+}
+
+impl RecordingKind {
+    pub fn of(f: &Flown) -> Self {
+        match (counts(f), f.airborne_s > 0.0) {
+            (true, _) => Self::Flight,
+            (false, true) => Self::TooShort,
+            (false, false) => Self::GroundOnly,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -590,6 +600,7 @@ mod tests {
                 max_gs_kt: 450.0,
                 ..Default::default()
             },
+            kind: RecordingKind::Flight,
         }
     }
 
@@ -940,6 +951,24 @@ mod tests {
         ] {
             assert_eq!(counts(&f), counted, "{f:?}");
         }
+    }
+
+    #[test]
+    fn a_recording_is_a_flight_too_short_or_ground_only() {
+        assert_eq!(
+            RecordingKind::of(&flown(3000.0, 300.0, 450.0)),
+            RecordingKind::Flight
+        );
+        assert_eq!(
+            RecordingKind::of(&flown(15.0, 0.3, 90.0)),
+            RecordingKind::TooShort
+        );
+        assert_eq!(
+            RecordingKind::of(&Flown::default()),
+            RecordingKind::GroundOnly
+        );
+        let wire = serde_json::to_value(RecordingKind::TooShort).unwrap();
+        assert_eq!(wire, "too_short");
     }
 
     #[test]

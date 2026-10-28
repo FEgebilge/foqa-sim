@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { ArrowDownRight, ArrowUpRight, Minus } from "lucide-react";
 import { SortableDataTable, type DataColumn } from "@ui/components/sortable-data-table/sortable-data-table";
 import { Tooltip } from "@ui/components/tooltip/tooltip";
-import { levelRank, number } from "../../lib/format";
+import { levelRank, lengthM, number } from "../../lib/format";
 import { delta, direction } from "../../lib/trends";
 import type { Trends } from "../../types";
 import { LevelBadge } from "../level";
@@ -31,8 +31,8 @@ const eventColumns: DataColumn<EventRow>[] = [
     render: (_, row) => <span className="flex min-w-0 flex-col leading-tight"><span className="truncate font-medium">{row.title}</span><span className="readout truncate text-[11px] text-fg-3">{row.rule}</span></span>,
   },
   { key: "rank", label: "Level", width: 110, numeric: false, render: (_, row) => <LevelBadge level={row.event.level} /> },
-  { key: "flights", label: "Flights", width: 90, numeric: true, render: (_, row) => <span className="readout">{row.flights}</span> },
-  { key: "per_100", label: "Per 100 flights", width: 140, numeric: true, render: (_, row) => <span className="readout">{number(row.per_100, 1)}</span> },
+  { key: "flights", label: "Flights", width: 104, numeric: true, render: (_, row) => <span className="readout">{row.flights}</span> },
+  { key: "per_100", label: "Per 100 flights", width: 170, numeric: true, render: (_, row) => <span className="readout">{number(row.per_100, 1)}</span> },
   {
     key: "change", label: "Recent vs earlier", width: 160, numeric: false,
     render: (_, row) => (
@@ -72,7 +72,7 @@ const airportColumns: DataColumn<AirportRow>[] = [
   { key: "landings", label: "Landings", numeric: true, render: (_, r) => <span className="readout">{r.landings}</span> },
   { key: "mean_score", label: "Mean score", numeric: true, render: (_, r) => <span className="readout">{r.mean_score === null ? "–" : number(r.mean_score, 1)}</span> },
   { key: "in_tdz", label: "In zone", numeric: true, render: (_, r) => <span className="readout">{r.in_tdz === null ? "–" : `${Math.round(r.in_tdz * 100)}%`}</span> },
-  { key: "mean_cross_m", label: "Mean offset", numeric: true, render: (_, r) => <span className="readout">{r.mean_cross_m === null ? "–" : `${r.mean_cross_m >= 0 ? "R" : "L"} ${number(Math.abs(r.mean_cross_m), 1)} m`}</span> },
+  { key: "mean_cross_m", label: "Mean offset", numeric: true, render: (_, r) => <span className="readout">{r.mean_cross_m === null ? "–" : `${r.mean_cross_m >= 0 ? "R" : "L"} ${lengthM(Math.abs(r.mean_cross_m), 1)}`}</span> },
 ];
 
 export const ByAirportTable = ({ rows }: { rows: AirportRow[] }) => (

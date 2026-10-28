@@ -520,7 +520,7 @@ impl Setup {
                 "sim_running",
                 "MSFS 2024 running",
                 State::Pass,
-                "Installing can fail while it uses the package files; then close the flight or the sim and try again. Changes surely load the next time it starts.",
+                "Installing can fail while it uses the package files; then close the flight or the sim and try again. Changes load the next time it starts.",
             )
         } else {
             Check::new(
@@ -798,10 +798,10 @@ fn same(a: &Path, b: &Path) -> bool {
 
 fn recorder_check(recorder: &RecorderStatus, running: bool) -> Check {
     let (state, detail) = match recorder {
-        RecorderStatus::Connected => (State::Pass, "Connected to MSFS 2024.".to_owned()),
+        RecorderStatus::Connected => (State::Pass, "Connected to MSFS.".to_owned()),
         RecorderStatus::Recording { .. } => (State::Pass, "Recording this flight.".to_owned()),
         RecorderStatus::WaitingForSim if running => (State::Warn, "MSFS 2024 is running but has not accepted the connection yet; it does once the sim reaches the main menu.".to_owned()),
-        RecorderStatus::WaitingForSim => (State::Pass, "Waiting for MSFS 2024; connects on its own when it starts.".to_owned()),
+        RecorderStatus::WaitingForSim => (State::Pass, "Waiting for MSFS; connects on its own when it starts.".to_owned()),
         RecorderStatus::Error { message } => (State::Fail, message.clone()),
     };
     Check::new("recorder", "Recorder", state, detail)

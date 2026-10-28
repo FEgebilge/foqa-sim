@@ -32,10 +32,6 @@ const RIDE_BAND_TOP: &str = "extremely uncomfortable";
 const SIDESLIP_MAX_AAL_FT: f64 = 10_000.0;
 /// Below this the sideslip vane means nothing (a hop, a slew, a stall).
 const SIDESLIP_MIN_IAS_KT: f64 = 40.0;
-/// Pitch is read over this many track points (0.5 s) for its rate.
-const PITCH_RATE_LAG: usize = 4;
-/// Rotation starts when the pitch is this far above its value at the start of the roll.
-const ROTATION_PITCH_DEG: f64 = 1.0;
 /// Fuel that rises by more than this between take-off and landing was added.
 const REFUEL_KG: f64 = 1.0;
 /// The top of descent is the last point this close to the flight's highest.
@@ -345,18 +341,7 @@ impl<'a> Ctx<'a> {
         let roll = self
             .span(Phase::Takeoff, false)
             .filter(|_| self.transport)?;
-        let r = points(self.track, roll.start, roll.end);
-        let pitch = &self.track.pitch_deg;
-        let start = r
-            .clone()
-            .find(|&i| pitch[i] - pitch[r.start] >= ROTATION_PITCH_DEG)?;
-        let rate =
-            |i: usize| (pitch[i] - pitch[i - PITCH_RATE_LAG]) * TRACK_HZ / PITCH_RATE_LAG as f64;
-        let rates = (start.max(PITCH_RATE_LAG)..r.end).map(rate);
-        rates
-            .filter(|r| r.is_finite())
-            .max_by(f64::total_cmp)
-            .map(r1)
+        analyzer::rotation_rate(self.track, points(self.track, roll.start, roll.end)).map(r1)
     }
 
     fn fuel(&self) -> Fuel {
@@ -652,6 +637,23 @@ mod tests {
         assert_eq!(s.ride.lateral_rms, None);
         assert_eq!(SkillsSummary::from(&s).ap_share, None);
         assert!(s.automation.airborne_s > 0.0);
+    }
+
+    #[test]
+    fn ride_bands_take_the_lowest_iso_2631_band() {
+        // Annex C bands overlap (0.5-1 fairly, 0.8-1.6 uncomfortable, ...).
+        let bands = [0.3, 0.55, 0.9, 1.4, 2.2, 2.5].map(ride_band);
+        assert_eq!(
+            bands,
+            [
+                "not uncomfortable",
+                "a little uncomfortable",
+                "fairly uncomfortable",
+                "uncomfortable",
+                "very uncomfortable",
+                "extremely uncomfortable"
+            ]
+        );
     }
 
     #[test]

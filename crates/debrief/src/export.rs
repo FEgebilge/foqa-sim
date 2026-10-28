@@ -66,11 +66,22 @@ pub fn existing_extra(format: Format, path: &Path) -> Option<PathBuf> {
 
 /// Long-format Parquet of the recorded samples, and the events beside it
 /// (`events_path`). Needs no analysis, so any readable flight exports.
+#[cfg(feature = "parquet")]
 pub fn parquet(flight: &Flight, options: Options, path: &Path) -> Result<Vec<PathBuf>, Error> {
     let events = events_path(path);
     analyzer::export::write_samples(flight, path)?;
     analyzer::export::write_events(flight, &events, options.identity)?;
     Ok(vec![path.to_owned(), events])
+}
+
+/// This build has no Parquet writer (the `parquet` feature).
+#[cfg(not(feature = "parquet"))]
+pub fn parquet(_: &Flight, _: Options, _: &Path) -> Result<Vec<PathBuf>, Error> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "this build has no Parquet export",
+    )
+    .into())
 }
 
 /// Writes the logbook to `path`; how many flights it holds.
@@ -91,10 +102,11 @@ const PATH_HZ: usize = 1;
 const COORD_DECIMALS: usize = 6;
 /// Line colours of the flight phases, the app's dark-theme palette
 /// (app/src/lib/palette.ts), as `#rrggbb`.
-const PHASE_COLORS: [(&str, &str); 8] = [
+const PHASE_COLORS: [(&str, &str); 9] = [
     ("Standing", "#5d6679"),
     ("Taxi", "#9a8b5e"),
     ("Takeoff", "#34b87e"),
+    ("RejectedTakeoff", "#c97a55"),
     ("InitialClimb", "#3cbab2"),
     ("EnRoute", "#5294e4"),
     ("Approach", "#9c79e8"),

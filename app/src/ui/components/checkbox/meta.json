@@ -1,0 +1,17 @@
+{
+  "title": "Checkbox",
+  "description": "A binary choice with a precise, legible state.",
+  "category": "Inputs",
+  "kind": "component",
+  "dependencies": [
+    "@radix-ui/react-checkbox",
+    "motion"
+  ],
+  "requires": [],
+  "tags": [
+    "field",
+    "form"
+  ],
+  "source": "arc",
+  "canvas": []
+}

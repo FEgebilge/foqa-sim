@@ -4,14 +4,20 @@ export type Route = { screen: "flights" } | { screen: "setup" } | { screen: "dev
 
 /** Hash routes, so the Tauri webview and a static build need no server rewrites: #/, #/setup, #/devlog, #/trends, #/flight/<id>
  * and #/challenges[/<key>]. */
-function parse(hash: string): Route {
-  if (hash === SETUP_HREF) return { screen: "setup" };
-  if (hash === DEVLOG_HREF) return { screen: "devlog" };
-  if (hash === TRENDS_HREF) return { screen: "trends" };
-  const challenge = /^#\/challenges(?:\/(.+))?$/.exec(hash);
-  if (challenge) return { screen: "challenges", key: challenge[1] ? decodeURIComponent(challenge[1]) : undefined };
-  const match = /^#\/flight\/(.+)$/.exec(hash);
-  return match ? { screen: "debrief", id: decodeURIComponent(match[1]!) } : { screen: "flights" };
+export function parse(hash: string): Route {
+  // A hand-typed or truncated link (`#/flight/%`) must never throw while rendering: it opens the flights list.
+  try {
+    if (hash === SETUP_HREF) return { screen: "setup" };
+    if (hash === DEVLOG_HREF) return { screen: "devlog" };
+    if (hash === TRENDS_HREF) return { screen: "trends" };
+    const challenge = /^#\/challenges(?:\/(.+))?$/.exec(hash);
+    if (challenge) return { screen: "challenges", key: challenge[1] ? decodeURIComponent(challenge[1]) : undefined };
+    const match = /^#\/flight\/(.+)$/.exec(hash);
+    if (match) return { screen: "debrief", id: decodeURIComponent(match[1]!) };
+  } catch (e) {
+    if (!(e instanceof URIError)) throw e;
+  }
+  return { screen: "flights" };
 }
 
 const subscribe = (notify: () => void) => {

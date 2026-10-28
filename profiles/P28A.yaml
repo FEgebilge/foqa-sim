@@ -1,0 +1,22 @@
+# Piper PA-28-181 Archer III (ICAO P28A, Doc 8643) type profile, G1000 serials
+# 2843701 and up. Schema: docs/rules.md.
+#
+# P28A also covers the other PA-28 Cherokee/Warrior/Archer variants; the speeds
+# below are the Archer III's and may differ a few knots on the others.
+# No vle/vlo: fixed gear. No tail_contact, hard_landing_g, max_tailwind: not
+# published in the POH.
+type: P28A
+name: Piper PA-28-181 Archer III
+class: light
+airframe: { kind: airplane, engine: piston, engines: 1, gear: fixed }
+mlw: { value: 2550 lb, source: "Archer III POH (VB-2266), Section 1.11 Maximum Weights: maximum landing weight 2550 lbs (normal category), https://www.andrews.edu/cp/aviation/resources/archeriii-poh.pdf" }
+vmo: { value: 154 kt, source: &poh "Piper PA-28-181 Archer III POH/AFM (G1000, SN 2843701+, report VB-2266, 16 Apr 2013), Section 2.3 Airspeed Limitations p. 2-1, https://www.andrews.edu/cp/aviation/resources/archeriii-poh.pdf", note: "VNE 154 KIAS (148 KCAS); VNO 125 KIAS; Va 113 KIAS at 2550 lb" }
+max_crosswind: { value: 17 kt, source: "Archer III POH (VB-2266), Section 4 Performance summary p. 4-20, same URL", note: "maximum demonstrated, not a limitation" }
+flaps:
+  - { vfe: { value: 102 kt, source: *poh, note: "VFE 102 KIAS, Section 2.3 p. 2-2; flaps 0/10/25/40 deg" } }
+vso: { value: 45 kt, source: "Archer III POH (VB-2266), Section 2.5 Airspeed Indicator Markings p. 2-2, same URL", note: "white arc 45-102 KIAS: lower limit is VSO (full flaps, 2550 lb; Section 5 stall speed 45 KIAS)" }
+approach_speed:
+  source: "Archer III POH (VB-2266), Section 4.5m Approach and Landing checklist p. 4-20, same URL"
+  note: "Final Approach Speed (Flaps 40 deg) 66 KIAS, one value, no range; initial approach 75 KIAS"
+  flaps:
+    - { flap: 40 deg, ias: [66 kt, 66 kt] }

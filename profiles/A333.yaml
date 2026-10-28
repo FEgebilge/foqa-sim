@@ -5,6 +5,9 @@
 type: A333
 name: Airbus A330-300 (A330 family; A332 -200 shares these limits)
 class: transport
+airframe: { kind: airplane, engine: jet, engines: 2, gear: retractable }
+mlw: { value: 412264 lb, source: "Airbus A330 Aircraft Characteristics - Airport and Maintenance Planning, Aug 01/22, subject 3-5-0 (A330-300: 137 kt at MLW 187 000 kg / 412 264 lb), https://www.aircraft.airbus.com/sites/g/files/jlcbta126/files/2023-02/Airbus-Commercial-Aircraft-AC-A330.pdf", note: "the weight the Vref table is anchored to; other A330 variants differ (A330-200 182 000 kg)" }
+aliases: [A330-300]
 tail_contact:
   takeoff: { value: 14.4 deg, source: "A333 Chicago O'Hare 2013 incident summary https://dru10.imibo.com/accidents-and-incidents/a333-chicago-ohare-il-usa-2013 (tail contact pitch 10.1 deg full compression to 14.4 deg full rebound)", approximate: true, note: "struts extended/rebound; page not fetchable directly, from search result text" }
   landing: { value: 10.1 deg, source: "same incident summary as takeoff", approximate: true, note: "struts fully compressed; from search result text" }
@@ -19,3 +22,9 @@ flaps:
   - { up_to: 14 deg, vfe: { value: 196 kt, source: *sheet, approximate: true, note: "CONF 2 (20/14); speed from the unofficial sheet, angle pairing from forum/sim manual" } }
   - { up_to: 22 deg, vfe: { value: 186 kt, source: *sheet, approximate: true, note: "CONF 3 (23/22); unofficial sheet, angle from forum/sim manual" } }
   - { vfe: { value: 180 kt, source: *sheet, approximate: true, note: "CONF FULL (23/32); unofficial sheet, angle from forum/sim manual" } }
+vref:
+  source: "Airbus A330 Aircraft Characteristics - Airport and Maintenance Planning, Aug 01/22, subject 3-5-0 Final Approach Speed (A330-300: 137 kt at MLW 187 000 kg), https://www.aircraft.airbus.com/sites/g/files/jlcbta126/files/2023-02/Airbus-Commercial-Aircraft-AC-A330.pdf"
+  approximate: true
+  note: "published value is the indicated airspeed at threshold at maximum landing weight and the maximum certificated landing flap; lighter weights scaled by sqrt(W/MLW) (Vref is 1.3 Vs and Vs goes with sqrt(W) at constant CL max); the FULL flap angle (32 deg) is from the sim-manual/forum pairing used for the flap bands; other landing flaps read a few kt higher, not published"
+  flaps:
+    - { flap: 32 deg, weights_kg: [121550, 140250, 158950, 187000], ias: [110.5 kt, 118.5 kt, 126.5 kt, 137 kt] }

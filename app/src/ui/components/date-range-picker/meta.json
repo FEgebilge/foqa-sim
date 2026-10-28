@@ -1,0 +1,17 @@
+{
+  "title": "Date range picker",
+  "description": "A range picker that grows from its trigger into two months with presets and a stretching range highlight.",
+  "category": "Inputs",
+  "kind": "component",
+  "dependencies": [
+    "lucide-react",
+    "motion"
+  ],
+  "requires": [],
+  "tags": [
+    "inputs",
+    "new"
+  ],
+  "source": "arc",
+  "canvas": []
+}

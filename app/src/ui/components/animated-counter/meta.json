@@ -1,0 +1,16 @@
+{
+  "title": "Animated counter",
+  "description": "Give changing totals a clear sense of movement.",
+  "category": "Data",
+  "kind": "component",
+  "dependencies": [
+    "motion"
+  ],
+  "requires": [],
+  "tags": [
+    "data",
+    "motion"
+  ],
+  "source": "arc",
+  "canvas": []
+}

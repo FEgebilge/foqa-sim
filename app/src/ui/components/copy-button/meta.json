@@ -1,0 +1,17 @@
+{
+  "title": "Copy button",
+  "description": "Copy a value with immediate confirmation.",
+  "category": "Actions",
+  "kind": "component",
+  "dependencies": [
+    "lucide-react",
+    "motion"
+  ],
+  "requires": [],
+  "tags": [
+    "action",
+    "utility"
+  ],
+  "source": "arc",
+  "canvas": []
+}

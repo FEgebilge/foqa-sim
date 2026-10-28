@@ -47,7 +47,7 @@ fn flown(
     let selection = profiles.select(&flight);
     let found = evaluate(&rules, &selection, &flight, &track);
     let tds = touchdowns(&flight, &track);
-    Method::landing_2().unwrap().assess(&Landing {
+    Method::landing_3().unwrap().assess(&Landing {
         flight: &flight,
         track: &track,
         selection: &selection,
@@ -111,7 +111,8 @@ fn a_stable_landing_on_its_aiming_point_is_good() {
         c.unwrap_or_else(|| panic!("no {id}")).ell
     };
     assert_eq!([ell("A1"), ell("C1"), ell("D1")], [0.0, 0.0, 0.0]);
-    // Threshold crossed at 42 ft: 8 ft under 50, within 10 ft.
+    // Threshold crossed at 42 ft: 7 ft over the 35 ft wheel height of a
+    // 50 ft glidepath (jet eye to wheel 15 ft), within 15 ft.
     assert!(ell("B1") > 0.0 && ell("B1") <= 0.5);
     assert_eq!(score.stable_from_ft.map(f64::round), Some(1000.0));
 }
@@ -135,6 +136,35 @@ fn the_selected_speed_is_only_a_debrief_fallback() {
         score.partial,
         ["No reference speed (Vref) for TEST, so speed items were not graded"]
     );
+}
+
+/// The profile's eye-to-wheel height replaces the class estimate in B1:
+/// 25 ft instead of the jet's 15 ft lowers the wheel height of the path by
+/// 10 ft, so the same crossing reads 10 ft higher.
+#[test]
+fn the_profile_eye_to_wheel_height_sets_the_threshold_crossing() {
+    let b1 = |profile: &str| {
+        let profiles = ProfileSet::load([("TEST", profile)]).unwrap();
+        let Assessment::Scored { score, .. } = assess(&profiles, true, true) else {
+            panic!("not scored")
+        };
+        criteria(&score, "B1")[0].value
+    };
+    let eye = format!("{PROFILE}eye_to_wheel: {{ value: 25 ft, source: synthetic }}\n");
+    assert!((b1(&eye) - b1(PROFILE) - 10.0).abs() < 1e-9);
+}
+
+/// A helicopter's landing is not given the airplane runway score.
+#[test]
+fn a_helicopter_landing_is_not_assessed() {
+    let heli = format!("{PROFILE}airframe: {{ kind: helicopter }}\n");
+    let profiles = ProfileSet::load([("TEST", heli.as_str())]).unwrap();
+    let missing = vec![NOT_RUNWAY_KIND];
+    assert_eq!(
+        assess(&profiles, true, false),
+        Assessment::Insufficient { missing }
+    );
+    assert!(not_scored_text(&[NOT_RUNWAY_KIND]).starts_with("Not assessed for this aircraft kind"));
 }
 
 #[test]
@@ -250,4 +280,57 @@ fn data_gaps_make_their_criteria_n_a() {
             "Threshold crossing height was not graded: no radio altitude at the threshold"
         ]
     );
+}
+
+/// A light aircraft aims at 150 m, not the 400 m aiming point of this
+/// 3000 m runway, and crosses the threshold against its own wheel path.
+#[test]
+fn a_light_aircraft_aims_short_of_the_airline_aiming_point() {
+    let light = "type: TEST\nname: Synthetic light aircraft\nclass: light\n";
+    let profiles = ProfileSet::load([("TEST", light)]).unwrap();
+    let Assessment::Scored { score, .. } = assess(&profiles, true, false) else {
+        panic!("not scored")
+    };
+    let value = |id: &str| criteria(&score, id)[0].value;
+    // Down 400 m past the threshold: 250 m = 820 ft past the target.
+    assert!(
+        (value("C1") - 250.0 / 0.3048).abs() < 2.0,
+        "{}",
+        value("C1")
+    );
+    // 41.9 ft against 150 m x tan 3 deg = 25.8 ft less 6 ft eye to wheel.
+    assert!((value("B1") - (41.9 - 19.8)).abs() < 1.0, "{}", value("B1"));
+}
+
+/// A crash the sim reports during the landing caps it as an excursion.
+#[test]
+fn a_crash_on_the_landing_caps_the_score() {
+    let events = [
+        (0.0, identity("TEST")),
+        (0.0, SimEvent::Airport(runway_behind_touchdown(400.0))),
+        (TD_S + 1.0, SimEvent::Crashed),
+    ];
+    let journal = journal(&events, AIRLINER_LB, TD_S + ROLLOUT_S, |t| {
+        landing(t, TD_S, 1.2)
+    });
+    let flight = Flight::read(&journal[..]).unwrap();
+    let track = Track::new(&flight).unwrap();
+    let profiles = ProfileSet::load([("TEST", PROFILE)]).unwrap();
+    let (rules, selection) = (load(CORE).unwrap(), profiles.select(&flight));
+    let tds = touchdowns(&flight, &track);
+    let Assessment::Scored { score, .. } = Method::landing_3().unwrap().assess(&Landing {
+        flight: &flight,
+        track: &track,
+        selection: &selection,
+        touchdowns: &tds,
+        index: 0,
+        events: &evaluate(&rules, &selection, &flight, &track),
+        rules: &rules,
+        ranked: false,
+        gate_ft: None,
+        target_m: None,
+    }) else {
+        panic!("not scored")
+    };
+    assert_eq!(score.score, 0.0, "{:?}", score.caps);
 }
