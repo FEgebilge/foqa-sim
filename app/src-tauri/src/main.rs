@@ -16,6 +16,7 @@ mod insim;
 mod library;
 mod links;
 mod setup;
+mod store;
 mod updated;
 
 use std::panic::{self, AssertUnwindSafe};
@@ -51,7 +52,11 @@ macro_rules! handler {
             commands::list_flights,
             commands::debrief,
             commands::trends,
-            commands::delete_flight,
+            commands::delete_flights,
+            commands::restore_flights,
+            commands::purge_trash,
+            commands::flight_meta_get,
+            commands::flight_meta_set,
             commands::place_challenge,
             commands::challenges_list,
             commands::challenge_import,
@@ -224,6 +229,10 @@ fn start(app: &mut tauri::App) -> Result<(), Failure> {
     #[cfg(feature = "connect")]
     let shared = shared.with_hooks(Arc::clone(&connect) as Arc<dyn commands::AttemptHooks>);
     let shared = Arc::new(shared);
+    // Flights deleted more than `TRASH_KEEP` ago go for good.
+    shared
+        .store()
+        .purge(store::TRASH_KEEP, std::time::SystemTime::now());
     shared.in_sim(strip, view_commands);
     #[cfg(feature = "connect")]
     {
