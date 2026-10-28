@@ -94,3 +94,8 @@ Rules:
   comparison halves the scored landings, an event rate the flights.
 - `mean_cross_m` is signed (the average offset, right positive); `in_tdz` is the share of the
   airport's landings with a touchdown zone. Mean scores are over full-stop landings.
+
+`skills` (`docs/skills.md`) holds `{ap_share, ap_off_ft_median, autolands, vertical_rms_median,
+descent_level_s_median, fuel_kg_h: [{icao, median}]}` over the matching flights: the flights'
+autopilot shares averaged, the others medians (an autoland counts as 0 ft), fuel per type by ICAO.
+A flight without a measure is left out of it; with none the value is `null`.

@@ -82,11 +82,7 @@ impl Track {
             .step_by(Self::STEP_US as usize)
             .map(|us| first.add_us(us))
             .collect();
-        let sample = |name| {
-            t.iter()
-                .map(|&t| flight.at(name, t).unwrap_or(f64::NAN))
-                .collect::<Vec<_>>()
-        };
+        let sample = |name| flight.resample(name, &t);
 
         let known: Vec<_> = t
             .iter()

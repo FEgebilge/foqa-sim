@@ -25,6 +25,57 @@
       "score": 77.4,
       "confidence": "full"
     },
+    "landings_detail": [
+      {
+        "t_s": 259.209244,
+        "full_stop": true,
+        "icao": "LTBL",
+        "runway": "17",
+        "score": 77.4,
+        "grade": "fair",
+        "confidence": "full",
+        "domains": {
+          "stability": 2,
+          "energy": 0,
+          "point": 0,
+          "lateral": 0,
+          "contact": 0,
+          "rollout": 0
+        },
+        "sink_fpm": 200.02974995615358,
+        "peak_g": 1.2744001969894996,
+        "along_m": 385.9328039848353,
+        "cross_m": -5.205367805187599,
+        "zone": "In TDZ",
+        "tdz_m": 914.4,
+        "aiming_point_m": 400.0,
+        "lda_m": 2987.692626953125,
+        "crosswind_kt": 2.9910164518975684,
+        "tailwind_kt": 0.23201290569616168,
+        "bounces": 0
+      }
+    ],
+    "skills": {
+      "ap_share": 0.0,
+      "at_share": 0.0,
+      "ap_off_ft": null,
+      "autoland": false,
+      "vertical_rms": 0.18,
+      "ride_band": "not uncomfortable",
+      "fuel_kg_h": 31.0,
+      "fuel_kg_nm": 0.34,
+      "descent_level_s": 0.0
+    },
+    "rule_counts": {
+      "flap-overspeed": {
+        "level": "high",
+        "count": 1
+      },
+      "high-sink-light": {
+        "level": "medium",
+        "count": 1
+      }
+    },
     "lfl_version": 1,
     "profile": "C172 profile",
     "class": "light",
@@ -27148,6 +27199,77 @@
       27.012077,
       27.012077
     ]
+  },
+  "skills": {
+    "automation": {
+      "airborne_s": 208.1,
+      "ap_s": 0.0,
+      "at_s": 0.0,
+      "by_phase": [
+        {
+          "phase": "Takeoff",
+          "s": 4.3,
+          "ap_s": 0.0,
+          "at_s": 0.0
+        },
+        {
+          "phase": "InitialClimb",
+          "s": 74.1,
+          "ap_s": 0.0,
+          "at_s": 0.0
+        },
+        {
+          "phase": "EnRoute",
+          "s": 77.8,
+          "ap_s": 0.0,
+          "at_s": 0.0
+        },
+        {
+          "phase": "Approach",
+          "s": 45.4,
+          "ap_s": 0.0,
+          "at_s": 0.0
+        },
+        {
+          "phase": "Landing",
+          "s": 6.6,
+          "ap_s": 0.0,
+          "at_s": 0.0
+        }
+      ],
+      "ap_off_ft": null,
+      "manual_final_s": null,
+      "autoland": false
+    },
+    "ride": {
+      "vertical_rms": 0.18,
+      "ride_band": "not uncomfortable",
+      "lateral_rms": 0.25,
+      "sideslip_rms_deg": 1.92,
+      "max_bank_deg": {
+        "Approach": 3.3,
+        "EnRoute": 42.7,
+        "InitialClimb": 4.8,
+        "Landing": 1.6,
+        "Takeoff": 1.8
+      },
+      "rotation_rate_dps": null
+    },
+    "fuel": {
+      "fuel_used_kg": 2.0,
+      "fuel_kg_h": 31.0,
+      "fuel_kg_nm": 0.34,
+      "taxi_fuel_kg": 0.2,
+      "descent_level_s": 0.0,
+      "descent_levels": 0
+    },
+    "control": {
+      "manual_s": 208.1,
+      "reversals_per_min": {
+        "pitch": 20.2,
+        "roll": 13.8
+      }
+    }
   },
   "airports": [
     {

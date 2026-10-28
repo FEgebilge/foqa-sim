@@ -185,6 +185,59 @@ export interface FlightSummary {
   landings_detail?: LandingFacts[];
   /** Each rule that fired at low or above: its worst level and how often. */
   rule_counts?: Record<string, { level: Level; count: number }>;
+  /** The figures Trends needs from the flying skills (docs/skills.md); absent on older summaries. */
+  skills?: SkillsSummary;
+}
+
+/** ISO 2631-1 Annex C comfort band, from the lowest to the highest. */
+export type RideBand = "not uncomfortable" | "a little uncomfortable" | "fairly uncomfortable" | "uncomfortable" | "very uncomfortable" | "extremely uncomfortable";
+
+/** What a summary keeps of the flying skills; every measure is null when it was not recorded. */
+export interface SkillsSummary {
+  ap_share?: number | null;
+  at_share?: number | null;
+  ap_off_ft?: number | null;
+  autoland?: boolean;
+  vertical_rms?: number | null;
+  ride_band?: RideBand | null;
+  fuel_kg_h?: number | null;
+  fuel_kg_nm?: number | null;
+  descent_level_s?: number | null;
+}
+
+/** Flying skills (docs/skills.md): measures, not a grade. A measure is null when its parameters are missing. */
+export interface Skills {
+  automation: {
+    airborne_s: number | null;
+    ap_s: number | null;
+    at_s: number | null;
+    by_phase: { phase: string; s: number; ap_s: number | null; at_s: number | null }[];
+    /** Radio height of the last autopilot disconnect before the final touchdown; null for an autoland. */
+    ap_off_ft: number | null;
+    manual_final_s: number | null;
+    /** Still engaged at contact. */
+    autoland: boolean;
+  };
+  ride: {
+    vertical_rms: number | null;
+    ride_band: RideBand | null;
+    lateral_rms: number | null;
+    sideslip_rms_deg: number | null;
+    max_bank_deg: Record<string, number>;
+    rotation_rate_dps: number | null;
+  };
+  fuel: {
+    fuel_used_kg: number | null;
+    fuel_kg_h: number | null;
+    fuel_kg_nm: number | null;
+    taxi_fuel_kg: number | null;
+    descent_level_s: number | null;
+    descent_levels: number | null;
+  };
+  control: {
+    manual_s: number | null;
+    reversals_per_min: { pitch: number | null; roll: number | null } | null;
+  };
 }
 
 /** What Trends keeps of one landing (docs/trends.md). */
@@ -266,6 +319,16 @@ export interface Trends {
   events: TrendEvent[];
   by_aircraft: { icao: string; flights: number; landings: number; mean_score: number | null; events_per_flight: number }[];
   by_airport: { icao: string; landings: number; mean_score: number | null; in_tdz: number | null; mean_cross_m: number | null }[];
+  /** Flying skills over the matching flights (docs/skills.md); fuel per type only, as types are not comparable. */
+  skills?: {
+    ap_share: number | null;
+    /** Over hand-flown landings; autolands are counted apart. */
+    ap_off_ft_median: number | null;
+    autolands: number;
+    vertical_rms_median: number | null;
+    descent_level_s_median: number | null;
+    fuel_kg_h: { icao: string; median: number | null }[];
+  };
 }
 
 export interface PhaseSpan {
@@ -400,6 +463,7 @@ export interface Debrief {
   events: FlightEvent[];
   series: Series;
   airports: Airport[];
+  skills?: Skills;
 }
 
 export interface LandingNotice {

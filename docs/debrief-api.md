@@ -165,6 +165,7 @@ interface FlightSummary {
   assessment: Assessment;
   landings_detail?: LandingFacts[];                      // per landing (bounces grouped), time order; what trends.md reads
   rule_counts?: Record<string, { level: Level; count: number }>;   // rules fired at low or above, by rule id
+  skills?: SkillsSummary;   // the flying-skills figures trends reads (docs/skills.md); absent on older summaries
 }
 
 // One landing's facts for the trends ([trends.md](trends.md)); `Debrief.flight` carries them too.
@@ -304,6 +305,44 @@ interface GradeBand {
   up_to?: number;            // inclusive; absent on the last, which takes any more
 }
 
+// Flying skills ([skills.md](skills.md)). A measure is `null` when its parameters are missing or
+// the flight has no such phase, never 0. Times in s, to 0.1; `vertical_rms` and `lateral_rms` in m/s².
+type RideBand = "not uncomfortable" | "a little uncomfortable" | "fairly uncomfortable"
+              | "uncomfortable" | "very uncomfortable" | "extremely uncomfortable";
+
+interface Skills {
+  automation: {
+    airborne_s: number;
+    ap_s: number | null; at_s: number | null;   // engaged time within airborne_s
+    by_phase: { phase: string; s: number; ap_s: number | null; at_s: number | null }[];   // phases with airborne time
+    ap_off_ft: number | null;        // last autopilot disconnect of the final approach; null for an autoland
+    manual_final_s: number | null;   // hand-flown, from that disconnect to touchdown
+    autoland: boolean;               // still engaged at contact
+  };
+  ride: {
+    vertical_rms: number | null; ride_band: RideBand | null;
+    lateral_rms: number | null; sideslip_rms_deg: number | null;
+    max_bank_deg: Record<string, number>;     // by phase name
+    rotation_rate_dps: number | null;         // transport class only
+  };
+  fuel: {
+    fuel_used_kg: number | null;     // null if fuel rose in between
+    fuel_kg_h: number | null; fuel_kg_nm: number | null; taxi_fuel_kg: number | null;
+    descent_level_s: number | null; descent_levels: number | null;
+  };
+  control: {
+    manual_s: number | null;         // autopilot off, airborne
+    reversals_per_min: { pitch: number | null; roll: number | null };
+  };
+}
+
+// What the flight list keeps of them; `ap_share` and `at_share` are of the airborne time (0-1).
+interface SkillsSummary {
+  ap_share: number | null; at_share: number | null; ap_off_ft: number | null; autoland: boolean;
+  vertical_rms: number | null; ride_band: RideBand | null;
+  fuel_kg_h: number | null; fuel_kg_nm: number | null; descent_level_s: number | null;
+}
+
 interface Debrief {
   flight: FlightSummary & {
     lfl_version: number;
@@ -331,6 +370,7 @@ interface Debrief {
   events: Event[];          // time order, most severe first at equal times
   series: Series;
   airports: Airport[];      // runway geometry for the map
+  skills: Skills;           // flying skills, measures not a grade (docs/skills.md)
 }
 
 // A landing is a touchdown with `bounce: false` plus the `bounce: true`
