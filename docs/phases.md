@@ -21,6 +21,22 @@ Code: `crates/analyzer/src/phase.rs` (after the flight, may look ahead) and
 Heights "above the runway" are the calibrated radio height, or the height
 above the aerodrome (AAL, pressure altitude) where RA is invalid.
 
+AAL is split at every approach, as an FDM ground station does it: a leg is
+flown from its departure, to its arrival and to every approach that ended
+low and climbed away (a go-around or low approach, 200 ft down and back up)
+within 10 km of an airport the recording holds; each holds from the
+highest point before it to the highest point after it. Departure and
+arrival come from the pressure altitude on the ground; another airport's
+from its elevation difference to one of those (its runway data, recorded
+with every contact). Without an airport there, or one to measure from,
+the leg's highest point splits departure from arrival.
+
+A slew, teleport or flight reload (`Flight::breaks`) ends every phase: the
+break and the stretch after it are labelled each as a recording of its
+own, so no approach, go-around or climb runs across the sim moving the
+aircraft. A stretch that starts in the air has no takeoff or initial
+climb.
+
 | Phase | CICTT | Starts when (proxy) | Ends when |
 |---|---|---|---|
 | Standing | STD | On the ground under 2 kt | Moving |
@@ -105,4 +121,7 @@ rule counts the whole flight in the air, liftoff and flare included.
 - Live AAL at a destination with a different elevation: the panel measures
   from the last aerodrome on the ground (the departure) until touchdown,
   so its approach and flare boundaries are off by the elevation difference;
-  the debrief uses the arrival aerodrome after the leg's top.
+  the debrief uses the airport each approach is flown to.
+- A go-around at an airport more than 10 km from every contact of the
+  flight: the recorder fetches runway data only around contacts, so it is
+  measured from the departure or arrival.

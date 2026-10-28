@@ -87,7 +87,7 @@ false).
 |---|---|---|
 | Any LFL parameter (`ias`, `roll`, `alt.radio`, `sel.speed`, …) | its LFL unit | Discrete ones (`air_ground`, `ap.engaged`) are conditions |
 | `vs` | fpm | Inertial vertical speed (derived) |
-| `height` | ft | Above the departure aerodrome up to the highest point, above the arrival aerodrome after |
+| `height` | ft | Above the aerodrome flown from or to: the departure up to the highest point, each go-around's airport and the arrival after ([phases.md](phases.md)) |
 | `ra` | ft | Radio height, on-ground bias removed, valid below 2500 ft |
 | `takeoff.rotation_rate` | deg/s | From the takeoff roll to the end of the initial climb after it: the rotation's peak pitch rate over 0.5 s, from the pitch 1 deg above the roll's (the `rotation_rate_dps` skill measure); unknown elsewhere |
 | `takeoff.flap` | deg | Over the same points: the flap angle at liftoff |
