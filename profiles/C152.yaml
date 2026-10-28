@@ -7,6 +7,8 @@
 type: C152
 name: Cessna 152
 class: light
+airframe: { kind: airplane, engine: piston, engines: 1, gear: fixed }
+mlw: { value: 1670 lb, source: "Cessna 152 Information Manual (1 Jul 1979), Section 2 Weight Limits: Maximum Landing Weight 1670 lbs, https://www.touringmachine.com/PDFs-Txt/Cessna-152_POH.pdf" }
 vmo: { value: 149 kt, source: &poh "Cessna 152 Information Manual (1 Jul 1979), Section 2, Fig. 2-1 Airspeed Limitations p. 2-3, https://www.touringmachine.com/PDFs-Txt/Cessna-152_POH.pdf", note: "VNE 149 KIAS (145 KCAS); Vno 111 KIAS; Va 104 KIAS at 1670 lb" }
 max_crosswind: { value: 12 kt, source: "Cessna 152 Information Manual (1 Jul 1979), Section 4, Airspeeds for Normal Operation, p. 4-3, same URL", note: "maximum demonstrated, not a limitation" }
 flaps:

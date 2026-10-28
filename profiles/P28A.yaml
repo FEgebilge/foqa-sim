@@ -8,6 +8,8 @@
 type: P28A
 name: Piper PA-28-181 Archer III
 class: light
+airframe: { kind: airplane, engine: piston, engines: 1, gear: fixed }
+mlw: { value: 2550 lb, source: "Archer III POH (VB-2266), Section 1.11 Maximum Weights: maximum landing weight 2550 lbs (normal category), https://www.andrews.edu/cp/aviation/resources/archeriii-poh.pdf" }
 vmo: { value: 154 kt, source: &poh "Piper PA-28-181 Archer III POH/AFM (G1000, SN 2843701+, report VB-2266, 16 Apr 2013), Section 2.3 Airspeed Limitations p. 2-1, https://www.andrews.edu/cp/aviation/resources/archeriii-poh.pdf", note: "VNE 154 KIAS (148 KCAS); VNO 125 KIAS; Va 113 KIAS at 2550 lb" }
 max_crosswind: { value: 17 kt, source: "Archer III POH (VB-2266), Section 4 Performance summary p. 4-20, same URL", note: "maximum demonstrated, not a limitation" }
 flaps:
