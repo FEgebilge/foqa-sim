@@ -200,8 +200,8 @@ impl Service {
         };
         panel::tee(tee, history);
         // Journals of earlier runs, listed before any new flight exists.
-        let backlog = debrief::journals(&self.dir);
-        thread::spawn(move || debrief::compact_all(backlog));
+        let (dir, backlog) = (self.dir.clone(), crate::backlog(&self.dir));
+        thread::spawn(move || crate::recover(&dir, backlog));
         let acquisition = Acquisition::new(&Lfl::V1);
         let mut status = StatusLine {
             feed: feed.clone(),
@@ -214,19 +214,14 @@ impl Service {
                     retry = RETRY_MIN;
                     status.set(RecorderStatus::Connected);
                     let mut watch = Watch::default();
-                    let result = record(&mut source, &acquisition, &self.dir, self.raw, |p| {
+                    record(&mut source, &acquisition, &self.dir, self.raw, |p| {
                         let link = Link {
                             feed: &feed,
                             commands: &commands,
                         };
                         self.follow(p, &mut watch, &mut status, link)
                     });
-                    status.set(match result {
-                        Ok(()) => RecorderStatus::WaitingForSim,
-                        Err(e) => RecorderStatus::Error {
-                            message: format!("recording failed: {e}"),
-                        },
-                    });
+                    status.set(RecorderStatus::WaitingForSim);
                 }
                 // How SimConnect_Open fails while MSFS is not running.
                 Err(sim_link::Error::Call { .. }) => status.set(RecorderStatus::WaitingForSim),
@@ -271,6 +266,7 @@ impl Service {
                         closing: None,
                     }),
                     touchdown_s: None,
+                    fault: None,
                 };
             }
             Progress::Recorded { item, touchdown } => {
@@ -336,15 +332,29 @@ impl Service {
                 }
             }
             Progress::Idle => command = link.idle_command(),
+            // Paused or loading: the panel's commands still count.
+            Progress::Tick => {
+                command = match watch.flight.as_mut() {
+                    Some(flight) => link.command(flight),
+                    None => link.idle_command(),
+                }
+            }
+            Progress::Failed(e) => {
+                let dir = self.dir.display();
+                watch.fault = Some(format!("cannot write flights to {dir}: {e}"));
+            }
         }
         // The app's requests wait for a frame without a panel command.
         let command = command.or_else(|| self.requested.try_recv().ok());
-        status.set(match &watch.flight {
-            Some(flight) => RecorderStatus::Recording {
+        status.set(match (&watch.flight, &watch.fault) {
+            (Some(flight), _) => RecorderStatus::Recording {
                 flight_id: flight.id.clone(),
                 elapsed_s: flight.started.elapsed().as_secs() as f64,
             },
-            None => RecorderStatus::Connected,
+            (None, Some(message)) => RecorderStatus::Error {
+                message: message.clone(),
+            },
+            (None, None) => RecorderStatus::Connected,
         });
         if self.stopper.stopped() {
             ControlFlow::Break(())
@@ -469,12 +479,13 @@ impl Link<'_> {
     }
 }
 
-/// The flight being recorded, and the sim time of a touchdown whose
-/// landing is not yet reported.
+/// The flight being recorded, the sim time of a touchdown whose landing is
+/// not yet reported, and why no flight is, until one opens again.
 #[derive(Default)]
 struct Watch {
     flight: Option<OpenFlight>,
     touchdown_s: Option<f64>,
+    fault: Option<String>,
 }
 
 struct OpenFlight {

@@ -254,17 +254,14 @@ impl<R: Read> Iterator for FlightRecords<R> {
     }
 }
 
-/// Replaces the closed, intact journal at `journal` with a compact flight
-/// beside it. The compact file is written under a temporary name, read back
-/// and compared with the journal's records; only then is it moved into place
-/// and the journal deleted. `None`, journal untouched, for a cut-off or
-/// corrupt journal: compacting would drop its damaged tail.
-pub fn compact_file(journal: &Path) -> io::Result<Option<PathBuf>> {
-    let mut reader = JournalReader::new(BufReader::new(File::open(journal)?))?;
-    let recording = Recording::from_records(reader.lfl_version(), reader.by_ref())?;
-    if reader.damaged_at().is_some() {
-        return Ok(None);
-    }
+/// Replaces the closed journal at `journal` with a compact flight beside
+/// it. The compact file is written under a temporary name, read back and
+/// compared with the journal's records; only then is it moved into place
+/// and the journal deleted. A journal cut off by a crash or a power loss
+/// keeps every record before the damage, all that any reader gets from it.
+pub fn compact_file(journal: &Path) -> io::Result<PathBuf> {
+    let reader = JournalReader::new(BufReader::new(File::open(journal)?))?;
+    let recording = Recording::from_records(reader.lfl_version(), reader)?;
     let (part, dest) = (
         journal.with_extension("fqz.part"),
         journal.with_extension(EXT),
@@ -285,7 +282,7 @@ pub fn compact_file(journal: &Path) -> io::Result<Option<PathBuf>> {
     }
     fs::rename(&part, &dest)?;
     fs::remove_file(journal)?;
-    Ok(Some(dest))
+    Ok(dest)
 }
 
 /// LEB128.
@@ -466,15 +463,26 @@ mod tests {
         let path = dir.join("flight-1.fqj");
         let bytes = journal();
         fs::write(&path, &bytes).unwrap();
-        let dest = compact_file(&path).unwrap().unwrap();
+        let dest = compact_file(&path).unwrap();
         assert!(!path.exists() && dest.extension().unwrap() == EXT);
         let back = Recording::from_records(1, read_records(File::open(&dest).unwrap()).unwrap());
         assert_eq!(back.unwrap(), recording(&bytes));
+    }
 
-        // A cut-off journal is left alone.
-        fs::write(&path, &bytes[..bytes.len() - 5]).unwrap();
-        assert_eq!(compact_file(&path).unwrap(), None);
-        assert!(path.exists());
+    #[test]
+    fn a_cut_off_journal_compacts_what_it_holds() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("flight-1.fqj");
+        let bytes = journal();
+        let cut = &bytes[..bytes.len() - 5];
+        fs::write(&path, cut).unwrap();
+        let dest = compact_file(&path).unwrap();
+        assert!(!path.exists());
+        let back = Recording::from_records(1, read_records(File::open(&dest).unwrap()).unwrap());
+        let intact = recording(cut);
+        assert!(intact.series.values().map(Vec::len).sum::<usize>() > 0);
+        assert_eq!(back.unwrap(), intact);
+        assert_eq!(fs::read_dir(tmp.path()).unwrap().count(), 1);
     }
 
     #[test]

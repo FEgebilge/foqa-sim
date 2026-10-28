@@ -12,7 +12,17 @@ The raw capture is optional (`foqa-rec --raw`, `FOQA_RAW=1` for the app).
 The recorder compacts each journal when its flight closes, and the journals
 of earlier runs at start-up; `fdm compact` does it by hand. Readers accept
 both journal and compact flight.
-A recording that is not a flight is deleted when it closes instead (journal and raw capture, never listed): under 10 s of frames (the sim also streams them in its menus), or every position at the menu placeholder (lat 0, lon 90, within 0.01 deg). A ground-only session at a real position is kept. Constants in `crates/capture/src/discard.rs`.
+A recording that is not a flight is deleted when it closes instead (journal and raw capture, never listed): under 10 s of frames (the sim also streams them in its menus), or every position at the menu placeholder (lat 0, lon 90, within 0.01 deg). A ground-only session at a real position is kept. A journal an earlier run left open (the app or the PC stopped mid-flight) gets the same verdict at start-up. Constants in `crates/capture/src/discard.rs`.
+A flight closes at flight end or the main menu, when a flight file loads
+(MSFS 2024 flow event, or in MSFS 2020 the `FlightLoaded` system event),
+before a teleport, time skip or back-on-track jump (the next one opens when
+it is done; the app's own challenge placement stays in the flight), and on
+an aircraft swap (title or ATC model), so one flight has one aircraft and
+no jump. It also closes when the sim quits or its connection is lost (a
+crash). A flight whose files cannot be written (disk full, folder locked)
+is closed with what it has; recording resumes 10 s later, doubling to 5 min
+while it keeps failing. A new flight never takes an existing flight's name:
+a taken `flight-<unix seconds>` moves on a second.
 The ground station also keeps a [flight index](#flight-index), a cache of
 the flight list.
 
@@ -145,7 +155,8 @@ thresholds, not overruns), `width_m`, and `primary` / `secondary` ends, each
 The user aircraft's identification SimVars, so the ground segment can pick
 the type profile and its limits. `foqa-rec` records it into every flight,
 shortly after the flight opens, and again whenever it changes (aircraft
-swapped). The latest one in a flight applies. One JSON object of strings,
+swapped, which also closes the flight and opens a new one). The latest
+one in a flight applies. One JSON object of strings,
 exactly as the sim reports them:
 
 | Key | SimVar | Example (MSFS 2024, Cessna 172) |
@@ -189,11 +200,13 @@ the gear is down and an always-retracted one is 0 on either scale.
 
 ## Compact flight v1
 
-A closed, intact journal regrouped by parameter. Written next to the
+A closed journal regrouped by parameter. Written next to the
 journal under a temporary name, read back and compared with it, and only
 then moved into place, after which the journal is deleted. A journal with a
-cut-off or corrupt tail is not compacted. Records of an unknown kind or event code are
-not carried over.
+cut-off or corrupt tail keeps the records before the damage, all a reader
+gets from it. A temporary file left by a quit while compacting is deleted at
+the next start-up. Records of an unknown kind or event code are not carried
+over.
 
 ### Header (8 bytes)
 

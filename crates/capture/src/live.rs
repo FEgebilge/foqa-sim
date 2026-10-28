@@ -1,17 +1,15 @@
 use std::collections::HashMap;
-use std::io;
 use std::thread;
 use std::time::{Duration, Instant};
 
 use fdm_core::{AircraftId, Airport};
-use recorder::{
-    Acquisition, Column, FlowEvent, SYSTEM_EVENTS, SimEvent, Telemetry, TelemetrySource,
-};
+use recorder::{Acquisition, Column, FlowEvent, SYSTEM_EVENTS, SimEvent, Telemetry};
 use sim_link::facility::{AirportFetch, Fetched};
 use sim_link::{Recv, SimConnect};
 
 use crate::place::{AirportAsks, Ask, KEY_EVENT_BASE, KEY_EVENTS, Start, key_event_id};
 use crate::session::Action;
+use crate::{Polled, Sim};
 
 const DEFINE: u32 = 1;
 const FACILITY_DEFINE: u32 = 2;
@@ -19,10 +17,17 @@ const IDENTITY_DEFINE: u32 = 3;
 const INIT_DEFINE: u32 = 4;
 const REQUEST: u32 = 1;
 const IDENTITY_REQUEST: u32 = 2;
+const PROBE_REQUEST: u32 = 3;
 /// The identification SimVars, in `AircraftId` field order.
 const IDENTITY: [&str; 4] = ["TITLE", "ATC MODEL", "ATC TYPE", "ATC ID"];
 /// Idle wait between empty polls of the SimConnect queue.
 const POLL: Duration = Duration::from_millis(1);
+/// The longest `poll` waits for an item: a paused sim or a loading screen
+/// sends none, and the recorder still acts on requests in the meantime.
+const TICK: Duration = Duration::from_millis(250);
+/// How often a quiet connection is checked. A crashed or killed sim sends
+/// no `Quit`; the next call on its connection fails instead.
+const PROBE_EVERY: Duration = Duration::from_secs(2);
 /// Airports whose reference point lies this close to the aircraft at a
 /// departure or touchdown; covers the gate-to-reference-point distance of
 /// the largest airports without reaching far into neighbouring ones.
@@ -42,6 +47,7 @@ pub struct LiveSource {
     airports: AirportFetch,
     asks: AirportAsks,
     identity: Identity,
+    next_probe: Instant,
 }
 
 impl LiveSource {
@@ -75,62 +81,13 @@ impl LiveSource {
             airports,
             asks: AirportAsks::default(),
             identity: Identity::default(),
+            next_probe: Instant::now() + PROBE_EVERY,
         })
     }
 
-    /// Puts the user aircraft at `start`'s position, then sends its key
-    /// events (autopilot off, gear, flaps). Errors are calls that failed at
-    /// once; a rejection arrives later as an exception, which is logged.
-    pub fn place(&mut self, start: &Start) -> Result<(), sim_link::Error> {
-        let send_id = self.sim.set_init_position(INIT_DEFINE, &start.pos)?;
-        self.sent.insert(send_id, "the initial position".into());
-        for (name, data) in start.events() {
-            let id = key_event_id(name).expect("a start sends mapped key events only");
-            let send_id = self.sim.transmit_event(id, data)?;
-            self.sent.insert(send_id, format!("{name} {data}"));
-        }
-        Ok(())
-    }
-
-    /// Fetches the airport `ask` names, or answers it from those fetched on
-    /// this connection. Like any captured airport it is also recorded,
-    /// into the open flight or the next one.
-    pub fn want_airport(&mut self, ask: Ask<String, Airport>) {
-        if let Some(icao) = self.asks.ask(ask) {
-            self.airports.want(&icao);
-        }
-    }
-
-    /// Follows the session's routing of an item. Flights are delimited in one
-    /// place, `Session`; this only reacts. Closing a flight drops its airport
-    /// requests and the set already captured, so the next flight fetches
-    /// afresh and no late reply spills into it. Recorded frames drive the
-    /// trigger. Opening a flight owes it the aircraft identity. True when
-    /// the item is a touchdown frame.
-    pub fn track(&mut self, item: Option<&Telemetry>, action: Action) -> bool {
-        if action == Action::Close {
-            self.airports.reset();
-            // Asked airports outlive the flight: ask again.
-            for icao in self.asks.waiting() {
-                self.airports.want(icao);
-            }
-        }
-        self.identity.follow(action);
-        let Some(contact) = item.and_then(|item| self.trigger.follow(item, action)) else {
-            return false;
-        };
-        if let Some(pos) = contact.pos {
-            self.airports.search(pos, AIRPORT_RADIUS_M);
-        }
-        contact.touchdown
-    }
-
     /// The next fetched airport as telemetry; progress and failures are logged.
-    fn next_airport(&mut self) -> io::Result<Option<Telemetry>> {
-        let fetched = self
-            .airports
-            .poll(&mut self.sim, Instant::now())
-            .map_err(io::Error::other)?;
+    fn next_airport(&mut self) -> Result<Option<Telemetry>, sim_link::Error> {
+        let fetched = self.airports.poll(&mut self.sim, Instant::now())?;
         Ok(match fetched {
             Some(Fetched::Airport(airport)) => {
                 eprintln!("airport captured: {}", airport.icao);
@@ -149,70 +106,140 @@ impl LiveSource {
             Some(Fetched::Near(_)) | None => None,
         })
     }
+
+    /// Puts the user aircraft at `start`'s position, then sends its key
+    /// events (autopilot off, gear, flaps). Errors are calls that failed at
+    /// once; a rejection arrives later as an exception, which is logged.
+    fn send_start(&mut self, start: &Start) -> Result<(), sim_link::Error> {
+        let send_id = self.sim.set_init_position(INIT_DEFINE, &start.pos)?;
+        self.sent.insert(send_id, "the initial position".into());
+        for (name, data) in start.events() {
+            let id = key_event_id(name).expect("a start sends mapped key events only");
+            let send_id = self.sim.transmit_event(id, data)?;
+            self.sent.insert(send_id, format!("{name} {data}"));
+        }
+        Ok(())
+    }
+
+    /// One look at the sim: an item, `Ended` once it quit, `None` for
+    /// nothing yet (after a short wait if the queue was empty). `Err` once
+    /// the connection is gone.
+    fn step(&mut self) -> Result<Option<Polled>, sim_link::Error> {
+        if let Some(id) = self.identity.next() {
+            eprintln!("aircraft: {} ({})", id.title, id.atc_model);
+            return Ok(Some(Polled::Item(Telemetry::Event(SimEvent::Aircraft(id)))));
+        }
+        if let Some(airport) = self.next_airport()? {
+            return Ok(Some(Polled::Item(airport)));
+        }
+        let Some(msg) = self.sim.try_dispatch()? else {
+            let now = Instant::now();
+            if now >= self.next_probe {
+                self.next_probe = now + PROBE_EVERY;
+                self.sim.probe(PROBE_REQUEST)?;
+            }
+            thread::sleep(POLL);
+            return Ok(None);
+        };
+        let item = match msg {
+            Recv::Data { values, .. } => Some(Telemetry::Frame(values)),
+            Recv::Text { values, .. } => {
+                self.identity.report(values);
+                None
+            }
+            Recv::Event { id, data } => system_event(id, data, ""),
+            Recv::EventFilename { id, file } => system_event(id, 0, &file),
+            Recv::Flow { event, .. } => {
+                FlowEvent::from_code(event).map(|f| Telemetry::Event(SimEvent::Flow(f)))
+            }
+            Recv::Facility(reply) => {
+                self.airports.feed(reply);
+                None
+            }
+            Recv::Exception {
+                code,
+                send_id,
+                index,
+            } => {
+                let what = self
+                    .sent
+                    .get(&send_id)
+                    .map(String::as_str)
+                    .or_else(|| self.airports.describe(send_id));
+                match what {
+                    Some(what) => eprintln!("SimConnect rejected {what} (exception {code})"),
+                    None => {
+                        eprintln!("SimConnect exception {code} (send {send_id}, index {index})")
+                    }
+                }
+                None
+            }
+            Recv::Open {
+                simconnect_version, ..
+            } => {
+                eprintln!("connected to MSFS, SimConnect {simconnect_version:?}");
+                None
+            }
+            Recv::Quit => return Ok(Some(Polled::Ended)),
+            Recv::CommBus { .. } | Recv::Other { .. } => None,
+        };
+        Ok(item.map(Polled::Item))
+    }
 }
 
-impl TelemetrySource for LiveSource {
+impl Sim for LiveSource {
     /// Frames keep flowing while airport requests are outstanding: the fetch
     /// is polled between messages and never waits.
-    fn recv(&mut self) -> io::Result<Option<Telemetry>> {
+    fn poll(&mut self) -> Polled {
+        let tick = Instant::now() + TICK;
         loop {
-            if let Some(id) = self.identity.next() {
-                eprintln!("aircraft: {} ({})", id.title, id.atc_model);
-                return Ok(Some(Telemetry::Event(SimEvent::Aircraft(id))));
-            }
-            if let Some(airport) = self.next_airport()? {
-                return Ok(Some(airport));
-            }
-            let Some(msg) = self.sim.dispatch() else {
-                thread::sleep(POLL);
-                continue;
-            };
-            let item = match msg {
-                Recv::Data { values, .. } => Some(Telemetry::Frame(values)),
-                Recv::Text { values, .. } => {
-                    self.identity.report(values);
-                    None
+            match self.step() {
+                Ok(Some(polled)) => return polled,
+                Ok(None) if Instant::now() >= tick => return Polled::Tick,
+                Ok(None) => {}
+                Err(e) => {
+                    eprintln!("lost the connection to MSFS: {e}");
+                    return Polled::Ended;
                 }
-                Recv::Event { id, data } => system_event(id, data, ""),
-                Recv::EventFilename { id, file } => system_event(id, 0, &file),
-                Recv::Flow { event, .. } => {
-                    FlowEvent::from_code(event).map(|f| Telemetry::Event(SimEvent::Flow(f)))
-                }
-                Recv::Facility(reply) => {
-                    self.airports.feed(reply);
-                    None
-                }
-                Recv::Exception {
-                    code,
-                    send_id,
-                    index,
-                } => {
-                    let what = self
-                        .sent
-                        .get(&send_id)
-                        .map(String::as_str)
-                        .or_else(|| self.airports.describe(send_id));
-                    match what {
-                        Some(what) => eprintln!("SimConnect rejected {what} (exception {code})"),
-                        None => {
-                            eprintln!("SimConnect exception {code} (send {send_id}, index {index})")
-                        }
-                    }
-                    None
-                }
-                Recv::Open {
-                    simconnect_version, ..
-                } => {
-                    eprintln!("connected to MSFS, SimConnect {simconnect_version:?}");
-                    None
-                }
-                Recv::Quit => return Ok(None),
-                Recv::CommBus { .. } | Recv::Other { .. } => None,
-            };
-            if item.is_some() {
-                return Ok(item);
             }
         }
+    }
+
+    fn place(&mut self, start: &Start) -> Result<(), String> {
+        self.send_start(start).map_err(|e| e.to_string())
+    }
+
+    /// Fetches the airport `ask` names, or answers it from those fetched on
+    /// this connection. Like any captured airport it is also recorded,
+    /// into the open flight or the next one.
+    fn want_airport(&mut self, ask: Ask<String, Airport>) {
+        if let Some(icao) = self.asks.ask(ask) {
+            self.airports.want(&icao);
+        }
+    }
+
+    /// Follows the session's routing of an item. Flights are delimited in one
+    /// place, `Session`; this only reacts. Closing a flight drops its airport
+    /// requests and the set already captured, so the next flight fetches
+    /// afresh and no late reply spills into it. Recorded frames drive the
+    /// trigger. Opening a flight owes it the aircraft identity. True when
+    /// the item is a touchdown frame.
+    fn track(&mut self, item: Option<&Telemetry>, action: Action) -> bool {
+        if matches!(action, Action::Close | Action::Split) {
+            self.airports.reset();
+            // Asked airports outlive the flight: ask again.
+            for icao in self.asks.waiting() {
+                self.airports.want(icao);
+            }
+        }
+        self.identity.follow(action, item);
+        let Some(contact) = item.and_then(|item| self.trigger.follow(item, action)) else {
+            return false;
+        };
+        if let Some(pos) = contact.pos {
+            self.airports.search(pos, AIRPORT_RADIUS_M);
+        }
+        contact.touchdown
     }
 }
 
@@ -252,9 +279,12 @@ impl Identity {
         }
     }
 
-    fn follow(&mut self, action: Action) {
+    /// `item` is the one `action` routed: a split on a new identity holds
+    /// it into the next flight, which is then owed nothing.
+    fn follow(&mut self, action: Action, item: Option<&Telemetry>) {
         match action {
-            Action::Close => self.owed = true,
+            Action::Split if matches!(item, Some(Telemetry::Event(SimEvent::Aircraft(_)))) => {}
+            Action::Close | Action::Split => self.owed = true,
             Action::Open => self.due |= std::mem::take(&mut self.owed),
             _ => {}
         }
@@ -439,19 +469,19 @@ mod tests {
         identity.report(reported("C172SP G1000 Passengers"));
         // Emitted before the first flight: held into it, nothing owed.
         assert!(identity.next().is_some());
-        identity.follow(Open);
+        identity.follow(Open, None);
         assert_eq!(identity.next(), None);
         // The next flight with the same aircraft gets it repeated.
-        identity.follow(Close);
-        identity.follow(Open);
+        identity.follow(Close, None);
+        identity.follow(Open, None);
         assert!(identity.next().is_some());
-        identity.follow(Record);
+        identity.follow(Record, None);
         assert_eq!(identity.next(), None);
         // A swap between flights is held into the next one: no repeat.
-        identity.follow(Close);
+        identity.follow(Close, None);
         identity.report(reported("C172SP Classic"));
         assert!(identity.next().is_some());
-        identity.follow(Open);
+        identity.follow(Open, None);
         assert_eq!(identity.next(), None);
     }
 
