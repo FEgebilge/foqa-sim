@@ -8,6 +8,9 @@ pub type Handle = *mut c_void;
 pub type HResult = i32;
 pub type Dword = u32;
 
+/// `E_FAIL`: what `SimConnect_GetNextDispatch` returns for an empty queue.
+pub const E_FAIL: HResult = 0x8000_4005_u32 as HResult;
+
 pub const OBJECT_ID_USER_AIRCRAFT: Dword = 0;
 /// `SIMCONNECT_OPEN_CONFIGINDEX_LOCAL`: ignore SimConnect.cfg, connect locally.
 pub const OPEN_CONFIGINDEX_LOCAL: Dword = Dword::MAX;
@@ -285,6 +288,10 @@ unsafe extern "C" {
     ) -> HResult;
     #[link_name = "SimConnect_GetNextDispatch"]
     pub fn get_next_dispatch(handle: Handle, data: *mut *mut Recv, len: *mut Dword) -> HResult;
+    /// H:1077.
+    #[link_name = "SimConnect_RequestSystemState"]
+    pub fn request_system_state(handle: Handle, request_id: Dword, state: *const c_char)
+    -> HResult;
     #[link_name = "SimConnect_SubscribeToFlowEvent"]
     pub fn subscribe_to_flow_event(handle: Handle) -> HResult;
     #[link_name = "SimConnect_AddToFacilityDefinition"]

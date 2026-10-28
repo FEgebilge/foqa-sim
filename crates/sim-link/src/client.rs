@@ -314,22 +314,44 @@ impl SimConnect {
         check("SimConnect_SubscribeToFlowEvent", hr)
     }
 
-    /// Next queued message, or `None` when the queue is empty.
+    /// Next queued message, or `None` when the queue is empty or the
+    /// connection is gone (`try_dispatch` tells them apart).
     pub fn dispatch(&mut self) -> Option<Recv> {
+        self.try_dispatch().ok().flatten()
+    }
+
+    /// Next queued message, `None` when the queue is empty. `Err` for any
+    /// other failure: the connection is gone, as when the sim crashed or was
+    /// killed (it sends `Quit` only when it closes normally).
+    pub fn try_dispatch(&mut self) -> Result<Option<Recv>, Error> {
         let mut data = ptr::null_mut();
         let mut len = 0;
         // SAFETY: valid out-pointers on an open handle.
         let hr = unsafe { ffi::get_next_dispatch(self.handle, &mut data, &mut len) };
-        if hr < 0 || data.is_null() {
-            return None;
+        if hr == ffi::E_FAIL {
+            return Ok(None);
+        }
+        check("SimConnect_GetNextDispatch", hr)?;
+        if data.is_null() {
+            return Ok(None);
         }
         // SAFETY: SimConnect hands out `len` readable bytes that stay valid
         // until the next dispatch call, which the `&mut self` borrow excludes;
         // `parse` copies what it keeps.
-        Some(parse(
+        Ok(Some(parse(
             unsafe { slice::from_raw_parts(data.cast::<u8>(), len as usize) },
             &self.text_defines,
-        ))
+        )))
+    }
+
+    /// Asks for the sim's state (`Sim`, user aircraft loaded) as
+    /// `request_id`. Its reply is not decoded: this is a cheap call that
+    /// fails once the connection is gone, when nothing else is being sent.
+    pub fn probe(&mut self, request_id: u32) -> Result<(), Error> {
+        let state = c_string("Sim")?;
+        // SAFETY: open handle and a NUL-terminated name that outlives the call.
+        let hr = unsafe { ffi::request_system_state(self.handle, request_id, state.as_ptr()) };
+        check("SimConnect_RequestSystemState", hr)
     }
 
     /// Broadcasts `data` (JSON, by convention) as Comm Bus event `name` to
