@@ -502,6 +502,12 @@ export interface OpenFlight {
 }
 
 /** Disk use of the flights folder, raw captures included. */
+/** A newer version the updater found: its number and the notes (Markdown) published with it. */
+export interface AppUpdate {
+  version: string;
+  notes: string;
+}
+
 export interface StorageUsage {
   flights: number;
   bytes: number;

@@ -37,11 +37,11 @@ a debrief that says what happened, why it matters and what to do differently.
 
 ## Status
 
-Version 0.9. Works end to end with MSFS 2024 on Windows: installer, automatic recording,
-debrief with replay and flying skills, trends across flights, exports, in-sim panel and EFB app, local landing
-challenges. It is being tested with a small group of pilots before a first public release. In
-progress: challenges with the same weather for every pilot, and the first website running the
-open challenge protocol.
+Version 0.10, the first public release. Works end to end with MSFS 2024 on Windows: installer
+with automatic updates, automatic recording, debrief with replay and flying skills, trends
+across flights, exports, in-sim panel and EFB app, local landing challenges. In progress:
+challenges with the same weather for every pilot, and the first website running the open
+challenge protocol.
 
 ## What you get
 
@@ -84,10 +84,19 @@ open challenge protocol.
 
 ## Install
 
-Run the `FOQA-Sim_<version>_x64-setup.exe` installer. It needs Windows 10/11 and MSFS 2024,
-and brings everything else (the VC++ runtime DLLs sit next to the exe). The app installs the
-in-sim packages into your Community folder and keeps them up to date. Flights are kept in
-`Documents\FOQA-Sim\flights` across updates.
+**[Download for Windows](https://github.com/FEgebilge/foqa-sim/releases/latest/download/FOQA-Sim_x64-setup.exe)**
+(or pick a version on the [releases page](https://github.com/FEgebilge/foqa-sim/releases)).
+
+It needs Windows 10/11 and MSFS 2024, and brings everything else (the VC++ runtime DLLs sit
+next to the exe). The app installs the in-sim packages into your Community folder and keeps
+them up to date, and updates itself: when a new version is out it offers it with its release
+notes, never while a flight is recording. Flights are kept in `Documents\FOQA-Sim\flights`
+across updates.
+
+The installer is not code-signed yet, so Windows SmartScreen may say "Windows protected your
+PC": choose **More info**, then **Run anyway**. To check the download, compare
+`Get-FileHash .\FOQA-Sim_x64-setup.exe` (PowerShell) with the SHA-256 in the release notes.
+Updates are signed with the project's own key and refused if they do not match it.
 
 ## Build from source
 

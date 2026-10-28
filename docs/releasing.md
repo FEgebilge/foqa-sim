@@ -6,12 +6,15 @@ confirmed by a source.
 
 ## TL;DR
 
-- **Publish locally, one command** (`release.mjs` builds, signs the updater artifact, `gh release create`). No CI.
-- **Self-update** with `tauri-plugin-updater` against `releases/latest/download/latest.json`. Needs a public repo
-  (anonymous download), so wire it in at going public, and ship it in the first public release.
+- **Publish locally, one command**: `npm run release -- <ver> --publish` (in `app/`) builds, signs the updater
+  artifact, writes `latest.json` and creates a **draft** GitHub release; check the draft, publish it on GitHub. It asks
+  for the updater key's password on the terminal (hidden). No CI.
+- **Self-update** with `tauri-plugin-updater` against `releases/latest/download/latest.json`: wired in code and config
+  (section 6). Needs a public repo (anonymous download), and the first public release must already contain it.
 - **CI**: not needed now. The MSFS SDK EULA does not clearly allow or forbid it (section 4); the clean way to make CI
   possible later is to load `SimConnect.dll` at runtime instead of linking `SimConnect.lib`.
-- **Signing**: nothing free fits today (section 5). Ship unsigned, document SmartScreen, publish SHA-256.
+- **Signing**: nothing free fits today (section 5). Cheapest fit: Certum's Open Source certificate (about €49/year,
+  individuals, works with local builds). Until then ship unsigned, document SmartScreen, publish SHA-256.
 
 ---
 
@@ -72,9 +75,9 @@ the status screen offers it. Manual reinstall (double-click the new setup.exe) i
 uninstaller runs without `/UPDATE`, removes the packages, and `refresh()` restores them (the case its doc comment
 describes). Both are covered; test both once (section 7).
 
-**Restart after update.** The plugin appends restart args (`/R`, `/ARGS`) only if its `restart_after_install`
-context is set; I could not confirm from the sources read whether JS `downloadAndInstall()` sets it **(unverified)**.
-Test it on the first real update. If the app does not relaunch (the process has already exited, so `relaunch()`
+**Restart after update.** Checked in plugin 2.14.1: `restart_after_install` defaults to true, JS
+`downloadAndInstall()` leaves it so, and the plugin appends `/R /ARGS` for NSIS passive mode, so the installer should
+relaunch the app. Still test it on the first real update. If the app does not relaunch (the process has already exited, so `relaunch()`
 cannot help), pass `/R` via the plugin's installer args or start the app from `NSIS_HOOK_POSTINSTALL` when
 `$UpdateMode = 1` (the template only auto-runs with `/R` in passive/silent mode). Single-instance plugin is
 already used, so a double start is harmless.
@@ -101,7 +104,8 @@ Today it bumps versions and runs `npm run tauri build`, and already requires `de
 1. Fail early if `TAURI_SIGNING_PRIVATE_KEY` is unset (once the updater is on) or `gh auth status` fails.
 2. Copy the installer to `FOQA-Sim_x64-setup.exe` in the same dir (stable download name).
 3. Write `latest.json` there from the devlog body and the `.sig` contents (format above).
-4. Create a **draft** release, check it, then publish:
+4. Create a **draft** release, check it, then publish (`release.mjs` does steps 1 to 4 up to the draft; the
+   publish is a click on GitHub, never `--draft=false` from the script):
 
 ```
 gh release create v0.2.0 --draft --title "FOQA-Sim 0.2.0" --notes-file devlog/0.2.0.md `
@@ -240,38 +244,70 @@ If done anyway, all of:
   signatures), Premium $99.99/month. Public-trust identity validation: individuals **USA and Canada only**;
   organizations USA, Canada, EU, UK. **Türkiye is not eligible as an individual**, and a Q&A post reports individual
   onboarding paused (unconfirmed). Not an option.
-- Paid OV/EV certificates from a CA: not researched; EV gives instant SmartScreen trust, OV does not.
+- **Certum Open Source Code Signing** (rechecked 2026-10-28): individuals only, one year; €49 with SimplySign (key in
+  Certum's cloud, a phone app approves each use, SimplySign Desktop shows it to `signtool` as a card), €69 card and
+  reader, €25 certificate only for existing Certum hardware
+  (<https://shop.certum.eu/open-source-code-signing-on-simplysign.html>). Needs ID verification (online or photos with
+  the ID), a utility bill in your name and a public OSS project page showing you run it; commercial distribution can
+  get it revoked (<https://support.certum.eu/en/code-signing-required-documents/>). Turkish IDs appear in their
+  verification provider's coverage list, Türkiye eligibility itself **(unverified)**; the shop showed out-of-stock
+  notices. Works with local builds through Tauri's `signCommand` and SignTool
+  (<https://support.certum.eu/en/signing-the-code-using-tools-like-signtool-and-jarsigner-instruction/>). The best fit
+  for FOQA-Sim once public.
+- Other individual certificates: SSL.com IV $129/year plus eSigner $180/year or a $379 token; Sectigo via SignMyCode
+  about $300/year (<https://www.ssl.com/guide/esigner-pricing-for-code-signing/>,
+  <https://signmycode.com/sectigo-individual-code-signing>).
+- **SmartScreen today**: EV no longer gives instant trust (removed 2024); signed files build reputation by publisher
+  and file hash, unsigned ones by file hash only, so every new unsigned version starts from zero
+  (<https://learn.microsoft.com/windows/apps/package-and-deploy/smartscreen-reputation>). Signing still pays: the
+  publisher's reputation carries over between versions.
+- SignPath detail (rechecked): with GitHub, every job before signing must run on GitHub-hosted runners
+  (<https://docs.signpath.io/trusted-build-systems/github>), so local builds cannot be signed there.
 - Tauri hook (from Tauri docs, not re-fetched; verify): `bundle.windows.signCommand` = a command line with `%1` for the
   file (e.g. `signtool sign ... %1` or the Artifact Signing CLI); SignPath works differently (CI uploads the
   artifact, SignPath returns it signed), so it needs a workflow, not `signCommand`.
+- Updater key (Tauri, minisign) is separate from Authenticode: free, made on your PC. Lose its private key and the
+  installed apps can no longer verify updates: everyone has to reinstall once by hand
+  (<https://v2.tauri.app/plugin/updater/#signing-updates>). Keep two copies.
 - Interim: ship unsigned, say in the README that SmartScreen may warn ("More info > Run anyway"), publish SHA-256 in
   each release, keep the repo public and the build reproducible. Reputation accrues per file hash/publisher.
 
 ## 6. Owner step list
 
-### Now (repo private)
+### Done in the repo (wired fully on, for going public)
+
+- App: `tauri-plugin-updater` + `@tauri-apps/plugin-updater`, capability `updater:default`, `tauri.conf.json` has
+  `createUpdaterArtifacts`, `plugins.updater` (endpoint, `passive`) and the `pubkey`. UI: a corner notice
+  ("FOQA-Sim <ver> is available", notes, "Install and restart") after a check at start (at most once a day) or from
+  "Check for updates" on the What's new screen; install is disabled while a flight records. Browser mock: no update.
+- `release.mjs`: checks `gh auth status` and the key file first, asks for the key password (hidden, passed to the build
+  process only, never written), copies the stable-name installer, writes `latest.json`, prints the SHA-256 and the exact
+  `gh release create ... --draft` command, and runs it only with `--publish` (always a draft).
+- Restart after an update: the plugin's `restart_after_install` defaults to true and `downloadAndInstall()` does not
+  turn it off, so the installer gets `/P /UPDATE /R /ARGS ...` and the NSIS template relaunches the app (plugin 2.14.1
+  source). The process exits by itself (`std::process::exit(0)`), so `relaunch()` from JS cannot run: not used. Still
+  verify on the first real update (section 7).
+
+### Owner steps before going public
 
 1. Verify one thing on your PC: does the MSFS 2024 install have its own `SimConnect.dll` (section 4)? Decides
-   whether runtime loading is viable.
-2. Optionally post on the MSFS dev forum asking Asobo to confirm SimConnect.dll redistribution (the two existing
-   threads are unanswered).
-3. Generate the updater key: `cd app; npm run tauri signer generate -- -w $HOME\.tauri\foqa-sim.key`; store key,
-   password and pubkey in the password manager (and a second offline copy).
-4. Wire the app side in code but leave `plugins.updater` out of `tauri.conf.json` (no pubkey, no endpoint, no
-   `createUpdaterArtifacts`): plugin, capability, "Check for updates" UI, notes display. Keep the check disabled when
-   the config block is absent.
-5. Extend `release.mjs` per section 2 (stable-name copy, `latest.json`, `gh release create --draft`); dry-run it
-   privately: private repo release works for manual downloads by collaborators.
-6. Write `devlog/<ver>.md` for each release (already enforced).
+   whether runtime loading is viable. (Answered, see the last section: no.)
+2. Generate the updater key: `cd app; npm run tauri signer generate -- -w $HOME\.tauri\foqa-sim.key`; store key,
+   password and pubkey in the password manager (and a second offline copy). `release.mjs` reads
+   `~\.tauri\foqa-sim.key` (override: env `FOQA_UPDATER_KEY`).
+3. The pubkey (content of `foqa-sim.key.pub`, public) is already in `tauri.conf.json` (`plugins.updater.pubkey`).
+   If the key is ever regenerated, replace it there, or installed apps will reject updates.
+4. Write `devlog/<ver>.md` for each release (already enforced).
 
 ### At going public
 
-1. Add to `tauri.conf.json`: `createUpdaterArtifacts: true` and the `plugins.updater` block (pubkey, endpoint,
-   `passive`). Set `TAURI_SIGNING_PRIVATE_KEY(_PASSWORD)` in the shell.
-2. **First public version must already contain the updater** (a build without it cannot self-update); bump to e.g.
+1. **First public version must already contain the updater** (a build without it cannot self-update); bump to e.g.
    0.2.0 and tell private testers to reinstall manually once.
-3. Branch/commit/tag yourself (git rules), then `npm run release -- 0.2.0`; check the draft on GitHub: assets are
-   installer, `.sig`, stable-name setup, `latest.json`; publish.
+2. Branch/commit/tag yourself (git rules; `gh release create` makes the tag from the default branch otherwise), then
+   from `app/`: `npm run release -- 0.2.0 --publish`. Enter the key password when asked (or set
+   `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` for the shell). Without `--publish` it only builds and prints the command.
+3. Open the **draft** on GitHub and check the assets (installer, `.sig`, stable-name setup, `latest.json`) and the
+   SHA-256 line in the notes, then publish it there: only now does `/releases/latest` (and so the updater) see it.
 4. README: Download link to `releases/latest/download/FOQA-Sim_x64-setup.exe`, SmartScreen note, SHA-256.
 5. Do not add `pull_request` CI that needs the SDK; leave `.github/` empty or CI without secrets (lint/tests only,
    on GitHub-hosted runners, per the Git rules CI only on test/main).
