@@ -124,6 +124,13 @@ pub struct Record {
     pub slice_failed: Option<String>,
 }
 
+impl Record {
+    /// Still to be flown, finished or abandoned.
+    pub fn open(&self) -> bool {
+        self.state.can_become(State::Abandoned)
+    }
+}
+
 /// An attempt as the Challenges screen lists it.
 #[derive(Debug, Clone, Serialize)]
 pub struct View {
@@ -244,22 +251,28 @@ impl Attempts {
 
     /// Every attempt with its grade and log, the newest first.
     pub fn list(&self) -> Vec<View> {
-        let mut views: Vec<View> = self
-            .records()
-            .map(|record| {
-                let dir = self.dir.join(&record.id);
-                let result = fs::read_to_string(dir.join(RESULT))
-                    .ok()
-                    .and_then(|s| serde_json::from_str(&s).ok());
-                View {
-                    log: read_log(&dir),
-                    result,
-                    record,
-                }
-            })
-            .collect();
+        let mut views: Vec<View> = self.records().map(|r| self.view(r)).collect();
         views.sort_by(|a, b| b.record.created_at.cmp(&a.record.created_at));
         views
+    }
+
+    /// The attempt the in-sim strip follows (`Record::open`: the newest
+    /// open one, else the newest), the only one whose grade and log are read.
+    pub fn current(&self) -> Option<View> {
+        let key = |r: &Record| (r.open(), r.created_at.clone());
+        self.records().max_by_key(key).map(|r| self.view(r))
+    }
+
+    fn view(&self, record: Record) -> View {
+        let dir = self.dir.join(&record.id);
+        let result = fs::read_to_string(dir.join(RESULT))
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok());
+        View {
+            log: read_log(&dir),
+            result,
+            record,
+        }
     }
 
     /// Moves `id` to `to`, logging `event` with `fields`; `edit` changes the
@@ -738,6 +751,21 @@ pub(crate) mod tests {
             Ok(json!({ "start": { "alt_ft": 2600 } }))
         })
         .unwrap()
+    }
+
+    #[test]
+    fn the_current_attempt_is_the_open_one_else_the_newest() {
+        let (_tmp, a) = attempts();
+        assert!(a.current().is_none());
+        let old = flying(&a, 0.0);
+        assert_eq!(a.current().unwrap().record.id, old.id);
+        a.abandon(&old.id, "cancelled").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        let newer = created(&a);
+        a.abandon(&newer.id, "cancelled").unwrap();
+        assert_eq!(a.current().unwrap().record.id, newer.id);
+        let open = flying(&a, 0.0);
+        assert_eq!(a.current().unwrap().record.id, open.id);
     }
 
     #[test]
