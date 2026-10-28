@@ -1,11 +1,17 @@
 //! Which closed recordings are not flights. The sim streams frames in its
 //! menus too (the aircraft parked at a placeholder position), so a recording
 //! can open there; one that holds nothing worth analysing is deleted when it
-//! closes instead of being compacted and listed.
+//! closes instead of being compacted and listed. A journal an earlier run
+//! never closed (the app or the PC stopped mid-flight) gets the same verdict
+//! when the next run recovers it.
 
 use std::fmt;
+use std::fs::{self, File};
+use std::io::{self, BufReader};
+use std::path::{Path, PathBuf};
 
-use recorder::{Column, Telemetry};
+use fdm_core::Lfl;
+use recorder::{Column, JournalReader, Record, Telemetry};
 
 /// A recording shorter than this (sim seconds, first to last frame) is
 /// dropped: a single menu sample, a reload or a mis-click is not a flight.
@@ -14,6 +20,8 @@ pub const MIN_FLIGHT_S: f64 = 10.0;
 pub const MENU_POSITION: (f64, f64) = (0.0, 90.0);
 /// How close to `MENU_POSITION` (degrees) a frame counts as being there.
 pub const MENU_TOLERANCE_DEG: f64 = 0.01;
+/// What compaction writes before it renames (`recorder::compact_file`).
+const COMPACT_PART: &str = ".fqz.part";
 
 /// Why a closed recording is dropped.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -38,14 +46,51 @@ impl fmt::Display for Discard {
     }
 }
 
+/// What a recording adds up to: its sim-time span and whether any position
+/// is a real one.
+#[derive(Debug, Clone, Default)]
+struct Tally {
+    span: Option<(f64, f64)>,
+    positioned: bool,
+}
+
+impl Tally {
+    fn time(&mut self, t: f64) {
+        if t.is_finite() {
+            let (lo, hi) = self.span.unwrap_or((t, t));
+            self.span = Some((lo.min(t), hi.max(t)));
+        }
+    }
+
+    fn position(&mut self, lat: f64, lon: f64) {
+        if lat.is_finite() && lon.is_finite() {
+            let at_menu = (lat - MENU_POSITION.0).abs() < MENU_TOLERANCE_DEG
+                && (lon - MENU_POSITION.1).abs() < MENU_TOLERANCE_DEG;
+            self.positioned |= !at_menu;
+        }
+    }
+
+    /// Why this recording is not a flight, if it is not. Ground-only
+    /// recordings at a real position are flights: taxi practice counts.
+    fn verdict(&self) -> Option<Discard> {
+        let seconds = self.span.map_or(0.0, |(lo, hi)| hi - lo);
+        if seconds < MIN_FLIGHT_S {
+            Some(Discard::TooShort { seconds })
+        } else if !self.positioned {
+            Some(Discard::NeverPositioned)
+        } else {
+            None
+        }
+    }
+}
+
 /// What a recording's frames add up to, kept as they are recorded.
 #[derive(Debug, Clone)]
 pub struct Usage {
     time: usize,
     lat: usize,
     lon: usize,
-    span: Option<(f64, f64)>,
-    positioned: bool,
+    tally: Tally,
 }
 
 impl Usage {
@@ -60,8 +105,7 @@ impl Usage {
             time: column("SIMULATION TIME"),
             lat: column("PLANE LATITUDE"),
             lon: column("PLANE LONGITUDE"),
-            span: None,
-            positioned: false,
+            tally: Tally::default(),
         }
     }
 
@@ -69,30 +113,71 @@ impl Usage {
         let Telemetry::Frame(frame) = item else {
             return;
         };
-        let at = |i: usize| frame.get(i).copied().filter(|v| v.is_finite());
-        if let Some(t) = at(self.time) {
-            let (lo, hi) = self.span.unwrap_or((t, t));
-            self.span = Some((lo.min(t), hi.max(t)));
-        }
-        if let (Some(lat), Some(lon)) = (at(self.lat), at(self.lon)) {
-            let at_menu = (lat - MENU_POSITION.0).abs() < MENU_TOLERANCE_DEG
-                && (lon - MENU_POSITION.1).abs() < MENU_TOLERANCE_DEG;
-            self.positioned |= !at_menu;
-        }
+        let at = |i: usize| frame.get(i).copied().unwrap_or(f64::NAN);
+        self.tally.time(at(self.time));
+        self.tally.position(at(self.lat), at(self.lon));
     }
 
-    /// Why this recording is not a flight, if it is not. Ground-only
-    /// recordings at a real position are flights: taxi practice counts.
+    /// Why this recording is not a flight, if it is not (`Discard`).
     pub fn verdict(&self) -> Option<Discard> {
-        let seconds = self.span.map_or(0.0, |(lo, hi)| hi - lo);
-        if seconds < MIN_FLIGHT_S {
-            Some(Discard::TooShort { seconds })
-        } else if !self.positioned {
-            Some(Discard::NeverPositioned)
-        } else {
-            None
+        self.tally.verdict()
+    }
+}
+
+/// `Usage::verdict` from a journal's records: the samples' sim time, and
+/// each longitude with the latitude before it.
+fn journal_verdict(journal: &Path) -> io::Result<Option<Discard>> {
+    let reader = JournalReader::new(BufReader::new(File::open(journal)?))?;
+    let id = |name| Lfl::V1.by_name(name).map(|s| s.id);
+    let (lat_id, lon_id) = (id("pos.lat"), id("pos.lon"));
+    let (mut tally, mut lat) = (Tally::default(), f64::NAN);
+    for record in reader {
+        let Record::Sample(s) = record? else {
+            continue;
+        };
+        tally.time(s.t.as_secs_f64());
+        if Some(s.signal) == lat_id {
+            lat = s.value;
+        } else if Some(s.signal) == lon_id {
+            tally.position(lat, s.value);
         }
     }
+    Ok(tally.verdict())
+}
+
+/// The journals an earlier run left in `dir`, listed before any new flight
+/// exists, for `recover`. Compaction leftovers (`.fqz.part`, a quit while
+/// compacting) are deleted now: no compaction runs yet.
+pub fn backlog(dir: &Path) -> Vec<PathBuf> {
+    let entries = fs::read_dir(dir).into_iter().flatten().flatten();
+    for part in entries.map(|e| e.path()).filter(|p| {
+        p.file_name()
+            .is_some_and(|n| n.to_string_lossy().ends_with(COMPACT_PART))
+    }) {
+        match fs::remove_file(&part) {
+            Ok(()) => eprintln!("deleted a stale {}", part.display()),
+            Err(e) => eprintln!("{}: could not delete: {e}", part.display()),
+        }
+    }
+    debrief::journals(dir)
+}
+
+/// Closes the journals of `backlog` as their run never did: one that is
+/// not a flight (`Discard`) is deleted with its raw capture, the rest are
+/// compacted, a cut-off tail dropped. Reads each journal twice: give it a
+/// thread of its own.
+pub fn recover(dir: &Path, backlog: Vec<PathBuf>) {
+    let flights = backlog.into_iter().filter(|journal| {
+        let Ok(Some(why)) = journal_verdict(journal) else {
+            return true;
+        };
+        match debrief::delete_flight(dir, &debrief::flight_id(journal)) {
+            Ok(_) => eprintln!("info: {} discarded, {why}", journal.display()),
+            Err(e) => eprintln!("{}: could not delete: {e}", journal.display()),
+        }
+        false
+    });
+    debrief::compact_all(flights);
 }
 
 #[cfg(test)]
