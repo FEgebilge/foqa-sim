@@ -181,6 +181,91 @@ export interface FlightSummary {
   worst_level?: Level;
   event_counts: Record<Level, number>;
   assessment: Assessment;
+  /** One per landing, in time order (docs/trends.md); empty on summaries from before it existed. */
+  landings_detail?: LandingFacts[];
+  /** Each rule that fired at low or above: its worst level and how often. */
+  rule_counts?: Record<string, { level: Level; count: number }>;
+}
+
+/** What Trends keeps of one landing (docs/trends.md). */
+export interface LandingFacts {
+  t_s: number;
+  full_stop: boolean;
+  icao?: string;
+  runway?: string;
+  /** landing-2, 0-100. */
+  score?: number;
+  grade?: Grade;
+  confidence?: Confidence;
+  /** Domain id to level 0-3; null: not applicable. */
+  domains: Record<string, number | null>;
+  sink_fpm: number;
+  peak_g: number;
+  /** Past the threshold; `cross_m` is positive right of the centreline. */
+  along_m?: number;
+  cross_m?: number;
+  zone?: "In TDZ" | "Long" | "Short";
+  /** The matched runway's touchdown zone length, aiming point and landing distance available. */
+  tdz_m?: number;
+  aiming_point_m?: number;
+  lda_m?: number;
+  crosswind_kt?: number;
+  tailwind_kt?: number;
+  bounces: number;
+}
+
+/** What the Trends screen filters by; absent fields mean all. */
+export interface TrendFilter {
+  aircraft?: string;
+  airport?: string;
+  days?: number;
+}
+
+export interface TrendLanding extends LandingFacts {
+  flight_id: string;
+  started_utc: string | null;
+  aircraft: string | null;
+}
+
+export interface TrendDomain {
+  id: string;
+  title: string;
+  short: string;
+  graded: number;
+  mean_level: number | null;
+  level_2_plus: number;
+}
+
+export interface TrendEvent {
+  rule: string;
+  title: string;
+  level: Level;
+  flights: number;
+  count: number;
+  per_100: number;
+  /** Null under 5 flights in either half. */
+  recent_per_100: number | null;
+  earlier_per_100: number | null;
+}
+
+export interface Trends {
+  filter: TrendFilter;
+  /** What the filters can be set to, from all flights. */
+  options: { aircraft: { icao: string; flights: number }[]; airports: { icao: string; landings: number }[] };
+  flights: number;
+  hours: number;
+  landing_count: number;
+  scored: number;
+  /** Scored full-stop landings; recent/earlier are null under 5 in each half. */
+  score: { mean: number | null; median: number | null; recent: number | null; earlier: number | null };
+  /** Oldest first: the chart and the footprint. */
+  landings: TrendLanding[];
+  /** In landing-2 order. */
+  domains: TrendDomain[];
+  /** Most frequent first, then by level. */
+  events: TrendEvent[];
+  by_aircraft: { icao: string; flights: number; landings: number; mean_score: number | null; events_per_flight: number }[];
+  by_airport: { icao: string; landings: number; mean_score: number | null; in_tdz: number | null; mean_cross_m: number | null }[];
 }
 
 export interface PhaseSpan {

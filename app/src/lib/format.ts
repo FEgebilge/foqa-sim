@@ -39,7 +39,7 @@ export function duration(seconds: number) {
 
 const dateFormat = new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric" });
 const timeFormat = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "UTC" });
-export const flightDate = (iso?: string) => (iso ? dateFormat.format(new Date(iso)) : "Unknown date");
+export const flightDate = (iso?: string | null) => (iso ? dateFormat.format(new Date(iso)) : "Unknown date");
 export const flightTimeUtc = (iso?: string) => (iso ? `${timeFormat.format(new Date(iso))}Z` : "");
 
 /** "InitialClimb" -> "Initial climb". Unknown names from a newer backend still read well. */

@@ -1,12 +1,13 @@
 import { useSyncExternalStore } from "react";
 
-export type Route = { screen: "flights" } | { screen: "setup" } | { screen: "devlog" } | { screen: "debrief"; id: string } | { screen: "challenges"; key?: string };
+export type Route = { screen: "flights" } | { screen: "setup" } | { screen: "devlog" } | { screen: "trends" } | { screen: "debrief"; id: string } | { screen: "challenges"; key?: string };
 
-/** Hash routes, so the Tauri webview and a static build need no server rewrites: #/, #/setup, #/devlog, #/flight/<id>
+/** Hash routes, so the Tauri webview and a static build need no server rewrites: #/, #/setup, #/devlog, #/trends, #/flight/<id>
  * and #/challenges[/<key>]. */
 function parse(hash: string): Route {
   if (hash === SETUP_HREF) return { screen: "setup" };
   if (hash === DEVLOG_HREF) return { screen: "devlog" };
+  if (hash === TRENDS_HREF) return { screen: "trends" };
   const challenge = /^#\/challenges(?:\/(.+))?$/.exec(hash);
   if (challenge) return { screen: "challenges", key: challenge[1] ? decodeURIComponent(challenge[1]) : undefined };
   const match = /^#\/flight\/(.+)$/.exec(hash);
@@ -25,6 +26,7 @@ export function useRoute(): Route {
 
 export const SETUP_HREF = "#/setup";
 export const DEVLOG_HREF = "#/devlog";
+export const TRENDS_HREF = "#/trends";
 export const flightHref = (id: string) => `#/flight/${encodeURIComponent(id)}`;
 export const CHALLENGES_HREF = "#/challenges";
 export const challengeHref = (key: string) => `${CHALLENGES_HREF}/${encodeURIComponent(key)}`;
