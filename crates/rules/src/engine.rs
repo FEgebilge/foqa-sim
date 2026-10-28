@@ -652,6 +652,29 @@ mod tests {
     }
 
     #[test]
+    fn a_profile_unreliable_signal_reads_as_no_data() {
+        use crate::profile::ProfileSet;
+        let yaml = "type: TEST\nname: x\nclass: light\nunreliable: [roll]\n";
+        let set = ProfileSet::load([("TEST", yaml)]).unwrap();
+        let (roll, pitch) = (
+            Lfl::V1.by_name("roll").unwrap().id,
+            Lfl::V1.by_name("pitch").unwrap().id,
+        );
+        let t = SimTime::from_micros(0);
+        let mut flight =
+            flight_from_journal(&[Sample::new(t, roll, 40.0), Sample::new(t, pitch, 5.0)]);
+        set.select_type(Some("TEST".into()), || None)
+            .mask(&mut flight);
+        assert_eq!(
+            (flight.value(roll, t), flight.value(pitch, t)),
+            (None, Some(5.0))
+        );
+        // Without a profile nothing is masked.
+        set.select_type(None, || None).mask(&mut flight);
+        assert_eq!(flight.value(pitch, t), Some(5.0));
+    }
+
+    #[test]
     fn a_non_finite_parameter_is_unknown() {
         let id = Lfl::V1.by_name("roll").unwrap().id;
         let flight = flight_from_journal(&[Sample::new(SimTime::from_micros(0), id, NAN)]);

@@ -105,7 +105,14 @@ pub fn list(items: &[String]) -> String {
 
 /// Why a landing has no score: the required measurements in `missing`
 /// (`runway`, `peak_g`, `sink`, `rollout position`) were not recorded.
+/// The `missing` entry of a landing the score is not for: a helicopter's or
+/// a glider's.
+pub const NOT_RUNWAY_KIND: &str = "aircraft kind";
+
 pub fn not_scored_text(missing: &[&str]) -> String {
+    if missing.contains(&NOT_RUNWAY_KIND) {
+        return "Not assessed for this aircraft kind: the landing score grades airplane runway landings, so this landing counts through its findings only (event points).".into();
+    }
     let words: Vec<String> = missing
         .iter()
         .map(|m| {

@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use analyzer::{Flight, RunwayFix, TRACK_HZ, Track, Window};
 use assess::{Height, Speeds};
 pub use rules::Level;
-use rules::{Domain, ScoringClass, Sourced};
+use rules::{Airframe, Domain, Identified, ScoringClass, Selection, Sourced};
 use serde::{Deserialize, Serialize};
 
 use crate::trends::{r1, r2};
@@ -576,6 +576,31 @@ impl From<&AssessmentDetail> for Assessment {
     }
 }
 
+/// How the aircraft was identified and what that left unchecked.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Identification {
+    /// The step of the chain that matched (docs/rules.md, "Identification").
+    pub matched: Identified,
+    pub airframe: Airframe,
+    /// The type-limit checks that could not run for want of a profile
+    /// value, in words.
+    pub unchecked: Vec<&'static str>,
+    /// `false` for a helicopter or a glider: no landing score and no runway
+    /// rules.
+    pub runway_landing: bool,
+}
+
+impl From<&Selection<'_>> for Identification {
+    fn from(s: &Selection) -> Self {
+        Self {
+            matched: s.identified,
+            airframe: s.airframe,
+            unchecked: s.unchecked(),
+            runway_landing: s.airframe.runway_landing(),
+        }
+    }
+}
+
 /// `Debrief.flight`: the summary plus how the flight was graded.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct FlightHeader {
@@ -586,6 +611,7 @@ pub struct FlightHeader {
     /// `light` or `transport`: the profile's class, else the class by weight.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub class: Option<String>,
+    pub identification: Identification,
     /// The type profile's values that do not depend on the flight state,
     /// by their `profile.<name>` in rules.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]

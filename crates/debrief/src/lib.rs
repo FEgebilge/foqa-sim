@@ -216,10 +216,12 @@ impl Station {
         &self.profiles
     }
 
-    /// `None` when the flight has no air/ground data to analyse.
-    pub fn analyse(&self, id: String, flight: Flight) -> Option<Analysis<'_>> {
-        let track = Track::new(&flight)?;
+    /// `None` when the flight has no air/ground data to analyse. The type
+    /// profile's unreliable signals are read as no data throughout.
+    pub fn analyse(&self, id: String, mut flight: Flight) -> Option<Analysis<'_>> {
         let selection = self.profiles.select(&flight);
+        selection.mask(&mut flight);
+        let track = Track::new(&flight)?;
         Some(Analysis {
             events: rules::evaluate(&self.rules, &selection, &flight, &track),
             touchdowns: touchdowns(&flight, &track),
@@ -349,6 +351,7 @@ impl Analysis<'_> {
                 lfl_version: self.flight.lfl_version(),
                 profile: self.selection.to_string(),
                 class: self.selection.class.map(|c| c.to_string()),
+                identification: (&self.selection).into(),
                 profile_limits: self.profile_limits(),
                 phase_values: PhaseField::ALL
                     .map(|f| (f.name(), self.selection.phase_value(f)))
@@ -795,6 +798,14 @@ mod tests {
         assert!(!json.contains("NaN") && !json.contains("inf"));
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         let flight = &v["flight"];
+        // The capture predates the identity: nothing is known, every type
+        // limit is off, and it is still taken for an airplane.
+        let id = &flight["identification"];
+        assert_eq!(
+            (id["matched"].as_str(), id["runway_landing"].as_bool()),
+            (Some("unknown"), Some(true))
+        );
+        assert_eq!(id["unchecked"].as_array().unwrap().len(), 9);
         assert_eq!(flight["profile"], "no aircraft identity, unknown class");
         assert_eq!(flight["worst_level"], "medium");
 

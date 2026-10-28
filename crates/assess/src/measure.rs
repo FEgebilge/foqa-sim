@@ -5,11 +5,12 @@
 
 use analyzer::{Approach, Flight, Phase, Touchdown, Track, held, phases, wind_components};
 use fdm_core::SimTime;
-use rules::{Aircraft, Domain, Event, RefSpeeds, Rule, ScoringClass, Selection};
+use rules::{Domain, Event, ProfileField, RefSpeeds, Rule, ScoringClass, Selection};
 use serde::Serialize;
 
 use crate::method::{Context, Height, Method};
 use crate::score::{Finding, LandingScore, Measures, Outcome, Value};
+use crate::text::NOT_RUNWAY_KIND;
 
 const FT_PER_M: f64 = 1.0 / 0.3048;
 /// Descent rate on a 3 deg path per knot of ground speed: tan 3 deg x
@@ -140,7 +141,7 @@ impl Method {
     /// The top and bottom of the landing's approach window, ft above the
     /// runway: its class's, the top lowered to a challenge gate.
     pub fn window_ft(&self, l: &Landing) -> (f64, f64) {
-        let window = self.windows[&scoring_class(l.selection)];
+        let window = self.windows[&l.selection.scoring_class()];
         let top = l.gate_ft.map_or(window.top_ft, |g| g.min(window.top_ft));
         (top, window.bottom_ft.unwrap_or(l.selection.phases.flare_ft))
     }
@@ -152,9 +153,12 @@ impl Method {
         &self,
         l: &Landing,
     ) -> Result<(Measures, Option<Speeds>, bool), Vec<&'static str>> {
+        if !l.selection.airframe.runway_landing() {
+            return Err(vec![NOT_RUNWAY_KIND]);
+        }
         let (flight, track) = (l.flight, l.track);
         let td = &l.touchdowns[l.index];
-        let class = scoring_class(l.selection);
+        let class = l.selection.scoring_class();
         let (top, bottom) = self.window_ft(l);
         let a = Approach::of(flight, track, td, top, bottom);
         // Slowed to taxi speed on the ground, or still rolling where the
@@ -211,8 +215,8 @@ impl Method {
             .as_ref()
             .map(|s| if light { s.vapp_kt } else { s.vref_kt });
         let profile_value = |f| l.selection.profile.and_then(|p| p.value(f, || None));
-        let track_ft = profile_value(rules::ProfileField::MainGearTrack)
-            .unwrap_or(self.fallback_track_ft[&class]);
+        let track_ft =
+            profile_value(ProfileField::MainGearTrack).unwrap_or(self.fallback_track_ft[&class]);
         let aim_m = if light {
             LIGHT_AIM_M
         } else {
@@ -221,7 +225,8 @@ impl Method {
         let target_m = l.target_m.unwrap_or(aim_m);
         // The glidepath to the target at the threshold, at the wheels.
         let path_ft = target_m * FT_PER_M * GLIDEPATH_DEG.to_radians().tan();
-        let tch_ft = path_ft.min(TCH_FT) - eye_to_wheel_ft(class);
+        let eye_ft = profile_value(ProfileField::EyeToWheel).unwrap_or(eye_to_wheel_ft(class));
+        let tch_ft = path_ft.min(TCH_FT) - eye_ft;
         let context = Context {
             add_kt: speeds.as_ref().map(|s| s.vapp_kt - s.vref_kt),
             gust_kt: Some(0.0),
@@ -232,7 +237,7 @@ impl Method {
             lda_ft: Some(fix.lda_m * FT_PER_M),
             width_ft: Some(fix.width_m * FT_PER_M),
             track_ft: Some(track_ft),
-            hard_g: profile_value(rules::ProfileField::HardLandingG),
+            hard_g: profile_value(ProfileField::HardLandingG),
         };
 
         let mut values: Vec<(String, Value)> = Vec::new();
@@ -286,7 +291,7 @@ impl Method {
             );
             crossing = None;
         }
-        let tail = profile_value(rules::ProfileField::TailLandingPitch);
+        let tail = profile_value(ProfileField::TailLandingPitch);
         let scalars = [
             (
                 "A6",
@@ -357,19 +362,11 @@ impl Method {
     }
 }
 
-/// The profile's scoring class, else the default of the rule class
-/// (transport where unknown, as the rules grade it).
-pub fn scoring_class(s: &Selection) -> ScoringClass {
-    s.profile.map_or_else(
-        || ScoringClass::of(s.class.unwrap_or(Aircraft::Transport)),
-        |p| p.scoring_class,
-    )
-}
-
 /// Eye to main-wheel height on the glidepath, from the FAA Order 8260.3
 /// height groups: HG1 up to 10 ft (general aviation, commuters), HG2 10-15
-/// ft (737, A320); the class value is an estimate within them. The radio
-/// height B1 reads is the wheels' (`Track::ra_ft`).
+/// ft (737, A320); the class value is an estimate within them, for types
+/// whose profile gives none (`eye_to_wheel`). The radio height B1 reads is
+/// the wheels' (`Track::ra_ft`).
 fn eye_to_wheel_ft(class: ScoringClass) -> f64 {
     match class {
         ScoringClass::Light => 6.0,

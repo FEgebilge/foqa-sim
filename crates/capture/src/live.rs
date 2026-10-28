@@ -508,7 +508,10 @@ mod tests {
         identity.report(reported("C172SP G1000 Passengers"));
         let facts = identity.next().unwrap().facts;
         assert_eq!(facts.category.as_deref(), Some("Airplane"));
-        assert_eq!((facts.engine_type, facts.max_gross_lb), (Some(0), Some(2550)));
+        assert_eq!(
+            (facts.engine_type, facts.max_gross_lb),
+            (Some(0), Some(2550))
+        );
         // A change of a fact alone is emitted; the same facts are not.
         identity.facts(&[0.0, 1.0, 0.0, 0.0, 0.0, 2550.0]);
         assert_eq!(identity.next(), None);
