@@ -41,7 +41,7 @@ const LIVE_EVERY: Duration = Duration::from_millis(250);
 const SNAPSHOT_EVERY: Duration = Duration::from_secs(5);
 /// A snapshot analyses the whole journal so far, so its cost grows with the
 /// flight: the next waits at least this many times the last one's, which
-/// keeps it under 1% of a core (a 10 h flight about every 100 s).
+/// keeps it under 1% of a core (every 100 s once one takes 1 s).
 const SNAPSHOT_COST_FACTOR: u32 = 100;
 
 /// What the service reports.
