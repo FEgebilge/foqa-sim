@@ -246,6 +246,7 @@ fn unit_named(word: &str) -> Option<Unit> {
         "ft" => Unit::Feet,
         "kt" => Unit::Knots,
         "deg" => Unit::Degrees,
+        "deg/s" => Unit::DegreesPerSecond,
         "g" => Unit::G,
         "fpm" => Unit::FeetPerMinute,
         "dot" | "dots" => Unit::Dots,
@@ -280,7 +281,11 @@ fn lex(src: &str) -> Result<Vec<(Tok, Range<usize>)>, Error> {
                 .map_err(|_| Error::new("malformed number", i..end))?;
             // A unit may follow, separated by spaces.
             let unit_start = word_end(end, |b| b == b' ');
-            let unit_end = word_end(unit_start, |b| b.is_ascii_alphabetic() || b == b'%');
+            let mut unit_end = word_end(unit_start, |b| b.is_ascii_alphabetic() || b == b'%');
+            // `deg/s`, the one unit with a slash.
+            if &src[unit_start..unit_end] == "deg" && src[unit_end..].starts_with("/s") {
+                unit_end += 2;
+            }
             match unit_named(&src[unit_start..unit_end]) {
                 Some(unit) => {
                     tokens.push((Tok::Num(x, Some(unit)), i..unit_end));
@@ -687,6 +692,7 @@ mod tests {
         assert_eq!(literal("30 deg"), Ok((30.0, Some(Unit::Degrees))));
         assert_eq!(literal("-10 kt"), Ok((-10.0, Some(Unit::Knots))));
         assert_eq!(literal("2 s"), Ok((2.0, Some(Unit::Seconds))));
+        assert_eq!(literal("3 deg/s"), Ok((3.0, Some(Unit::DegreesPerSecond))));
         assert_eq!(literal("1.6"), Ok((1.6, None)));
         assert!(literal("height").is_err());
     }

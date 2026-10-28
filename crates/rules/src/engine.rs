@@ -1,13 +1,14 @@
 use std::ops::Range;
 
 use analyzer::{
-    Flight, Phase, RunwayFix, Touchdown, Track, phase_labels, runs, touchdowns, wind_components,
+    Flight, Phase, RunwayFix, Touchdown, Track, phase_labels, rotation_rate, runs, touchdowns,
+    wind_components,
 };
 use fdm_core::{SimTime, Unit};
 
 use crate::expr::{Expr, Values};
 use crate::profile::{Profile, ProfileField, Selection};
-use crate::rule::{Aircraft, Level, Limits, Rule, Side, TdField, Trigger, Var};
+use crate::rule::{Aircraft, Level, Limits, Rule, Side, TakeoffField, TdField, Trigger, Var};
 
 const FEET_PER_METRE: f64 = 3.280_839_895;
 /// A gate re-arms when more than this passes between two points of its
@@ -66,6 +67,7 @@ pub fn evaluate(
     track: &Track,
 ) -> Vec<Event> {
     let phases = phase_labels(track, &selection.phases);
+    let takeoffs = Takeoffs::new(flight, track, &phases);
     let tds = touchdowns(flight, track);
     let class = selection.class.unwrap_or(Aircraft::Transport);
     let mut events: Vec<Event> = rules
@@ -78,6 +80,7 @@ pub fn evaluate(
                 flight,
                 track,
                 phases: &phases,
+                takeoffs: &takeoffs,
             }
             .run(&tds)
         })
@@ -86,11 +89,40 @@ pub fn evaluate(
     events
 }
 
+/// `takeoff.*` at every track point, `NaN` outside a takeoff.
+#[derive(Default)]
+struct Takeoffs {
+    rotation_dps: Vec<f64>,
+    flap_deg: Vec<f64>,
+}
+
+impl Takeoffs {
+    /// Each takeoff roll's values over it and the initial climb after it.
+    fn new(flight: &Flight, track: &Track, phases: &[Phase]) -> Self {
+        let n = track.len();
+        let mut out = Self {
+            rotation_dps: vec![f64::NAN; n],
+            flap_deg: vec![f64::NAN; n],
+        };
+        for roll in runs(n, |i| phases[i] == Phase::Takeoff) {
+            let climb = (roll.end..n).take_while(|&i| phases[i] == Phase::InitialClimb);
+            let end = climb.last().map_or(roll.end, |i| i + 1);
+            let liftoff = roll.clone().find(|&i| !track.on_ground[i]);
+            let flap = liftoff.and_then(|i| flight.at("flap.te_angle", track.t[i]));
+            let start = roll.start;
+            out.rotation_dps[start..end].fill(rotation_rate(track, roll).unwrap_or(f64::NAN));
+            out.flap_deg[start..end].fill(flap.unwrap_or(f64::NAN));
+        }
+        out
+    }
+}
+
 /// The values one expression evaluation sees.
 struct Point<'a> {
     profile: Option<&'a Profile>,
     flight: &'a Flight,
     track: &'a Track,
+    takeoffs: &'a Takeoffs,
     i: usize,
     td: Option<&'a Touchdown>,
 }
@@ -119,6 +151,10 @@ impl Values<Var> for Point<'_> {
             Var::Vs => finite(self.track.vs_fpm[self.i]),
             Var::Height => finite(self.track.aal_ft[self.i]),
             Var::Ra => finite(self.track.ra_ft[self.i]),
+            Var::Takeoff(field) => finite(match field {
+                TakeoffField::RotationRate => self.takeoffs.rotation_dps[self.i],
+                TakeoffField::Flap => self.takeoffs.flap_deg[self.i],
+            }),
             Var::Profile(field @ (ProfileField::Vref | ProfileField::Vapp)) => {
                 let flight = self.flight;
                 let speeds = self
@@ -183,6 +219,7 @@ struct Evaluation<'a> {
     flight: &'a Flight,
     track: &'a Track,
     phases: &'a [Phase],
+    takeoffs: &'a Takeoffs,
 }
 
 impl<'a> Evaluation<'a> {
@@ -205,6 +242,7 @@ impl<'a> Evaluation<'a> {
             profile: self.profile,
             flight: self.flight,
             track: self.track,
+            takeoffs: self.takeoffs,
             i,
             td,
         }
@@ -444,6 +482,7 @@ mod tests {
             flight: &flight_from_journal(&[]),
             track,
             phases,
+            takeoffs: &Takeoffs::default(),
         }
         .run(&[])
     }
@@ -580,6 +619,7 @@ mod tests {
             profile: None,
             flight: &flight,
             track: &track,
+            takeoffs: &Takeoffs::default(),
             i: 0,
             td: None,
         };
