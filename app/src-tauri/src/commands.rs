@@ -151,6 +151,11 @@ impl Shared {
         self.index.summaries(&self.station)
     }
 
+    /// `summaries`, each analysing thread first running `start`.
+    pub fn summaries_with(&self, start: &(dyn Fn() + Sync)) -> Vec<FlightSummary> {
+        self.index.summaries_with(&self.station, start)
+    }
+
     /// The compact flights only: what trends and exports are about, and
     /// without analysing the journal that changes on every flush.
     pub fn saved(&self) -> Vec<FlightSummary> {
@@ -229,14 +234,7 @@ pub async fn list_flights(shared: State<'_, Arc<Shared>>) -> Result<Vec<FlightSu
 #[tauri::command]
 pub async fn trends(filter: TrendFilter, shared: State<'_, Arc<Shared>>) -> Result<Trends, String> {
     let shared = Arc::clone(&shared);
-    blocking(move || {
-        Ok(::debrief::trends(
-            &shared.saved(),
-            &filter,
-            &shared.station,
-        ))
-    })
-    .await
+    blocking(move || Ok(::debrief::trends(&shared.saved(), &filter, &shared.station))).await
 }
 
 #[tauri::command]

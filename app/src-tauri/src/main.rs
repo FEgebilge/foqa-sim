@@ -30,10 +30,11 @@ use capture::{Happening, Service};
 use commands::{Shared, lock};
 use library::Library;
 use serde::Serialize;
+use serde_json::json;
 use setup::Setup;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Emitter, Manager, WindowEvent, Wry};
+use tauri::{AppHandle, Emitter, Manager, RunEvent, WebviewWindowBuilder, Wry};
 use tauri_plugin_notification::NotificationExt;
 
 /// How long Quit waits for the recorder to close an open flight's files.
@@ -143,27 +144,48 @@ fn main() {
             }
             start(app).inspect_err(|e| diag::start_failed(app.handle(), e))
         })
-        // The window only hides: the app keeps recording from the tray.
-        .on_window_event(|window, event| {
-            if let WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                let _ = window.hide();
-            }
-        })
-        .run(tauri::generate_context!())
+        .build(tauri::generate_context!())
         // The dialog is shown (`start_failed`); a panic here would add nothing.
         .unwrap_or_else(|e| {
             eprintln!("error while running FOQA-Sim: {e}");
             std::process::exit(1)
+        })
+        // Closing the window destroys it (its WebView is the app's biggest
+        // memory cost; `show` builds it again) and the app keeps recording
+        // from the tray: only Quit (`exit(0)`) ends it.
+        .run(|_, event| {
+            if let RunEvent::ExitRequested {
+                api, code: None, ..
+            } = event
+            {
+                api.prevent_exit();
+            }
         });
 }
 
 type Failure = Box<dyn std::error::Error>;
 
+/// Puts the calling thread in Windows' background mode: the lowest CPU, disk
+/// and memory priority, for as long as it lives.
+fn background() {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::System::Threading::{
+            GetCurrentThread, SetThreadPriority, THREAD_MODE_BACKGROUND_BEGIN,
+        };
+        // SAFETY: neither call takes a pointer, and the pseudo handle needs no closing.
+        unsafe { SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN) };
+    }
+}
+
 /// Opens the folders and starts the recorder and the shared state.
 fn start(app: &mut tauri::App) -> Result<(), Failure> {
     let station = Arc::new(Station::core()?);
-    let dir = app.path().document_dir()?.join("FOQA-Sim").join("flights");
+    // FOQA_FLIGHTS_DIR: a test run's own folder, not the user's flights.
+    let dir = match std::env::var_os("FOQA_FLIGHTS_DIR") {
+        Some(dir) => dir.into(),
+        None => app.path().document_dir()?.join("FOQA-Sim").join("flights"),
+    };
     // FOQA_RAW=1 also keeps raw captures, to replay through a changed chain.
     let mut service = Service::new(dir.clone(), Arc::clone(&station))?
         .raw(std::env::var_os("FOQA_RAW").is_some());
@@ -231,9 +253,10 @@ fn start(app: &mut tauri::App) -> Result<(), Failure> {
             }
         }
     });
-    // Brings the flight list's index up to date before it is asked for.
+    // Brings the flight list's index up to date before it is asked for, in the
+    // background: after an update it analyses every flight, maybe beside a running sim.
     let warm = Arc::clone(&shared);
-    thread::spawn(move || warm.summaries());
+    thread::spawn(move || warm.summaries_with(&background));
 
     let handle = app.handle().clone();
     app.notification().on_action(move |action| {
@@ -241,10 +264,11 @@ fn start(app: &mut tauri::App) -> Result<(), Failure> {
         if action.action_id() != "tap" {
             return;
         }
-        show(&handle, extra(FLIGHT_ID));
-        if let Some(key) = extra(CHALLENGE_KEY) {
-            let _ = handle.emit("open-challenge", OpenChallenge { key });
-        }
+        let flight = extra(FLIGHT_ID).map(Open::Flight);
+        show(
+            &handle,
+            flight.or(extra(CHALLENGE_KEY).map(Open::Challenge)),
+        );
     })?;
     let tray = Tray::new(app.handle())?;
     // The installer restarts the app like any start, hidden in the tray: after an update, show it.
@@ -334,17 +358,65 @@ fn notify(app: &AppHandle, notice: &LandingNotice) {
     }
 }
 
-/// Brings the debrief window up, on a flight if one is named: the frontend
-/// opens it on the `open-flight` event.
-pub(crate) fn show(app: &AppHandle, flight_id: Option<&str>) {
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.unminimize();
-        let _ = window.show();
-        let _ = window.set_focus();
+/// What the window opens on.
+pub(crate) enum Open<'a> {
+    Flight(&'a str),
+    Challenge(&'a str),
+}
+
+/// Brings the debrief window up, on `open` if given: the open window's
+/// frontend follows the `open-flight` and `open-challenge` events, a window
+/// built anew starts on it (`create`).
+pub(crate) fn show(app: &AppHandle, open: Option<Open>) {
+    let Some(window) = app.get_webview_window("main") else {
+        return create(app, open);
+    };
+    let _ = window.unminimize();
+    let _ = window.show();
+    let _ = window.set_focus();
+    let sent = match open {
+        Some(Open::Flight(flight_id)) => app.emit("open-flight", OpenFlight { flight_id }),
+        Some(Open::Challenge(key)) => app.emit("open-challenge", OpenChallenge { key }),
+        None => Ok(()),
+    };
+    if let Err(e) = sent {
+        eprintln!("event not sent: {e}");
     }
-    if let Some(flight_id) = flight_id {
-        let _ = app.emit("open-flight", OpenFlight { flight_id });
-    }
+}
+
+/// Builds the window the config describes (`"create": false`) and shows it.
+/// The frontend takes its route from the URL hash, and a link or the
+/// recorder status it asks for when it starts, so nothing pushed is missed.
+/// On a thread of its own: a window built inside an event handler can
+/// deadlock on Windows.
+fn create(app: &AppHandle, open: Option<Open>) {
+    let route = open.map(|open| match open {
+        Open::Flight(id) => ("flight", id),
+        Open::Challenge(key) => ("challenges", key),
+    });
+    let script = route.map(|(screen, id)| {
+        format!(
+            "location.hash = '/{screen}/' + encodeURIComponent({});",
+            json!(id)
+        )
+    });
+    let app = app.clone();
+    thread::spawn(move || {
+        let built = || {
+            let config = app.config().app.windows.first().cloned();
+            let config = config.ok_or(tauri::Error::WindowNotFound)?;
+            let mut builder = WebviewWindowBuilder::from_config(&app, &config)?
+                .visible(true)
+                .focused(true);
+            if let Some(script) = script {
+                builder = builder.initialization_script(script);
+            }
+            builder.build()
+        };
+        if let Err(e) = built() {
+            eprintln!("window not built: {e}");
+        }
+    });
 }
 
 #[derive(Clone, Serialize)]
