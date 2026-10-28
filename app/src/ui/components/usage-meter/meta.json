@@ -1,0 +1,18 @@
+{
+  "title": "Usage meter",
+  "description": "Show what fills an allowance and how close it is to the limit.",
+  "category": "Feedback",
+  "kind": "component",
+  "dependencies": [
+    "lucide-react",
+    "motion"
+  ],
+  "requires": [],
+  "tags": [
+    "meter",
+    "usage",
+    "storage"
+  ],
+  "source": "arc",
+  "canvas": []
+}

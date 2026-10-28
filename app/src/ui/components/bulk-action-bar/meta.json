@@ -1,0 +1,25 @@
+{
+  "title": "Bulk action bar",
+  "description": "A selection toolbar that docks in with a rolling count, select-all, overflow actions and confirmations that ask in place.",
+  "category": "Actions",
+  "kind": "component",
+  "dependencies": [
+    "lucide-react",
+    "motion"
+  ],
+  "requires": [
+    "button",
+    "confirm-morph",
+    "dropdown-menu",
+    "tooltip"
+  ],
+  "tags": [
+    "selection",
+    "bulk",
+    "toolbar",
+    "actions",
+    "new"
+  ],
+  "source": "egebilge",
+  "canvas": []
+}

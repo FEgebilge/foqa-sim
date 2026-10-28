@@ -1,0 +1,17 @@
+{
+  "title": "Tabs",
+  "description": "Page and section tabs: a hairline row with an accent bar under the active tab. For a compact toggle use Pill tabs.",
+  "category": "Disclosure",
+  "kind": "component",
+  "dependencies": [
+    "@radix-ui/react-tabs",
+    "lucide-react",
+    "motion"
+  ],
+  "requires": [],
+  "tags": [
+    "navigation",
+    "layout"
+  ],
+  "source": "arc"
+}

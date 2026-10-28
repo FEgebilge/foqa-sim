@@ -1,0 +1,18 @@
+{
+  "title": "Inline edit",
+  "description": "Rename in place: the text becomes a field without moving.",
+  "category": "Inputs",
+  "kind": "component",
+  "dependencies": [
+    "lucide-react",
+    "motion"
+  ],
+  "requires": [],
+  "tags": [
+    "inline edit",
+    "rename",
+    "click to edit"
+  ],
+  "source": "arc",
+  "canvas": []
+}

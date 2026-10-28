@@ -1,0 +1,18 @@
+{
+  "title": "Select",
+  "description": "A compact choice field with a keyboard friendly menu.",
+  "category": "Inputs",
+  "kind": "component",
+  "dependencies": [
+    "@radix-ui/react-select",
+    "lucide-react",
+    "motion"
+  ],
+  "requires": [],
+  "tags": [
+    "field",
+    "form"
+  ],
+  "source": "arc",
+  "canvas": []
+}

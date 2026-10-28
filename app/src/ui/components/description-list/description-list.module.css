@@ -1,0 +1,25 @@
+/* Every value comes from foundation tokens. These properties retune the list from a theme, an ancestor, or the
+   style/className passthrough, without touching this file:
+     --description-list-gap           space between rows and columns (default: --space-4 --space-6, --space-3 --space-5 compact)
+     --description-list-label-color   label colour (default: --text-muted)
+     --description-list-value-size    value font size (default: --text-sm)
+     --description-list-min-height    shortest value row (default: 28px, 22px compact)
+     --description-list-edge          edge drawn on a changed item (default: --accent) */
+.root { container: description-list / inline-size; min-width: 0; }
+.list { --_cols: 2; --_row: var(--description-list-min-height, 28px); display: grid; grid-template-columns: repeat(var(--_cols), minmax(0, 1fr)); gap: var(--description-list-gap, var(--space-4) var(--space-6)); margin: 0; }
+.list[data-density="compact"] { --_row: var(--description-list-min-height, 22px); gap: var(--description-list-gap, var(--space-3) var(--space-5)); }
+.list[data-columns="1"] { --_cols: 1; }
+.list[data-columns="3"] { --_cols: 3; }
+.item { display: grid; align-content: start; gap: 2px; min-width: 0; }
+/* A changed item gets an edge plus indent (a shape cue, not colour alone); the sr-only text says it for assistive tech. */
+.item[data-changed] { padding-inline-start: var(--space-2); box-shadow: inset 2px 0 0 var(--description-list-edge, var(--accent)); }
+.item dt { color: var(--description-list-label-color, var(--text-muted)); font-size: var(--text-xs); }
+.item dd { display: flex; align-items: center; gap: 6px; min-width: 0; min-height: var(--_row); margin: 0; font-size: var(--description-list-value-size, var(--text-sm)); overflow-wrap: anywhere; }
+.item[data-empty] dd { color: var(--text-muted); }
+.value { min-width: 0; }
+.icon { display: inline-grid; flex: none; place-items: center; color: var(--text-muted); }
+.item dd.hint { min-height: 0; color: var(--text-muted); font-size: var(--text-xs); }
+.srOnly { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+@container description-list (width >= 420px) { .list:not([data-columns="1"]) .item[data-span="2"] { grid-column: span 2; } }
+@container description-list (width < 640px) { .list[data-columns="3"] { --_cols: 2; } }
+@container description-list (width < 420px) { .list[data-columns] { --_cols: 1; } }

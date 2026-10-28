@@ -1,0 +1,69 @@
+/* Every value comes from foundation tokens. These properties retune the bar from a theme, an ancestor, or the
+   style/className passthrough, without touching this file:
+     --bulk-action-bar-offset      gap between the docked bar and the bottom edge (default: --space-4)
+     --bulk-action-bar-max-width   widest the bar grows before it folds labels into icons (default: 720px)
+     --bulk-action-bar-gutter      least room kept on either side of the bar (default: --space-3; 0 when inline)
+     --bulk-action-bar-radius      bar corners (default: --radius-panel)
+     --bulk-action-bar-padding     ring between the bar's edge and its controls (default: 6px)
+     --bulk-action-bar-bg          bar fill (default: --surface-raised)
+     --bulk-action-bar-shadow      bar elevation (default: --shadow-floating)
+     --bulk-action-bar-z           stacking order while docked (default: 40) */
+.root { --_gutter: var(--bulk-action-bar-gutter, var(--space-3)); --_pad: var(--bulk-action-bar-padding, 6px); --_max: min(var(--bulk-action-bar-max-width, 720px), 100cqi - 2 * var(--_gutter)); container: bulk-action-bar / inline-size; position: relative; z-index: var(--bulk-action-bar-z, 40); display: flex; min-width: 0; justify-content: center; font-family: var(--font-body); letter-spacing: var(--tracking-body); pointer-events: none; }
+/* Sticky sits in the flow after the list, so a short list keeps it right below the last row, and a long one keeps it on the edge. */
+.root[data-position="sticky"] { position: sticky; bottom: var(--bulk-action-bar-offset, var(--space-4)); }
+.root[data-position="fixed"] { position: fixed; right: 0; bottom: var(--bulk-action-bar-offset, var(--space-4)); left: 0; }
+.root[data-position="inline"] { --_gutter: var(--bulk-action-bar-gutter, 0px); }
+/* The root spans its container so it can measure it; only the bar takes pointer events, so rows beside it stay clickable. */
+.bar { position: relative; display: flex; max-width: 100%; margin-top: var(--space-3); border: 1px solid var(--border); border-radius: var(--bulk-action-bar-radius, var(--radius-panel)); padding: var(--_pad); background: var(--bulk-action-bar-bg, var(--surface-raised)); color: var(--foreground); box-shadow: var(--bulk-action-bar-shadow, var(--shadow-floating)); pointer-events: auto; transition: border-color var(--duration-fast) var(--ease-standard); }
+.root[data-position="inline"] .bar { margin-top: 0; }
+/* An open danger question tints the edge with the badge formula, so the bar reads as asking before the prompt is read. */
+.bar[data-confirming="danger"] { border-color: color-mix(in oklab, var(--danger) 25%, var(--border)); }
+/* The frame's width springs to the content's natural width; the content stays centred and may overhang evenly while it catches up. */
+.frame { display: flex; min-width: 0; justify-content: center; }
+.frame[data-morphing] { overflow: clip; overflow-clip-margin: var(--_pad); }
+.content { position: relative; display: flex; flex: none; width: max-content; max-width: calc(var(--_max) - 2 * var(--_pad) - 2px); min-width: 0; align-items: center; gap: var(--space-1); }
+.summary { display: flex; flex: 0 0 auto; min-width: 0; align-items: center; gap: 10px; padding-inline: 4px var(--space-2); }
+/* The count chip mirrors notification-center's: a quiet tile on tabular figures that rolls between values. */
+.count { display: grid; flex: none; min-width: 24px; height: 24px; box-sizing: border-box; place-items: center; overflow: hidden; border-radius: calc(var(--radius-control) * .4); padding: 0 6px; background: var(--surface-muted); color: var(--foreground); font-family: var(--font-display); font-size: var(--text-xs); font-weight: 600; letter-spacing: var(--tracking-display); line-height: 1; font-variant-numeric: tabular-nums; }
+.text { display: grid; min-width: 0; line-height: 1.25; }
+.noun, .status { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.noun { font-size: var(--text-sm); font-weight: 500; }
+.status { color: var(--text-muted); font-size: var(--text-xs); }
+.status:empty { display: none; }
+.divider { width: 1px; height: 20px; flex: none; margin-inline: var(--space-1); background: var(--border); }
+/* Folding controls clip while their width springs, and the question clips to its pill; focus draws inside both so no clip cuts the outline. */
+.slot { display: flex; flex: none; align-items: center; overflow: hidden; }
+.slotInner { display: flex; flex: none; align-items: center; }
+.slot :focus-visible, .confirm :focus-visible { --focus-outline-offset: -2px; }
+/* Text-only ghost buttons sit tighter than outlined ones, so the row spends its width on actions. */
+.ghostText { padding-inline: var(--space-2); }
+/* The leaving group pops out of the flow against the stage, so the next one takes its room at once and the bar springs to fit. */
+.stage { position: relative; display: flex; flex: none; align-items: center; }
+.region { display: flex; flex: none; align-items: center; gap: var(--space-1); }
+.actionIcon { display: inline-flex; flex: none; }
+.actionIcon > svg { width: 16px; height: 16px; }
+.action[data-variant="secondary"] .actionIcon { color: var(--text-secondary); }
+.iconOnly { width: var(--control-height-sm); padding-inline: 0; }
+/* A reason or a running sibling disables with aria-disabled (so focus stays), which Button does not style; this mirrors its
+   :disabled look: outlined buttons keep their shape and mute the label, the filled one fades. */
+.action[aria-disabled="true"]:not([aria-busy="true"]) { cursor: not-allowed; }
+.action:is([data-variant="secondary"], [data-variant="danger"])[aria-disabled="true"]:not([aria-busy="true"]) { border-color: var(--border); background: var(--surface-muted); color: var(--text-muted); box-shadow: none; }
+.action[data-variant="danger"][aria-disabled="true"]:not([aria-busy="true"]) { color: color-mix(in oklab, var(--danger) 55%, var(--surface-muted)); }
+.action[aria-disabled="true"]:not([aria-busy="true"]) .actionIcon { color: inherit; }
+.action[data-variant="primary"][aria-disabled="true"]:not([aria-busy="true"]) { opacity: .52; box-shadow: none; }
+@media (hover: hover) and (pointer: fine) {
+  .action:is([data-variant="secondary"], [data-variant="danger"])[aria-disabled="true"]:not([aria-busy="true"]):hover { border-color: var(--border); background: var(--surface-muted); box-shadow: none; }
+  .action[data-variant="primary"][aria-disabled="true"]:not([aria-busy="true"]):hover { opacity: .52; box-shadow: none; }
+}
+/* Folding (see useFold): nothing shrinks, so a row that does not fit folds a level instead of squeezing. Level 1 drops
+   "selected", level 2 the status line, and level 3 leaves the count chip on its own; the toolbar's description still reads
+   "3 files selected". */
+.content > * { flex-shrink: 0; }
+.bar:not([data-fold="0"]) .selectedWord, .bar:is([data-fold="2"], [data-fold="3"]) .status, .bar[data-fold="3"] .text { display: none; }
+/* A question keeps the fold it opened on and gives way by container width instead: the noun goes first, then the count. */
+@container bulk-action-bar (max-width: 560px) { .bar[data-confirming] .text { display: none; } }
+@container bulk-action-bar (max-width: 420px) { .bar[data-confirming] :is(.summary, .divider) { display: none; } }
+.bar:not([data-fold="0"]) .summary { gap: var(--space-2); padding-inline: 2px var(--space-1); }
+.bar[data-fold="3"] .summary { padding-inline: 0; }
+.srOnly { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+@media (prefers-reduced-motion: reduce) { .bar { transition: none; } }
