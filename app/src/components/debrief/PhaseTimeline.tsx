@@ -114,8 +114,8 @@ export function PhaseTimeline({ phases, phaseValues, events, touchdowns, range, 
           const w = px(phase.end_s - phase.start_s);
           return (
             <Tooltip key={index} content={<PhaseTip phase={phase} />}>
-              <div tabIndex={0} aria-label={`${phaseName(phase.phase)}, ${clock(phase.start_s)} to ${clock(phase.end_s)}. Started: ${phase.trigger}`}
-                className="absolute inset-y-0 flex items-center overflow-hidden border-r border-[var(--surface)] px-1.5 outline-offset-[-2px] focus-visible:outline-2 focus-visible:outline-[var(--foreground)]"
+              {/* Hover only: the bar is one image to a screen reader, and the legend chips below are the keyboard's way in. */}
+              <div className="absolute inset-y-0 flex items-center overflow-hidden border-r border-[var(--surface)] px-1.5"
                 style={{ left: pct(phase.start_s), width: share(phase.end_s - phase.start_s), background: `color-mix(in oklab, var(--phase-${phase.phase}, var(--phase-unknown)) 78%, var(--surface))` }}>
                 <span className="readout truncate text-[11px] font-semibold text-[oklch(18%_.03_258)]">{w > 90 ? phaseName(phase.phase) : w > 30 ? CODES[phase.phase] ?? "" : ""}</span>
               </div>
@@ -150,7 +150,7 @@ export function PhaseTimeline({ phases, phaseValues, events, touchdowns, range, 
             className="inline-flex items-center gap-1.5 rounded-full border border-line px-2 py-0.5 text-xs text-fg-2 hover:border-line-strong hover:text-fg"
             title={`Zoom the charts to ${phaseName(phase.phase)} (${clock(phase.start_s)}–${clock(phase.end_s)})`}>
             <span className="size-2 rounded-full" style={{ background: `var(--phase-${phase.phase}, var(--phase-unknown))` }} aria-hidden="true" />
-            {phaseName(phase.phase)}
+            {phaseName(phase.phase)}{CODES[phase.phase] ? <span className="readout text-fg-3" aria-hidden="true">· {CODES[phase.phase]}</span> : null}
             <span className="readout text-fg-3">{clock(phase.end_s - phase.start_s)}</span>
           </button>
         ))}

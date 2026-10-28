@@ -56,7 +56,7 @@ export function RunwayDiagram({ fix, widthM }: { fix: RunwayFix; widthM: number 
           {side} · {number(Math.abs(fix.cross_m) / M_PER_FT)} ft · runway {number(widthM)} m wide
         </text>
       </svg>
-      <figcaption className="text-[10.5px] text-fg-3">Top view: length to scale, width exaggerated. Strip: across the runway, to scale.</figcaption>
+      <figcaption className="text-[11px] text-fg-3">Top view: length to scale, width exaggerated. Strip: across the runway, to scale.</figcaption>
     </figure>
   );
 }
