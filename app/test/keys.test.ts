@@ -28,3 +28,11 @@ test("Escape resets the zoom unless a menu, dialog or field is handling it", () 
   assert.equal(shortcutAllowed(on("dialog[open]"), "Escape"), false);
   assert.equal(shortcutAllowed(null, "Escape"), true);
 });
+
+test("The character keys work on a focused button, never while typing", () => {
+  for (const key of ["j", "K", "[", "]"]) {
+    assert.equal(shortcutAllowed(on("button"), key), true);
+    assert.equal(shortcutAllowed(on("input"), key), false);
+    assert.equal(shortcutAllowed(on("[role='menu']"), key), false);
+  }
+});
