@@ -7,6 +7,9 @@
 type: B77W
 name: Boeing 777-300ER
 class: transport
+airframe: { kind: airplane, engine: jet, engines: 2, gear: retractable }
+mlw: { value: 554000 lb, source: "Boeing, Aerodrome Reference Code and Approach Speeds, Rev A, table row 777-300ER: MLW 554,000 lb (251290 kg), https://www.boeing.com/content/dam/boeing/v2/airports/faq/arcandapproachspeeds.pdf" }
+aliases: [777-300ER]
 vref:
   source: "Boeing, Aerodrome Reference Code and Approach Speeds, Rev A, table row 777-300ER: approach speed 150 kt, MLW 251,290 kg, https://www.boeing.com/content/dam/boeing/v2/airports/faq/arcandapproachspeeds.pdf"
   approximate: true

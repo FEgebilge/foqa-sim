@@ -5,6 +5,10 @@
 type: A20N
 name: Airbus A320neo
 class: transport
+airframe: { kind: airplane, engine: jet, engines: 2, gear: retractable }
+mlw: { value: 148592 lb, source: "Airbus A320 Aircraft Characteristics - Airport and Maintenance Planning, Rev Jul 15/25, subject 2-1-1 (A320neo MLW 67 400 kg), https://www.aircraft.airbus.com/sites/g/files/jlcbta126/files/2025-07/AC_A320_20250715.pdf", note: "the weight the Vref table is anchored to; EASA TCDS EASA.A.064 Issue 62 (26 Jun 2026) lists up to 68 400 kg for the A320-271N weight variants" }
+mmo: { value: 0.82 M, source: "EASA TCDS EASA.A.064 Issue 62 (26 Jun 2026), sec. 1 A320 series para 10 Maximum Operating Mach (MMO) 0.82, https://www.easa.europa.eu/en/downloads/16507/en" }
+aliases: [A320neo, A32NX]
 tail_contact:
   takeoff: { value: 13.5 deg, source: "Airbus Safety First Dec 2007, A320 tail strike at take-off (search snippet; PDF not fetchable), https://safetyfirst.airbus.com/app/themes/mh_newsdesk/documents/archives/a320-tail-strike-at-take-off.pdf", approximate: true, note: "struts fully extended; forum sources 13.5-13.7; snippet only, PDF not read" }
   landing: { value: 11.7 deg, source: "Airline FCOM flashcards (Spirit A320 limits, brainscape); Aerosoft forum https://forum.aerosoft.com/index.php?%2Ftopic%2F104076-tailstrikes%2F=", approximate: true, note: "struts compressed; secondary sources, PPRuNe quotes 11.5" }

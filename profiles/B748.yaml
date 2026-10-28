@@ -5,6 +5,9 @@
 type: B748
 name: Boeing 747-8 Intercontinental
 class: transport
+airframe: { kind: airplane, engine: jet, engines: 4, gear: retractable }
+mlw: { value: 688000 lb, source: "Boeing, Aerodrome Reference Code and Approach Speeds, Rev A, table row 747-8: MLW 688,000 lb (312072 kg), https://www.boeing.com/content/dam/boeing/v2/airports/faq/arcandapproachspeeds.pdf" }
+aliases: [747-8]
 tail_contact:
   takeoff: { value: 12.5 deg, source: "Boeing AERO tail strike article, 747-400, https://www.leonardo-in-flight.nl/PDF/Boeing AERO Tailstrikes].pdf", approximate: true, note: "struts extended; 747-400 value, the 747-8 fuselage is stretched so the true value is likely a bit lower" }
 vmo: { value: 365 kt, source: "EASA TCDS IM.A.196 747-8 section, https://www.easa.europa.eu/en/downloads/102235/en (FAA TCDS A20WE)", note: "TCDS 747-8: VMO/MMO 365 KCAS / 0.9" }

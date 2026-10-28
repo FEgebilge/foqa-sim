@@ -7,6 +7,8 @@
 type: B772
 name: Boeing 777-200 (200ER share this profile)
 class: transport
+airframe: { kind: airplane, engine: jet, engines: 2, gear: retractable }
+mlw: { value: 460000 lb, source: "Boeing, Aerodrome Reference Code and Approach Speeds, Rev A, table row 777-200: MLW 460,000 lb (208700 kg), https://www.boeing.com/content/dam/boeing/v2/airports/faq/arcandapproachspeeds.pdf" }
 vref:
   source: "Boeing, Aerodrome Reference Code and Approach Speeds, Rev A, table row 777-200: approach speed 139 kt, MLW 208,700 kg, https://www.boeing.com/content/dam/boeing/v2/airports/faq/arcandapproachspeeds.pdf"
   approximate: true

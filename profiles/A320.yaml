@@ -6,6 +6,9 @@
 type: A320
 name: Airbus A320-200 (ceo)
 class: transport
+airframe: { kind: airplane, engine: jet, engines: 2, gear: retractable }
+mlw: { value: 145505 lb, source: "EASA TCDS EASA.A.064 Issue 62 (26 Jun 2026), sec. 1 weights: A320-211/-212/-231/-214/-215/-216 max landing weight 66 000 kg, https://www.easa.europa.eu/en/downloads/16507/en", note: "the weight the Vref table is anchored to (Airbus A320 Aircraft Characteristics 3-5-0); later weight variants are heavier" }
+mmo: { value: 0.82 M, source: "EASA TCDS EASA.A.064 Issue 62 (26 Jun 2026), sec. 1 A320 series para 10 Maximum Operating Mach (MMO) 0.82, https://www.easa.europa.eu/en/downloads/16507/en" }
 tail_contact:
   takeoff: { value: 13.5 deg, source: "Airbus Safety First Dec 2007, A320 tail strike at take-off (search snippet; PDF not fetchable), https://safetyfirst.airbus.com/app/themes/mh_newsdesk/documents/archives/a320-tail-strike-at-take-off.pdf", approximate: true, note: "struts fully extended; forum sources 13.5-13.7; snippet only, PDF not read" }
   landing: { value: 11.7 deg, source: "Airline FCOM flashcards (Spirit A320 limits, brainscape); Aerosoft forum https://forum.aerosoft.com/index.php?%2Ftopic%2F104076-tailstrikes%2F=", approximate: true, note: "struts compressed; secondary sources, PPRuNe quotes 11.5" }

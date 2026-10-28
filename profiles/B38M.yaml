@@ -6,6 +6,10 @@
 type: B38M
 name: Boeing 737 MAX 8
 class: transport
+airframe: { kind: airplane, engine: jet, engines: 2, gear: retractable }
+mlw: { value: 152800 lb, source: "Boeing, Aerodrome Reference Code and Approach Speeds, Rev A, table row 737-8: MLW 152,800 lb (69308 kg), https://www.boeing.com/content/dam/boeing/v2/airports/faq/arcandapproachspeeds.pdf" }
+mmo: { value: 0.82 M, source: "737 NG/MAX FCOM limitations (340 KCAS/0.82M), same secondary source as vmo; EASA TCDS IM.A.120 Issue 29 defers to the AFM", approximate: true, note: "not read from a primary document" }
+aliases: [737 MAX 8]
 tail_contact:
   takeoff: { value: 11.0 deg, source: &fctm "Boeing 737 FCTM, takeoff tail clearance table, 737-8 row, e.g. Copa 737 FCTM section 3.35, https://cmpva.org/descargas/B737_FCTM.pdf", note: "struts extended, wheels on runway" }
   landing: { value: 9.2 deg, source: "Boeing 737 FCTM, landing body/tail-skid contact chart, 737-8 with one-position tail skid, +-0.1 deg, Copa 737 FCTM p. 6.14, https://cmpva.org/descargas/B737_FCTM.pdf#page=276", note: "struts compressed; MSFS skid configuration unverified" }

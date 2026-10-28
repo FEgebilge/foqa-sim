@@ -5,6 +5,10 @@
 type: B78X
 name: Boeing 787-10
 class: transport
+airframe: { kind: airplane, engine: jet, engines: 2, gear: retractable }
+mlw: { value: 445000 lb, source: "Boeing, Aerodrome Reference Code and Approach Speeds, Rev A, table row 787-10: MLW 445,000 lb (201848 kg), https://www.boeing.com/content/dam/boeing/v2/airports/faq/arcandapproachspeeds.pdf" }
+mmo: { value: 0.90 M, source: "EASA TCDS IM.A.115 Issue 30 (17 Dec 2025), sec. 3 787-10 para 10 Airspeed Limits: VMO/MMO = 350 KEAS / 0.90 M, https://www.easa.europa.eu/en/downloads/7302/en" }
+aliases: [787-10]
 vmo: { value: 350 kt, source: "EASA TCDS IM.A.115 Issue 30 Sec 3 787-10, https://www.easa.europa.eu/en/downloads/7302/en", note: "TCDS: VMO/MMO 350 KEAS / 0.90 M (certification limit); some FCOM sources show 330 kt operating VMO, unverified" }
 vle: { value: 270 kt, source: "Airliners.net forum + Quizlet 787 limitations (secondary, weak)", approximate: true, note: "787 gear extended appears to equal the gear operating limit 270 kt/0.82M (unlike 737/747 at 320); low confidence" }
 vlo: { value: 270 kt, source: "Quizlet 787 limitations / airliners.net forum (secondary)", approximate: true, note: "270 kt/0.82M for extend and retract per secondary sources" }

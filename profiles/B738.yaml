@@ -5,6 +5,10 @@
 type: B738
 name: Boeing 737-800
 class: transport
+airframe: { kind: airplane, engine: jet, engines: 2, gear: retractable }
+mlw: { value: 146300 lb, source: "Boeing, Aerodrome Reference Code and Approach Speeds, Rev A, table row 737-800: MLW 146,300 lb (66361 kg), https://www.boeing.com/content/dam/boeing/v2/airports/faq/arcandapproachspeeds.pdf" }
+mmo: { value: 0.82 M, source: "737 NG FCOM limitations (340 KCAS/0.82M), same secondary source as vmo; EASA TCDS IM.A.120 Issue 29 defers to the AFM", approximate: true, note: "not read from a primary document" }
+aliases: [B737-800]
 tail_contact:
   takeoff: { value: 11.0 deg, source: "Boeing 737 NG FCTM Rev 21, section 3.37-3.38 tail strike pitch table, https://p7aviation.com/LMS/wp-content/uploads/2023/03/B737-NG-FCTM_Rev_21.pdf" }
   landing: { value: 9.2 deg, source: "Boeing 737 NG FCTM Rev 21, section 6.13-6.15 landing contact chart, https://p7aviation.com/LMS/wp-content/uploads/2023/03/B737-NG-FCTM_Rev_21.pdf", note: "standard / one-position skid; about 8.8 deg with the two-position skid" }

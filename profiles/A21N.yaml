@@ -5,6 +5,10 @@
 type: A21N
 name: Airbus A321LR (A321neo family)
 class: transport
+airframe: { kind: airplane, engine: jet, engines: 2, gear: retractable }
+mlw: { value: 174606 lb, source: "EASA TCDS EASA.A.064 Issue 62 (26 Jun 2026), sec. 2 A321 series weights: A321-251N/-252N/-253N and later variants max landing weight 79 200 kg, https://www.easa.europa.eu/en/downloads/16507/en", note: "the weight the Vref table is anchored to (Airbus A321 Aircraft Characteristics 3-5-0)" }
+mmo: { value: 0.82 M, source: "EASA TCDS EASA.A.064 Issue 62 (26 Jun 2026), sec. 2 A321 series para 10 Maximum Operating Mach (MMO) 0.82, https://www.easa.europa.eu/en/downloads/16507/en" }
+aliases: [A321neo]
 tail_contact:
   takeoff: { value: 11.2 deg, source: "Flightglobal, A321 struck tail after pilot falsely perceived bounce https://www.flightglobal.com/a321-struck-tail-after-pilot-falsely-perceived-bounce/122689.article (9.7-11.2 deg range)", note: "struts extended; forum values 11.2-11.4" }
   landing: { value: 9.7 deg, source: "Flightglobal article as above; PPRuNe https://www.pprune.org/tech-log/619760-a320-vs-a321-conf-3-tail-strike.html", note: "struts compressed (older docs 9.5)" }
