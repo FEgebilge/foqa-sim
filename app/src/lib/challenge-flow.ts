@@ -11,12 +11,14 @@ export const FLOW = [
   { id: "result", label: "Result", description: "Graded here" },
 ];
 
-/** The step in progress (`FLOW.length`: done). The newest attempt decides once there is one; before that, a failing check keeps it at Pre-flight. */
+/** The step in progress (`FLOW.length`: done). An open attempt decides; otherwise a failing check keeps it at Pre-flight, also
+ * after a graded attempt, since the next one (Fly again) cannot start until it is fixed. */
 export function flowStep(lines: PreflightLine[] | null, attempts: AttemptView[]): number {
   const last = attempts[0];
   if (last && OPEN_STATES.includes(last.state)) return last.state === "rollout" || last.state === "finished" ? 4 : 3;
-  if (last && last.result) return FLOW.length;
-  return !lines || lines.some((l) => l.state === "fail") ? 2 : 3;
+  const blocked = !lines || lines.some((l) => l.state === "fail");
+  if (last && last.result) return blocked ? 2 : FLOW.length;
+  return blocked ? 2 : 3;
 }
 
 export interface ScorePart { name: string; label: string; weight: number }

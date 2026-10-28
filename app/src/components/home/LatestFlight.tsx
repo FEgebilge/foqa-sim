@@ -1,12 +1,12 @@
 import { useMemo, type ReactNode } from "react";
 import { ArrowDownRight, ArrowRight, ArrowUpRight, Trophy } from "lucide-react";
 import { Button } from "@ui/components/button/button";
-import { flightDate, flightTimeUtc, measured, number } from "../../lib/format";
+import { flightDate, flightTimeUtc, lengthM, measured, number } from "../../lib/format";
 import { flightHref } from "../../lib/route";
 import { direction, GRADE_VAR } from "../../lib/trends";
 import type { FlightSummary } from "../../types";
 import { EventCounts, GradeTag } from "../level";
-import { byNewest, ordinal, personal, scoredLanding, typeOf, type Compare } from "./latest";
+import { byNewest, MIN_COMPARE, ordinal, personal, scoredLanding, typeOf, type Compare } from "./latest";
 
 /** The most recent counted flight, against your own recent flights: the reason to open the app after every landing. */
 export function LatestFlight({ flights }: { flights: FlightSummary[] }) {
@@ -43,7 +43,7 @@ export function LatestFlight({ flights }: { flights: FlightSummary[] }) {
               {context.rank.place === 1 ? <Trophy size={14} className="text-accent" aria-hidden="true" /> : null}
               {context.rank.place === 1 ? `Your best ${type} landing of ${context.rank.of}` : `${ordinal(context.rank.place)} best of ${context.rank.of} in the ${type}`}
             </p>
-          ) : !context.type && assessment.score !== undefined ? <p className="text-fg-3">Your first scored {type ?? ""} flight: the next ones are compared with it.</p> : null}
+          ) : !context.type && assessment.score !== undefined ? <p className="text-fg-3">Comparisons start once you have {MIN_COMPARE} earlier scored {type ?? ""} flights.</p> : null}
         </div>
       </div>
 
@@ -52,8 +52,8 @@ export function LatestFlight({ flights }: { flights: FlightSummary[] }) {
           <>
             <Figure label="Sink rate" value={measured(landing.sink_fpm, "fpm")}>{context.sink ? <Delta compare={context.sink} digits={0} unit=" fpm" label="your mean" small /> : null}</Figure>
             <Figure label="Peak load" value={measured(landing.peak_g, "g")}>{context.g ? <Delta compare={context.g} digits={2} unit=" g" label="your mean" small /> : null}</Figure>
-            {landing.along_m !== undefined ? <Figure label="Touchdown" value={`${number(landing.along_m)} m`}>{landing.zone ? <span className="text-xs text-fg-3">past the threshold · {landing.zone}</span> : null}</Figure> : null}
-            {landing.cross_m !== undefined ? <Figure label="Centreline" value={landing.cross_m === 0 ? "0 m" : `${number(Math.abs(landing.cross_m), 1)} m ${landing.cross_m > 0 ? "R" : "L"}`} /> : null}
+            {landing.along_m !== undefined ? <Figure label="Touchdown" value={lengthM(landing.along_m)}>{landing.zone ? <span className="text-xs text-fg-3">past the threshold · {landing.zone}</span> : null}</Figure> : null}
+            {landing.cross_m !== undefined ? <Figure label="Centreline" value={landing.cross_m === 0 ? lengthM(0) : `${lengthM(Math.abs(landing.cross_m), 1)} ${landing.cross_m > 0 ? "R" : "L"}`} /> : null}
             <Figure label="Bounces" value={number(landing.bounces)} />
           </>
         ) : <Figure label="Landings" value={number(latest.landings)} />}

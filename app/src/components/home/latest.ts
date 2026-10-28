@@ -3,6 +3,8 @@ import type { FlightSummary, LandingFacts } from "../../types";
 
 /** How many of your previous flights the means and the sparkline look back over. */
 export const WINDOW = 10;
+/** Fewer earlier flights than this and a mean is one flight's luck, not your level (as the debrief's median tick). */
+export const MIN_COMPARE = 3;
 
 /** The trends rule for a flight (crates/debrief/src/trends.rs `counts`): a minute and a mile in the air at 40 kt or more.
  * A summary without `flown` (a mock, an older file) counts, so it is never silently dropped. */
@@ -34,7 +36,7 @@ export interface Compare {
 const mean = (values: number[]) => values.reduce((a, b) => a + b, 0) / values.length;
 
 function compare(value: number | undefined, previous: number[]): Compare | null {
-  if (value === undefined || !previous.length) return null;
+  if (value === undefined || previous.length < MIN_COMPARE) return null;
   const m = mean(previous);
   return { n: previous.length, mean: m, delta: value - m };
 }

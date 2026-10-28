@@ -11,7 +11,7 @@ import SegmentedControl from "@ui/components/segmented-control/segmented-control
 import { sortRowsBy, type SortState } from "@ui/components/sortable-data-table/sortable-data-table";
 import { useNotify } from "../../lib/context";
 import { duration, flightDate, GRADE_LABEL, GRADES, number } from "../../lib/format";
-import type { RecorderState } from "../../lib/use-backend";
+import type { RecorderState, Setup } from "../../lib/use-backend";
 import { useFlights, useLoad } from "../../lib/use-backend";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { ExportMenu } from "../ExportMenu";
@@ -29,7 +29,7 @@ const localDay = (date: Date) => dayKey(date.toISOString())!;
 const TRASH_DAYS = 30;
 const loadUsage = () => api.storageUsage();
 
-export function FlightsScreen({ recorder }: { recorder: RecorderState | null }) {
+export function FlightsScreen({ recorder, setup }: { recorder: RecorderState | null; setup?: Setup }) {
   const { state, refresh, refreshing, patch } = useFlights();
   const { state: usage, reload: reloadUsage } = useLoad(loadUsage);
   const openFolder = useOpenFolder();
@@ -146,7 +146,7 @@ export function FlightsScreen({ recorder }: { recorder: RecorderState | null }) 
   if (state.status === "loading") body = <TableSkeleton />;
   else if (state.status === "error") {
     body = <div className="panel"><EmptyState icon={<ServerCrash size={20} />} title="Could not read the flights" description={state.message} action={<Button variant="secondary" size="sm" onClick={refresh}>Try again</Button>} /></div>;
-  } else if (!flights.length) body = <FirstRun recorder={recorder} />;
+  } else if (!flights.length) body = <FirstRun recorder={recorder} setup={setup} />;
   else {
     const hidden = view.showAll ? 0 : others.length;
     const [shownTotal, noun] = view.showAll ? [rows.length, "recording"] : [counted.length, "flight"];

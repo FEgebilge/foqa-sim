@@ -67,15 +67,15 @@ test("scoredLanding takes the last scored full stop, else the last landing", () 
 });
 
 test("personal compares the latest with your previous flights, in the type and overall", () => {
-  // Oldest to newest: two C172s, a B738, an unscored C172, then the latest C172.
-  const flights = byNewest([flight("C172", 60, 300, 1.5), flight("C172", 80, 100, 1.3), flight("B738", 40), flight("C172", undefined), flight("C172", 75, 150, 1.2)]);
+  // Oldest to newest: three C172s, a B738, an unscored C172, then the latest C172.
+  const flights = byNewest([flight("C172", 60, 300, 1.5), flight("C172", 80, 100, 1.3), flight("C172", 70, 200, 1.4), flight("B738", 40), flight("C172", undefined), flight("C172", 75, 150, 1.2)]);
   const p = personal(flights)!;
-  assert.deepEqual(p.type, { n: 2, mean: 70, delta: 5 });
-  assert.equal(p.overall!.n, 3);
-  assert.ok(Math.abs(p.overall!.delta - 15) < 1e-9);
-  assert.deepEqual(p.rank, { place: 2, of: 3 });
-  assert.deepEqual(p.spark, [60, 80, 75]);
-  assert.deepEqual(p.sink, { n: 2, mean: 200, delta: -50 });
+  assert.deepEqual(p.type, { n: 3, mean: 70, delta: 5 });
+  assert.equal(p.overall!.n, 4);
+  assert.ok(Math.abs(p.overall!.delta - 12.5) < 1e-9);
+  assert.deepEqual(p.rank, { place: 2, of: 4 });
+  assert.deepEqual(p.spark, [60, 80, 70, 75]);
+  assert.deepEqual(p.sink, { n: 3, mean: 200, delta: -50 });
   assert.ok(Math.abs(p.g!.delta + 0.2) < 1e-9);
 });
 
@@ -95,7 +95,8 @@ test("personal: a first flight, an unscored one, and the window", () => {
   assert.equal(many.rank!.place, 1);
   const untyped = personal([flight(undefined, 70), flight(undefined, 60)])!;
   assert.equal(untyped.type, null);
-  assert.equal(untyped.overall!.n, 1);
+  // One earlier flight is not enough to compare with.
+  assert.equal(untyped.overall, null);
 });
 
 test("ordinal", () => {

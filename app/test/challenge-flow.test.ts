@@ -16,7 +16,9 @@ test("flowStep stays at pre-flight until nothing fails", () => {
 test("flowStep follows the newest attempt", () => {
   assert.equal(flowStep([line("ok")], [attempt("flying")]), 3);
   assert.equal(flowStep([line("ok")], [attempt("rollout")]), 4);
-  assert.equal(flowStep([line("fail")], [attempt("done", true), attempt("done", true)]), 5);
+  assert.equal(flowStep([line("ok")], [attempt("done", true), attempt("done", true)]), 5);
+  // Graded, but the next attempt is blocked: back to Pre-flight.
+  assert.equal(flowStep([line("fail")], [attempt("done", true)]), 2);
 });
 
 test("methodOf treats retired landing-2 as landing-3", () => {

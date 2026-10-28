@@ -19,6 +19,7 @@ import { useUnits } from "./lib/prefs";
 import { LOGO } from "./lib/logo";
 import { CHALLENGES_HREF, challengeHref, DEVLOG_HREF, FLIGHTS_HREF, flightHref, openFlight, openSetup, SETUP_HREF, TRENDS_HREF, useRoute } from "./lib/route";
 import { useNotify, useTheme } from "./lib/context";
+import { failing as failingChecks, GROUPS } from "./components/setup/setup-groups";
 import { useBackendEvent, useRecorderStatus, useSetup } from "./lib/use-backend";
 import { useUpdater } from "./lib/use-updater";
 import type { LandingNotice, OpenFlight } from "./types";
@@ -37,17 +38,20 @@ export default function App() {
   const prefs = useUnits();
   const setup = useSetup(recorder?.value.state);
   const updater = useUpdater(recorder?.value.state === "recording");
-  const failing = setup.state.status === "ready" ? setup.state.data.checks.filter((check) => check.state === "fail").length : 0;
+  // Only checks that stop something this pilot uses: without MSFS 2024 the panel steps are optional (setup-groups.ts).
+  const issues = setup.state.status === "ready" ? failingChecks(setup.state.data) : [];
+  const failing = issues.length;
+  const required = issues.some((check) => GROUPS[0].has(check.id));
 
-  // The first time a check fails (a fresh install: no packages in the sim yet), open the Installation screen once.
+  // The first time a required check fails (recording blocked), open Setup once; missing packages are the first-run stepper's.
   useEffect(() => {
-    if (!failing || route.screen !== "flights") return;
+    if (!required || route.screen !== "flights") return;
     try {
       if (localStorage.getItem(SETUP_SHOWN)) return;
       localStorage.setItem(SETUP_SHOWN, "1");
     } catch { return; }
     openSetup();
-  }, [failing, route.screen]);
+  }, [required, route.screen]);
 
   // A click on the Windows landing notification asks the app to show that flight.
   useBackendEvent("open-flight", useCallback((payload: OpenFlight) => openFlight(payload.flight_id), []));
@@ -81,7 +85,7 @@ export default function App() {
             </nav>
           ) : route.screen === "setup" ? (
             <nav aria-label="Breadcrumb" className="hidden min-w-0 items-center gap-2 text-sm text-fg-3 md:flex">
-              <span>/</span><a className="text-fg no-underline" href={SETUP_HREF} aria-current="page">Installation</a>
+              <span>/</span><a className="text-fg no-underline" href={SETUP_HREF} aria-current="page">Setup</a>
             </nav>
           ) : route.screen === "challenges" ? (
             <nav aria-label="Breadcrumb" className="hidden min-w-0 items-center gap-2 text-sm text-fg-3 md:flex">
@@ -98,7 +102,7 @@ export default function App() {
           ) : null}
           <div className="ml-auto flex shrink-0 items-center gap-1 md:gap-2">
             {failing ? (
-              <a href={SETUP_HREF} className="no-underline" aria-label={`${failing} installation check${failing > 1 ? "s" : ""} failing`}>
+              <a href={SETUP_HREF} className="no-underline" aria-label={`${failing} setup check${failing > 1 ? "s" : ""} failing`}>
                 <Badge tone="danger" size="sm" icon={<TriangleAlert size={12} aria-hidden="true" />}>{failing}<span className="hidden sm:inline">&nbsp;setup issue{failing > 1 ? "s" : ""}</span></Badge>
               </a>
             ) : null}
@@ -123,8 +127,8 @@ export default function App() {
                 <Newspaper size={16} aria-hidden="true" />
               </Button>
             </Tooltip>
-            <Tooltip content="Installation status" side="bottom">
-              <Button href={SETUP_HREF} variant={route.screen === "setup" ? "secondary" : "ghost"} size="sm" iconOnly label="Installation status" aria-current={route.screen === "setup" ? "page" : undefined}>
+            <Tooltip content="Setup" side="bottom">
+              <Button href={SETUP_HREF} variant={route.screen === "setup" ? "secondary" : "ghost"} size="sm" iconOnly label="Setup" aria-current={route.screen === "setup" ? "page" : undefined}>
                 <PackageCheck size={16} aria-hidden="true" />
               </Button>
             </Tooltip>
@@ -140,7 +144,7 @@ export default function App() {
         : route.screen === "setup" ? <SetupScreen setup={setup} />
         : route.screen === "challenges" ? <ChallengesScreen selected={route.key} recorder={recorder} />
         : route.screen === "trends" ? <TrendsScreen />
-        : route.screen === "devlog" ? <DevlogScreen updater={updater} /> : <FlightsScreen recorder={recorder} />}
+        : route.screen === "devlog" ? <DevlogScreen updater={updater} /> : <FlightsScreen recorder={recorder} setup={setup} />}
       </Suspense>
       </ErrorBoundary>
       <WhatsNewDialog />
