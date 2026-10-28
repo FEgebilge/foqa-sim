@@ -160,7 +160,7 @@
     "result": {
       "challenge": "ltbj-16l-calm",
       "challenge_version": 2,
-      "valid": true,
+      "valid": false,
       "checks": [
         {
           "name": "aircraft",
@@ -328,8 +328,8 @@
         "seq": 7,
         "event": "graded_local",
         "score": 76.5,
-        "valid": true,
-        "failed_checks": []
+        "valid": false,
+        "failed_checks": ["data"]
       }
     ]
   },
