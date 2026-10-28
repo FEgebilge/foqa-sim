@@ -6,6 +6,7 @@
 //! departs from and lands at. `record` covers one sim session (`foqa-rec`);
 //! `Service` keeps doing it across sim restarts for the desktop app.
 
+mod discard;
 mod history;
 mod live;
 mod monitor;
@@ -26,6 +27,8 @@ use recorder::{
     Acquisition, AttemptMarker, Column, RawWriter, Recorder, SimEvent, Telemetry, TelemetrySource,
 };
 
+use discard::Usage;
+pub use discard::{Discard, MENU_POSITION, MENU_TOLERANCE_DEG, MIN_FLIGHT_S};
 pub use live::LiveSource;
 pub use place::{ASK_TIMEOUT, Ask, InitPosition, Start, flaps_set_data};
 pub use service::{Happening, Service, SimRequests, Stopper};
@@ -48,6 +51,9 @@ pub enum Progress<'a> {
     },
     /// A flight closed; its journal (and raw capture) are complete.
     Saved(&'a Path),
+    /// A recording closed that was not a flight (`Discard`): its files are
+    /// deleted and the path is only its name.
+    Discarded(&'a Path, Discard),
     /// A frame passed with no flight open: after one was ended, or in the menu.
     Idle,
 }
@@ -144,7 +150,7 @@ pub fn record(
         match (action, &item) {
             (Action::Hold, Some(item)) => held.push(item.clone()),
             (Action::Open, Some(item)) => {
-                let mut f = FlightFiles::create(dir, raw.then(|| acquisition.columns()))?;
+                let mut f = FlightFiles::create(dir, acquisition.columns(), raw)?;
                 for h in held.drain(..) {
                     f.record(&h)?;
                 }
@@ -158,7 +164,7 @@ pub fn record(
                 if let Some(item) = &item {
                     f.record(item)?;
                 }
-                reply(on(Progress::Saved(&f.finish()?)));
+                reply(f.finish_with(&mut on)?);
             }
             _ => {}
         }
@@ -174,7 +180,7 @@ pub fn record(
     }
     if let Some(f) = flight {
         // Recording ends here either way.
-        let _ = on(Progress::Saved(&f.finish()?));
+        let _ = f.finish_with(&mut on)?;
     }
     Ok(())
 }
@@ -190,25 +196,30 @@ struct FlightFiles {
     journal: PathBuf,
     recorder: Recorder<BufWriter<File>>,
     raw: Option<RawWriter>,
+    raw_path: PathBuf,
     frames: u64,
+    usage: Usage,
 }
 
 impl FlightFiles {
     /// Named by the wall-clock start, `flight-<unix seconds>`, which the
-    /// debrief reads back as the start time.
-    fn create(dir: &Path, raw_columns: Option<&[Column]>) -> io::Result<Self> {
+    /// debrief reads back as the start time. `columns` are the frames'.
+    fn create(dir: &Path, columns: &[Column], raw: bool) -> io::Result<Self> {
         let started = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
         let name = format!("flight-{started}");
         let journal = dir.join(format!("{name}.fqj"));
+        let raw_path = dir.join(format!("{name}.raw.jsonl.gz"));
         let flight = Self {
             recorder: Recorder::new(&Lfl::V1, BufWriter::new(File::create(&journal)?))?,
-            raw: raw_columns
-                .map(|columns| RawWriter::create(dir.join(format!("{name}.raw.jsonl.gz")), columns))
+            raw: raw
+                .then(|| RawWriter::create(raw_path.clone(), columns))
                 .transpose()?,
+            raw_path,
             frames: 0,
+            usage: Usage::new(columns),
             journal,
         };
         eprintln!("flight started: {name}");
@@ -223,20 +234,102 @@ impl FlightFiles {
         if matches!(item, Telemetry::Frame(_)) {
             self.frames += 1;
         }
+        self.usage.see(item);
         Ok(())
     }
 
-    /// Completes the raw capture (the journal is flushed per item) and
-    /// returns the journal's path.
-    fn finish(self) -> io::Result<PathBuf> {
-        if let Some(raw) = self.raw {
+    /// Completes the raw capture (the journal is flushed per item), then
+    /// reports the flight as `Saved`, or deletes its files and reports
+    /// `Discarded` if it is not a flight (`Usage::verdict`).
+    fn finish_with(self, on: &mut impl FnMut(Progress) -> Reply) -> io::Result<Reply> {
+        let Self {
+            journal,
+            recorder,
+            raw,
+            raw_path,
+            frames,
+            usage,
+        } = self;
+        drop(recorder);
+        if let Some(raw) = raw {
             raw.finish()?;
         }
+        let Some(why) = usage.verdict() else {
+            eprintln!("flight saved: {} ({frames} frames)", journal.display());
+            return Ok(on(Progress::Saved(&journal)));
+        };
+        for file in [&journal, &raw_path] {
+            match std::fs::remove_file(file) {
+                Err(e) if e.kind() != io::ErrorKind::NotFound => {
+                    eprintln!("{}: could not delete: {e}", file.display())
+                }
+                _ => {}
+            }
+        }
         eprintln!(
-            "flight saved: {} ({} frames)",
-            self.journal.display(),
-            self.frames
+            "info: recording discarded, {why}: {} ({frames} frames)",
+            journal.display()
         );
-        Ok(self.journal)
+        Ok(on(Progress::Discarded(&journal, why)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Records `seconds` of 1 Hz frames at `(lat, lon)` into a new journal in
+    /// `dir`, closes it and returns what it was reported as.
+    fn close(dir: &Path, seconds: u32, (lat, lon): (f64, f64)) -> (String, PathBuf) {
+        let acquisition = Acquisition::new(&Lfl::V1);
+        let columns = acquisition.columns();
+        let at = |name| columns.iter().position(|c| c.simvar == name).unwrap();
+        let mut flight = FlightFiles::create(dir, columns, false).unwrap();
+        let journal = flight.journal.clone();
+        for t in 0..=seconds {
+            let mut frame = vec![f64::NAN; columns.len()];
+            frame[at("SIMULATION TIME")] = 100.0 + f64::from(t);
+            frame[at("PLANE LATITUDE")] = lat;
+            frame[at("PLANE LONGITUDE")] = lon;
+            flight.record(&Telemetry::Frame(frame)).unwrap();
+        }
+        let mut reported = String::new();
+        let _ = flight
+            .finish_with(&mut |p| {
+                reported = match p {
+                    Progress::Saved(_) => "saved".into(),
+                    Progress::Discarded(_, why) => format!("discarded: {why}"),
+                    _ => unreachable!(),
+                };
+                ControlFlow::Continue(None)
+            })
+            .unwrap();
+        (reported, journal)
+    }
+
+    fn temp(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("foqa-capture-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn a_menu_recording_is_deleted_when_it_closes() {
+        let dir = temp("menu");
+        let (reported, journal) = close(&dir, 6, MENU_POSITION);
+        assert!(reported.starts_with("discarded"), "{reported}");
+        assert!(!journal.exists());
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_ground_session_at_an_airport_is_kept() {
+        let dir = temp("taxi");
+        let (reported, journal) = close(&dir, 30, (38.29, 27.16));
+        assert_eq!(reported, "saved");
+        assert!(journal.exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

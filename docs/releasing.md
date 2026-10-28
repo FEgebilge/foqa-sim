@@ -77,10 +77,18 @@ describes). Both are covered; test both once (section 7).
 
 **Restart after update.** Checked in plugin 2.14.1: `restart_after_install` defaults to true, JS
 `downloadAndInstall()` leaves it so, and the plugin appends `/R /ARGS` for NSIS passive mode, so the installer should
-relaunch the app. Still test it on the first real update. If the app does not relaunch (the process has already exited, so `relaunch()`
-cannot help), pass `/R` via the plugin's installer args or start the app from `NSIS_HOOK_POSTINSTALL` when
-`$UpdateMode = 1` (the template only auto-runs with `/R` in passive/silent mode). Single-instance plugin is
-already used, so a double start is harmless.
+relaunch the app. The plugin runs `ShellExecuteW(installer /P /UPDATE /R /ARGS ...)` and then `std::process::exit(0)`,
+so no tray or exit-prevention code can keep the old process alive and no single-instance race exists.
+
+**Finding from 0.10.0 -> 0.10.1** (the update installed, the app "did not reopen"): most likely the installer did
+restart it, but a start is always hidden in the tray (window `visible: false`, nothing shows it at launch), so it
+looked like nothing happened. Not verified directly: the bundler's `installer.nsi` is not in the local cargo registry.
+Fix: before downloading, the window calls `update_mark` (writes `%TEMP%\foqa-sim-updated`); the restarted app finds a
+mark younger than 10 minutes at start (`updated.rs`), removes it and shows its window. A manual start after an
+update does the same. The card now says "Installing... FOQA-Sim will restart." once the download finishes (the
+download itself is a few seconds, the passive installer window comes next). No NSIS relaunch hook is added: it would
+race `/R` and the app is single-instance anyway. If the app is truly absent after an update, check
+`%TEMP%\foqa-sim-updated` (mark left, app never started: the `/R` relaunch failed) and then add the hook.
 
 **App side** (small): add `tauri-plugin-updater` (Rust) and `@tauri-apps/plugin-updater`; capability
 `updater:default`; check on start (after the tray is up, once per day) and from a "Check for updates" button;

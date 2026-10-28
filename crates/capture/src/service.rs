@@ -322,6 +322,19 @@ impl Service {
                     }
                 }
             }
+            Progress::Discarded(_, why) => {
+                // Nothing was saved, so nothing is analysed or listed.
+                watch.touchdown_s = None;
+                let closing = watch.flight.take().and_then(|f| f.closing);
+                match closing {
+                    // Deleting is what was asked for.
+                    Some(ViewCommand::DiscardFlight) => {
+                        link.ack(&ViewCommand::DiscardFlight, Ok(()))
+                    }
+                    Some(cmd) => link.ack(&cmd, Err(format!("nothing to save: {why}"))),
+                    None => {}
+                }
+            }
             Progress::Idle => command = link.idle_command(),
         }
         // The app's requests wait for a frame without a panel command.

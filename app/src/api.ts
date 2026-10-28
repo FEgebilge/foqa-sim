@@ -69,7 +69,7 @@ export interface Api extends ChallengesApi, SitesApi {
   /** Asks the release feed for a newer version; null when this is the newest. Rejects when the feed cannot be reached. */
   checkUpdate(): Promise<AppUpdate | null>;
   /** Downloads and installs the update `checkUpdate` found, reporting bytes done and the total when known. The installer closes the app and starts it again. */
-  installUpdate(onProgress: (done: number, total?: number) => void): Promise<void>;
+  installUpdate(onProgress: (done: number, total?: number, finished?: boolean) => void): Promise<void>;
   /** Saves a PNG the window drew (the landing card); the file, null when cancelled. */
   saveImage(png: Blob, name: string): Promise<string | null>;
   on<K extends keyof BackendEvents>(event: K, handler: (payload: BackendEvents[K]) => void): Promise<Unlisten>;
@@ -104,10 +104,12 @@ const tauriApi: Api = {
     if (!found) throw new Error("Check for updates first.");
     let done = 0;
     let total: number | undefined;
+    // The installer restarts the app hidden in the tray; the mark makes that start show its window.
+    await invoke<void>("update_mark");
     await found.downloadAndInstall((event) => {
       if (event.event === "Started") total = event.data.contentLength;
       else if (event.event === "Progress") done += event.data.chunkLength;
-      onProgress(done, total);
+      onProgress(done, total, event.event === "Finished");
     });
   },
   challengesList: () => invoke<ChallengeEntry[]>("challenges_list"),
