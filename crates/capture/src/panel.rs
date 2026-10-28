@@ -686,6 +686,8 @@ mod tests {
                 worst_level: None,
                 event_counts: BTreeMap::from([(Level::Advisory, 0)]),
                 assessment: debrief::Assessment::of(&[]),
+                landings_detail: vec![],
+                rule_counts: BTreeMap::new(),
             },
             events: vec![],
             landings: vec![notice(); landings],

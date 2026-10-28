@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 
 use ::debrief::{
     Debrief, FlightSummary, Index, LandingNotice, RecorderStatus, Station, StorageUsage,
+    TrendFilter, Trends,
 };
 use capture::{
     ASK_TIMEOUT, InitPosition, PreflightLine, SimRequests, SiteStrip, Start, Stopper, Views,
@@ -177,6 +178,20 @@ pub(crate) async fn blocking<T: Send + 'static>(
 pub async fn list_flights(shared: State<'_, Arc<Shared>>) -> Result<Vec<FlightSummary>, String> {
     let shared = Arc::clone(&shared);
     blocking(move || Ok(shared.summaries())).await
+}
+
+/// The flights' trends (docs/trends.md) from the cached summaries.
+#[tauri::command]
+pub async fn trends(filter: TrendFilter, shared: State<'_, Arc<Shared>>) -> Result<Trends, String> {
+    let shared = Arc::clone(&shared);
+    blocking(move || {
+        Ok(::debrief::trends(
+            &shared.summaries(),
+            &filter,
+            &shared.station,
+        ))
+    })
+    .await
 }
 
 #[tauri::command]

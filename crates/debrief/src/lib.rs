@@ -9,6 +9,7 @@
 mod assessment;
 pub mod export;
 mod index;
+mod trends;
 mod wire;
 
 use std::collections::BTreeMap;
@@ -26,6 +27,7 @@ use rules::{LoadError, PhaseField, ProfileField, ProfileSet, Rule, Selection, So
 
 pub use assessment::{POINTS, domain_title};
 pub use index::{INDEX_FILE, Index};
+pub use trends::{TrendFilter, Trends, trends};
 pub use wire::*;
 
 pub type Error = Box<dyn std::error::Error>;
@@ -296,7 +298,35 @@ impl Analysis<'_> {
             worst_level: events.iter().map(|e| e.level).max(),
             event_counts,
             assessment: detail.into(),
+            landings_detail: self.landings_detail(detail),
+            rule_counts: detail
+                .parts
+                .iter()
+                .filter(|p| p.level >= Level::Low)
+                .map(|p| {
+                    let count = RuleCount {
+                        level: p.level,
+                        count: p.count,
+                    };
+                    (p.rule.clone(), count)
+                })
+                .collect(),
         }
+    }
+
+    /// Each landing's facts; a bounce counts toward the landing before it.
+    fn landings_detail(&self, detail: &AssessmentDetail) -> Vec<LandingFacts> {
+        let mut assessed = detail.landings.iter();
+        let mut facts: Vec<LandingFacts> = Vec::new();
+        for td in &self.touchdowns {
+            if !td.bounce {
+                let Some(a) = assessed.next() else { break };
+                facts.push(LandingFacts::new(&Touchdown::new(td, &self.flight), a));
+            } else if let Some(last) = facts.last_mut() {
+                last.bounces += 1;
+            }
+        }
+        facts
     }
 
     pub fn debrief(&self) -> Debrief {
@@ -780,6 +810,27 @@ mod tests {
         assert_eq!(flare["value"], 50.0);
         assert_eq!(flare["source"], "transport class default (unknown class)");
         assert_eq!(v["events"][0]["level"], "medium");
+    }
+
+    /// The summary carries what the trends read: each landing and each rule
+    /// that fired at low or above.
+    #[test]
+    fn the_summary_carries_landing_facts_and_rule_counts() {
+        let s = c172().summary();
+        let [l] = &s.landings_detail[..] else {
+            panic!("{:?}", s.landings_detail)
+        };
+        let d = c172().debrief();
+        assert_eq!(
+            (l.t_s, l.sink_fpm),
+            (d.touchdowns[0].t_s, d.touchdowns[0].sink_fpm)
+        );
+        assert_eq!(l.score, s.assessment.score);
+        assert_eq!(l.bounces, 0);
+        let medium = s.event_counts[&Level::Medium];
+        let counted: usize = s.rule_counts.values().map(|c| c.count).sum();
+        assert_eq!(counted, medium);
+        assert!(s.rule_counts.values().all(|c| c.level >= Level::Low));
     }
 
     #[test]

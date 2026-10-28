@@ -37,11 +37,11 @@ a debrief that says what happened, why it matters and what to do differently.
 
 ## Status
 
-Version 0.4. Works end to end with MSFS 2024 on Windows: installer, automatic recording,
-debrief, in-sim panel and EFB app, local landing challenges. It is being tested with a small
-group of pilots before a first public release. In progress: an FDR-style replay, challenges
-with the same weather for every pilot, and the first website running the open challenge
-protocol.
+Version 0.7. Works end to end with MSFS 2024 on Windows: installer, automatic recording,
+debrief with replay, trends across flights, exports, in-sim panel and EFB app, local landing
+challenges. It is being tested with a small group of pilots before a first public release. In
+progress: challenges with the same weather for every pilot, and the first website running the
+open challenge protocol.
 
 ## What you get
 
@@ -56,6 +56,10 @@ protocol.
   ([scoring.md](docs/scoring.md)). Missing data is reported as such, never as full marks.
 - **Flight phases** after the ICAO CICTT definitions, following the aircraft (a light aircraft
   flares lower, turboprops fly a higher pattern), each with the reason it started.
+- **Trends.** What an airline safety department looks at first: landing scores over time, a
+  touchdown footprint on the runway, the landing areas that cost points most often, and event
+  rates per 100 flights with the newer half of your flights against the older, by aircraft and
+  airport ([trends.md](docs/trends.md)).
 - **Landing challenges.** Import a challenge, check the pre-flight card, place the aircraft on
   final and fly again from the sim. Optionally connect a website that runs the open
   [challenge protocol](docs/challenge-protocol.md) to rank attempts; FOQA-Sim works fully without one.
@@ -105,6 +109,7 @@ cargo run -p cli --bin fdm -- export <flight> [--format parquet|csv|kml|gpx] [-o
 cargo run -p cli --bin fdm -- logbook <dir>                # Little Navmap logbook CSV
 cargo run -p cli --bin fdm -- compact <file|dir>           # .fqj -> .fqz
 cargo run -p cli --bin fdm -- list <dir>                   # the app's flight list
+cargo run -p cli --bin fdm -- trends <dir> [--aircraft ICAO] [--airport ICAO] [--days N] [--json]  # event rates, score and touchdown trends
 cargo run -p cli --bin fdm -- challenge <challenge.json> <flight>  # a landing-challenge attempt
 cargo run -p capture --bin foqa-rec                        # headless recorder
 ```
@@ -138,7 +143,7 @@ Worth reading first: [format.md](docs/format.md) (recording formats),
 (flight phases), [debrief-api.md](docs/debrief-api.md) (backend and UI contract),
 [ingame-panel.md](docs/ingame-panel.md) (app and in-sim panel),
 [challenges.md](docs/challenges.md) (landing challenges), [exports.md](docs/exports.md)
-(exports and the landing card).
+(exports and the landing card), [trends.md](docs/trends.md) (trends across flights).
 
 ## Development
 

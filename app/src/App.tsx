@@ -1,5 +1,5 @@
 import { useCallback, useEffect } from "react";
-import { Newspaper, PackageCheck, TriangleAlert, Trophy } from "lucide-react";
+import { Newspaper, PackageCheck, TrendingUp, TriangleAlert, Trophy } from "lucide-react";
 import { Badge } from "@ui/components/badge/badge";
 import { Button } from "@ui/components/button/button";
 import { Tooltip } from "@ui/components/tooltip/tooltip";
@@ -14,9 +14,10 @@ import { DebriefScreen } from "./components/debrief/DebriefScreen";
 import { FlightsScreen } from "./components/flights/FlightsScreen";
 import { RecorderStatusPill } from "./components/RecorderStatusPill";
 import { SetupScreen } from "./components/setup/SetupScreen";
+import { TrendsScreen } from "./components/trends/TrendsScreen";
 import { measured, number } from "./lib/format";
 import { LOGO } from "./lib/logo";
-import { CHALLENGES_HREF, challengeHref, DEVLOG_HREF, flightHref, openFlight, openSetup, SETUP_HREF, useRoute } from "./lib/route";
+import { CHALLENGES_HREF, challengeHref, DEVLOG_HREF, flightHref, openFlight, openSetup, SETUP_HREF, TRENDS_HREF, useRoute } from "./lib/route";
 import { useNotify, useTheme } from "./lib/context";
 import { useBackendEvent, useRecorderStatus, useSetup } from "./lib/use-backend";
 import type { LandingNotice, OpenFlight } from "./types";
@@ -55,10 +56,10 @@ export default function App() {
   return (
     <div className="flex min-h-full flex-col">
       <header className="sticky top-0 z-40 border-b border-line bg-[color-mix(in_oklab,var(--background)_88%,transparent)] backdrop-blur">
-        <div className="flex h-14 w-full items-center gap-4 px-6 2xl:px-8">
+        <div className="flex h-14 w-full items-center gap-3 px-4 sm:gap-4 sm:px-6 2xl:px-8">
           <a href="#/" className="flex items-center gap-2.5 text-fg no-underline" aria-label="FOQA-Sim, all flights">
             <Logo />
-            <span className="font-display text-[15px] font-semibold tracking-tight">FOQA-Sim</span>
+            <span className="hidden font-display text-[15px] font-semibold tracking-tight whitespace-nowrap sm:inline">FOQA-Sim</span>
           </a>
           {route.screen === "debrief" ? (
             <nav aria-label="Breadcrumb" className="hidden items-center gap-2 text-sm text-fg-3 sm:flex">
@@ -73,6 +74,10 @@ export default function App() {
             <nav aria-label="Breadcrumb" className="hidden items-center gap-2 text-sm text-fg-3 sm:flex">
               <span>/</span><a className="text-fg no-underline" href={CHALLENGES_HREF} aria-current="page">Challenges</a>
             </nav>
+          ) : route.screen === "trends" ? (
+            <nav aria-label="Breadcrumb" className="hidden items-center gap-2 text-sm text-fg-3 sm:flex">
+              <span>/</span><a className="text-fg no-underline" href={TRENDS_HREF} aria-current="page">Trends</a>
+            </nav>
           ) : route.screen === "devlog" ? (
             <nav aria-label="Breadcrumb" className="hidden items-center gap-2 text-sm text-fg-3 sm:flex">
               <span>/</span><a className="text-fg no-underline" href={DEVLOG_HREF} aria-current="page">What's new</a>
@@ -81,12 +86,15 @@ export default function App() {
           <div className="ml-auto flex items-center gap-2">
             {failing ? (
               <a href={SETUP_HREF} className="no-underline" aria-label={`${failing} installation check${failing > 1 ? "s" : ""} failing`}>
-                <Badge tone="danger" size="sm" icon={<TriangleAlert size={12} aria-hidden="true" />}>{failing} setup issue{failing > 1 ? "s" : ""}</Badge>
+                <Badge tone="danger" size="sm" icon={<TriangleAlert size={12} aria-hidden="true" />}>{failing}<span className="hidden sm:inline">&nbsp;setup issue{failing > 1 ? "s" : ""}</span></Badge>
               </a>
             ) : null}
             <RecorderStatusPill status={recorder} />
+            <Button href={TRENDS_HREF} variant={route.screen === "trends" ? "secondary" : "ghost"} size="sm" aria-label="Trends" aria-current={route.screen === "trends" ? "page" : undefined}>
+              <TrendingUp size={16} aria-hidden="true" /><span className="hidden lg:inline">Trends</span>
+            </Button>
             <Button href={CHALLENGES_HREF} variant={route.screen === "challenges" ? "secondary" : "ghost"} size="sm" aria-label="Challenges" aria-current={route.screen === "challenges" ? "page" : undefined}>
-              <Trophy size={16} aria-hidden="true" /><span className="hidden md:inline">Challenges</span>
+              <Trophy size={16} aria-hidden="true" /><span className="hidden lg:inline">Challenges</span>
             </Button>
             <Tooltip content="What's new" side="bottom">
               <Button href={DEVLOG_HREF} variant={route.screen === "devlog" ? "secondary" : "ghost"} size="sm" iconOnly label="What's new" aria-current={route.screen === "devlog" ? "page" : undefined}>
@@ -106,6 +114,7 @@ export default function App() {
       {route.screen === "debrief" ? <DebriefScreen key={route.id} id={route.id} />
         : route.screen === "setup" ? <SetupScreen setup={setup} />
         : route.screen === "challenges" ? <ChallengesScreen selected={route.key} recorder={recorder} />
+        : route.screen === "trends" ? <TrendsScreen />
         : route.screen === "devlog" ? <DevlogScreen /> : <FlightsScreen recorder={recorder} />}
       <WhatsNewDialog />
       <DeepLinkDialog />

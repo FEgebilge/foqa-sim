@@ -46,6 +46,7 @@ macro_rules! handler {
         tauri::generate_handler![
             commands::list_flights,
             commands::debrief,
+            commands::trends,
             commands::delete_flight,
             commands::place_challenge,
             commands::challenges_list,

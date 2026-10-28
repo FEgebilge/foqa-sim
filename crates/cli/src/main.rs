@@ -8,6 +8,7 @@
 //! `fdm logbook <folder|flight> [--identity] [-o file]` a Little Navmap logbook CSV
 //! `fdm compact <journal.fqj|folder>`           journals to compact flights
 //! `fdm list <folder>`                          the app's flight list, as JSON
+//! `fdm trends <folder> [--aircraft ICAO] [--airport ICAO] [--days N] [--json]` the folder's trends (docs/trends.md)
 //! `fdm challenge <challenge.json> <flight.fqz>` a landing-challenge attempt, as JSON
 //! `fdm challenge --check <challenge.json>`      validates a definition (exit 1 if invalid)
 //! `fdm slice <flight> --ref <ref> [-o out.fqz]` an attempt's recording slice, what a site receives
@@ -29,7 +30,7 @@ use std::process::ExitCode;
 
 use analyzer::RunwayFix;
 use debrief::export::{self, Format, Options};
-use debrief::{Analysis, Index, Station, flight_id};
+use debrief::{Analysis, Index, Station, TrendFilter, flight_id};
 use fdm_core::SimTime;
 use rules::Event;
 
@@ -41,6 +42,7 @@ const USAGE: &str =
        fdm logbook <folder|flight> [--identity] [-o file]
        fdm compact <journal.fqj|folder>
        fdm list <folder>
+       fdm trends <folder> [--aircraft ICAO] [--airport ICAO] [--days N] [--json]
        fdm challenge <challenge.json> <flight.fqz>
        fdm challenge --check <challenge.json>
        fdm slice <flight.fqj|flight.fqz> (--ref <ref> | --from <s> --to <s>) [-o out.fqz]";
@@ -61,6 +63,10 @@ fn main() -> ExitCode {
         },
         ["compact", path] => compact(Path::new(path)),
         ["list", dir] => list(Path::new(dir)),
+        ["trends", dir, ref rest @ ..] => match trend_args(rest) {
+            Some((filter, json)) => trends(Path::new(dir), filter, json),
+            None => Err(USAGE.into()),
+        },
         ["challenge", "--check", def] => check(Path::new(def)),
         ["challenge", def, path] => challenge(Path::new(def), Path::new(path)),
         ["slice", path, ref rest @ ..] => match slice_args(rest) {
@@ -388,6 +394,88 @@ fn list(dir: &Path) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+/// `fdm trends` options after the folder.
+fn trend_args(args: &[&str]) -> Option<(TrendFilter, bool)> {
+    let (mut filter, mut json) = (TrendFilter::default(), false);
+    let mut args = args.iter();
+    while let Some(&arg) = args.next() {
+        match arg {
+            "--json" if !json => json = true,
+            "--aircraft" if filter.aircraft.is_none() => {
+                filter.aircraft = Some(args.next()?.to_uppercase());
+            }
+            "--airport" if filter.airport.is_none() => {
+                filter.airport = Some(args.next()?.to_uppercase());
+            }
+            "--days" if filter.days.is_none() => filter.days = Some(args.next()?.parse().ok()?),
+            _ => return None,
+        }
+    }
+    Some((filter, json))
+}
+
+/// The folder's flights aggregated (docs/trends.md), as a short report or JSON.
+fn trends(dir: &Path, filter: TrendFilter, json: bool) -> Result<(), Box<dyn Error>> {
+    let station = Station::core()?;
+    let t = debrief::trends(&Index::open(dir).summaries(&station), &filter, &station);
+    if json {
+        println!("{}", serde_json::to_string_pretty(&t)?);
+        return Ok(());
+    }
+    let num = |x: Option<f64>, unit: &str| x.map_or("-".to_owned(), |x| format!("{x:.1}{unit}"));
+    println!(
+        "{} flights, {:.1} h, {} landings ({} scored)",
+        t.flights, t.hours, t.landing_count, t.scored
+    );
+    println!(
+        "score: mean {}, median {}, newest half {}, older half {}",
+        num(t.score.mean, ""),
+        num(t.score.median, ""),
+        num(t.score.recent, ""),
+        num(t.score.earlier, "")
+    );
+    println!("domains (mean level 0-3):");
+    for d in &t.domains {
+        let level = num(d.mean_level, "");
+        println!(
+            "  {:<24}{level:>5}  graded {}, level 2+: {}",
+            d.title, d.graded, d.level_2_plus
+        );
+    }
+    println!("events per 100 flights:");
+    for e in &t.events {
+        let (recent, earlier) = (num(e.recent_per_100, ""), num(e.earlier_per_100, ""));
+        println!(
+            "  {:>6.1}  {} ({:?}, {} of {} flights, fired {}; newest half {recent}, older {earlier})",
+            e.per_100, e.title, e.level, e.flights, t.flights, e.count
+        );
+    }
+    println!("airports:");
+    for a in &t.by_airport {
+        println!(
+            "  {}: {} landings, score {}, in TDZ {}, centreline {}",
+            a.icao,
+            a.landings,
+            num(a.mean_score, ""),
+            a.in_tdz
+                .map_or("-".to_owned(), |z| format!("{:.0}%", z * 100.0)),
+            num(a.mean_cross_m, " m")
+        );
+    }
+    println!("aircraft:");
+    for a in &t.by_aircraft {
+        println!(
+            "  {}: {} flights, {} landings, score {}, {:.1} events/flight",
+            a.icao,
+            a.flights,
+            a.landings,
+            num(a.mean_score, ""),
+            a.events_per_flight
+        );
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -413,6 +501,23 @@ mod tests {
         }
     }
 
+    #[test]
+    fn trends_take_filters_and_json() {
+        let (f, json) = trend_args(&["--aircraft", "b738", "--days", "90", "--json"]).unwrap();
+        assert_eq!(
+            (f.aircraft.as_deref(), f.airport, f.days, json),
+            (Some("B738"), None, Some(90), true)
+        );
+        assert_eq!(trend_args(&[]), Some((TrendFilter::default(), false)));
+        for bad in [
+            &["--days", "x"][..],
+            &["--airport"],
+            &["--json", "--json"],
+            &["extra"],
+        ] {
+            assert!(trend_args(bad).is_none(), "{bad:?}");
+        }
+    }
     #[test]
     fn slice_takes_a_ref_or_a_range_and_an_output() {
         let ok = |args: &[&str]| slice_args(args).is_some();

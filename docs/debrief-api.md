@@ -13,6 +13,7 @@ the recording; units are in the field names.
 |---|---|---|
 | `list_flights()` | `FlightSummary[]` | Newest first |
 | `debrief(id: string)` | `Debrief` | Full analysis of one flight |
+| `trends(filter: TrendFilter)` | `Trends` | The flights aggregated ([trends.md](trends.md)); `filter` is `{aircraft?, airport?, days?}` |
 | `delete_flight(id: string)` | `void` | Deletes the flight's stored files for good; refused for the flight being recorded |
 | `place_challenge(definition: string)` | `StartState` | Puts the aircraft at a landing challenge's start (the challenge JSON, [challenges.md](challenges.md)); an error while the sim is not connected or for a `self` start |
 | `recorder_status()` | `RecorderStatus` | Current state, also pushed as an event |
@@ -162,6 +163,23 @@ interface FlightSummary {
   worst_level?: Level;    // most severe event, if any
   event_counts: Record<Level, number>;
   assessment: Assessment;
+  landings_detail?: LandingFacts[];                      // per landing (bounces grouped), time order; what trends.md reads
+  rule_counts?: Record<string, { level: Level; count: number }>;   // rules fired at low or above, by rule id
+}
+
+// One landing's facts for the trends ([trends.md](trends.md)); `Debrief.flight` carries them too.
+interface LandingFacts {
+  t_s: number;               // first touchdown
+  full_stop: boolean;        // false: touch-and-go
+  icao?: string; runway?: string;          // matched runway
+  score?: number; grade?: "good" | "fair" | "poor"; confidence?: "full" | "partial";   // landing-2; none when unscored
+  domains: Record<"stability" | "energy" | "point" | "lateral" | "contact" | "rollout", number | null>;   // level 0-3, null: n/a; empty when unscored
+  sink_fpm: number; peak_g: number;        // first contact
+  along_m?: number; cross_m?: number;      // past the threshold; right of the centreline positive
+  zone?: "In TDZ" | "Long" | "Short";
+  crosswind_kt?: number;     // right positive
+  tailwind_kt?: number;      // negative: a headwind
+  bounces: number;
 }
 
 // The flight graded as a whole, as the flight list shows it: by landing-2
