@@ -4,12 +4,13 @@
 
 use std::collections::BTreeMap;
 
-use analyzer::{Flight, RunwayFix, Window};
+use analyzer::{Flight, RunwayFix, TRACK_HZ, Track, Window};
 use assess::{Height, Speeds};
 pub use rules::Level;
 use rules::{Domain, ScoringClass, Sourced};
 use serde::{Deserialize, Serialize};
 
+use crate::trends::{r1, r2};
 use crate::{Skills, SkillsSummary, secs};
 
 /// What the recorder is doing, as the tray and the app header show it.
@@ -64,6 +65,46 @@ pub struct FlightSummary {
     /// Each rule that fired at low or above, by rule id.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub rule_counts: BTreeMap<String, RuleCount>,
+    /// What was flown, which decides whether trends count the recording.
+    #[serde(default)]
+    pub flown: Flown,
+}
+
+/// How much of a recording was real flying (docs/trends.md), from the
+/// track's airborne legs, points with the sim's slew on left out.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Flown {
+    pub airborne_s: f64,
+    /// Ground speed integrated over the airborne time.
+    pub distance_nm: f64,
+    pub max_gs_kt: f64,
+    /// The recording begins in the air (a teleport, or started mid-flight).
+    pub started_airborne: bool,
+    /// The recording ends in the air.
+    pub ended_airborne: bool,
+}
+
+impl Flown {
+    /// `slew` is the `sim.slew` series on the track's time base.
+    pub fn of(track: &Track, slew: &[f64]) -> Self {
+        let slewed = |i: usize| slew[i] >= 0.5;
+        let gs: Vec<f64> = (track.airborne())
+            .filter(|&i| !slewed(i))
+            .map(|i| track.gs_kt[i])
+            .collect();
+        let speeds = || gs.iter().copied().filter(|g| g.is_finite());
+        Self {
+            airborne_s: r1(gs.len() as f64 / TRACK_HZ),
+            distance_nm: r2(speeds().sum::<f64>() / TRACK_HZ / 3600.0),
+            max_gs_kt: r1(speeds().fold(0.0, f64::max)),
+            started_airborne: track.legs.first().is_some_and(|l| l.airborne.start == 0),
+            ended_airborne: track
+                .legs
+                .last()
+                .is_some_and(|l| l.airborne.end == track.len()),
+        }
+    }
 }
 
 /// What a landing contributes to the trends: where and how it touched
@@ -815,7 +856,60 @@ pub struct LandingNotice {
 
 #[cfg(test)]
 mod tests {
+    use std::iter::once;
+    use std::ops::Range;
+
+    use analyzer::Leg;
+
     use super::*;
+
+    /// `n` points at 120 kt with the airborne `legs`.
+    fn track(n: usize, legs: impl IntoIterator<Item = Range<usize>>) -> Track {
+        let mut t = Track::blank(n);
+        t.gs_kt = vec![120.0; n];
+        t.legs = legs
+            .into_iter()
+            .map(|r| Leg {
+                peak: r.start,
+                airborne: r,
+            })
+            .collect();
+        t
+    }
+
+    const MIN: usize = 480;
+
+    #[test]
+    fn flown_sums_the_airborne_legs() {
+        let off = |n| vec![0.0; n];
+        // Ground only.
+        assert_eq!(Flown::of(&track(MIN, []), &off(MIN)), Flown::default());
+        // A sector: one minute, then two legs (a circuit) of 4 and 2 minutes.
+        let t = track(8 * MIN, [MIN..5 * MIN, 6 * MIN..8 * MIN - 1]);
+        let f = Flown::of(&t, &off(8 * MIN));
+        assert_eq!((f.airborne_s, f.max_gs_kt), (359.9, 120.0));
+        assert_eq!(f.distance_nm, 12.0);
+        assert!(!f.started_airborne && !f.ended_airborne);
+        // Starts in the air (teleported onto final), ends on the ground.
+        let f = Flown::of(&track(2 * MIN, once(0..90 * 8)), &off(2 * MIN));
+        assert!(f.started_airborne && !f.ended_airborne);
+        assert_eq!(f.airborne_s, 90.0);
+        // Ends in the air.
+        let f = Flown::of(&track(2 * MIN, once(MIN..2 * MIN)), &off(2 * MIN));
+        assert!(!f.started_airborne && f.ended_airborne);
+    }
+
+    #[test]
+    fn flown_leaves_slewed_points_out() {
+        let mut slew = vec![0.0; 2 * MIN];
+        slew[..MIN].fill(1.0);
+        // Airborne throughout, slewed for the first half.
+        let f = Flown::of(&track(2 * MIN, once(0..2 * MIN)), &slew);
+        assert_eq!((f.airborne_s, f.distance_nm), (60.0, 2.0));
+        // Missing slew data is not slew.
+        let f = Flown::of(&track(MIN, once(0..MIN)), &vec![f64::NAN; MIN]);
+        assert_eq!(f.airborne_s, 60.0);
+    }
 
     fn event(rule: &str, level: Level) -> Event {
         Event {

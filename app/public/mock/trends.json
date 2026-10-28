@@ -36,6 +36,13 @@
  },
  "flights": 20,
  "hours": 19,
+ "recordings": {
+  "total": 24,
+  "counted": 20,
+  "ground_only": 1,
+  "too_short": 3,
+  "partial": 1
+ },
  "landing_count": 20,
  "scored": 17,
  "score": {

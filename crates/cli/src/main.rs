@@ -476,9 +476,14 @@ fn trends(dir: &Path, filter: TrendFilter, json: bool) -> Result<(), Box<dyn Err
         return Ok(());
     }
     let num = |x: Option<f64>, unit: &str| x.map_or("-".to_owned(), |x| format!("{x:.1}{unit}"));
+    let r = &t.recordings;
     println!(
-        "{} flights, {:.1} h, {} landings ({} scored)",
-        t.flights, t.hours, t.landing_count, t.scored
+        "{} flights counted of {} recordings ({} ground only, {} too short or empty; {} partial)",
+        r.counted, r.total, r.ground_only, r.too_short, r.partial
+    );
+    println!(
+        "{:.1} h flown, {} landings ({} scored)",
+        t.hours, t.landing_count, t.scored
     );
     println!(
         "score: mean {}, median {}, newest half {}, older half {}",

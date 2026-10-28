@@ -200,7 +200,7 @@ const mockApi: Api = {
     const scores = rows.filter((l) => l.score !== undefined && l.full_stop).map((l) => l.score!);
     const mean = scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : null;
     const keep = (rows.length === all.landings.length);
-    return { ...all, filter: { aircraft, airport, days }, flights: rows.length, landing_count: rows.length, scored: scores.length, hours: Math.round(rows.length * 9.5) / 10,
+    return { ...all, filter: { aircraft, airport, days }, flights: rows.length, recordings: keep ? all.recordings : { total: rows.length, counted: rows.length, ground_only: 0, too_short: 0, partial: 0 }, landing_count: rows.length, scored: scores.length, hours: Math.round(rows.length * 9.5) / 10,
       landings: rows, score: keep ? all.score : { mean, median: mean, recent: null, earlier: null },
       by_aircraft: all.by_aircraft.filter((r) => !aircraft || r.icao === aircraft), by_airport: all.by_airport.filter((r) => !airport || r.icao === airport) };
   },
