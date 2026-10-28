@@ -37,6 +37,7 @@ tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-deep-link = { version = "2", optional = true }
 tauri-plugin-single-instance = "2"
+tauri-plugin-updater = "2"
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]

@@ -13,6 +13,7 @@ import { WhatsNewDialog } from "./components/devlog/WhatsNewDialog";
 import { DebriefScreen } from "./components/debrief/DebriefScreen";
 import { FlightsScreen } from "./components/flights/FlightsScreen";
 import { RecorderStatusPill } from "./components/RecorderStatusPill";
+import { UpdateNotice } from "./components/UpdateNotice";
 import { SetupScreen } from "./components/setup/SetupScreen";
 import { TrendsScreen } from "./components/trends/TrendsScreen";
 import { measured, number } from "./lib/format";
@@ -20,6 +21,7 @@ import { LOGO } from "./lib/logo";
 import { CHALLENGES_HREF, challengeHref, DEVLOG_HREF, flightHref, openFlight, openSetup, SETUP_HREF, TRENDS_HREF, useRoute } from "./lib/route";
 import { useNotify, useTheme } from "./lib/context";
 import { useBackendEvent, useRecorderStatus, useSetup } from "./lib/use-backend";
+import { useUpdater } from "./lib/use-updater";
 import type { LandingNotice, OpenFlight } from "./types";
 
 export default function App() {
@@ -28,6 +30,7 @@ export default function App() {
   const { theme, setTheme } = useTheme();
   const notify = useNotify();
   const setup = useSetup(recorder?.value.state);
+  const updater = useUpdater(recorder?.value.state === "recording");
   const failing = setup.state.status === "ready" ? setup.state.data.checks.filter((check) => check.state === "fail").length : 0;
 
   // The first time a check fails (a fresh install: no packages in the sim yet), open the Installation screen once.
@@ -115,8 +118,9 @@ export default function App() {
         : route.screen === "setup" ? <SetupScreen setup={setup} />
         : route.screen === "challenges" ? <ChallengesScreen selected={route.key} recorder={recorder} />
         : route.screen === "trends" ? <TrendsScreen />
-        : route.screen === "devlog" ? <DevlogScreen /> : <FlightsScreen recorder={recorder} />}
+        : route.screen === "devlog" ? <DevlogScreen updater={updater} /> : <FlightsScreen recorder={recorder} />}
       <WhatsNewDialog />
+      <UpdateNotice updater={updater} />
       <DeepLinkDialog />
     </div>
   );

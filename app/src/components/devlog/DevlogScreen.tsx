@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { ChevronRight, Newspaper } from "lucide-react";
+import { ChevronRight, Newspaper, RefreshCw } from "lucide-react";
 import { Badge } from "@ui/components/badge/badge";
+import { Button } from "@ui/components/button/button";
+import type { Updater } from "../../lib/use-updater";
 import { EmptyState } from "@ui/components/empty-state/empty-state";
 import { appVersion, DEVLOG, type DevlogEntry } from "../../lib/devlog";
 import { Markdown } from "../../lib/markdown";
@@ -59,7 +61,7 @@ function Disclosure({ id, open, onToggle, summary, children, nested }: {
 }
 
 /** Release notes as a collapsible tree: a group index on the left (wide screens), the tree on the right. */
-export function DevlogScreen() {
+export function DevlogScreen({ updater }: { updater: Updater }) {
   const [current, setCurrent] = useState<string>();
   useEffect(() => { appVersion().then(setCurrent, () => undefined); }, []);
   const series = useMemo(() => seriesOf(DEVLOG), []);
@@ -73,10 +75,15 @@ export function DevlogScreen() {
 
   return (
     <main className="flex w-full flex-col gap-5 px-6 py-6 2xl:px-8">
-      <header>
-        <p className="eyebrow">Release notes</p>
-        <h1 className="mt-1 font-display text-2xl font-semibold tracking-tight">What's new</h1>
-        <p className="mt-1 text-sm text-fg-2">What changed in each version of FOQA-Sim, newest first.</p>
+      <header className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <p className="eyebrow">Release notes</p>
+          <h1 className="mt-1 font-display text-2xl font-semibold tracking-tight">What's new</h1>
+          <p className="mt-1 text-sm text-fg-2">What changed in each version of FOQA-Sim, newest first.</p>
+        </div>
+        <Button variant="secondary" size="sm" onClick={() => void updater.check()} loading={updater.state.phase === "checking"} disabled={updater.state.phase === "installing"}>
+          <RefreshCw size={14} aria-hidden="true" />Check for updates
+        </Button>
       </header>
       {DEVLOG.length ? (
         <div className="grid items-start gap-6 lg:grid-cols-[13rem_minmax(0,1fr)]">

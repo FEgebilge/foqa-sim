@@ -6,7 +6,7 @@ import { mockChallenges } from "./lib/challenges-mock";
 import { mockSetup } from "./lib/setup-mock";
 import { mockSites } from "./lib/sites-mock";
 import type { DeepLink, LinkOpened, SiteAttempt, SiteChallenge, SiteSettings, SitesApi, SiteView } from "./lib/sites";
-import type { AttemptRecord, AttemptView, Briefing, ChallengeEntry, Debrief, FlightSummary, LandingNotice, OpenFlight, PreflightLine, RecorderStatus, SetupStatus, StorageUsage, TrendFilter, Trends } from "./types";
+import type { AppUpdate, AttemptRecord, AttemptView, Briefing, ChallengeEntry, Debrief, FlightSummary, LandingNotice, OpenFlight, PreflightLine, RecorderStatus, SetupStatus, StorageUsage, TrendFilter, Trends } from "./types";
 
 export type Unlisten = () => void;
 
@@ -66,10 +66,17 @@ export interface Api extends ChallengesApi, SitesApi {
   exportFlight(id: string, format: ExportFormat, identity: boolean): Promise<string | null>;
   /** Saves the flight list as a Little Navmap logbook CSV; the file, null when cancelled. */
   exportLogbook(identity: boolean): Promise<string | null>;
+  /** Asks the release feed for a newer version; null when this is the newest. Rejects when the feed cannot be reached. */
+  checkUpdate(): Promise<AppUpdate | null>;
+  /** Downloads and installs the update `checkUpdate` found, reporting bytes done and the total when known. The installer closes the app and starts it again. */
+  installUpdate(onProgress: (done: number, total?: number) => void): Promise<void>;
   /** Saves a PNG the window drew (the landing card); the file, null when cancelled. */
   saveImage(png: Blob, name: string): Promise<string | null>;
   on<K extends keyof BackendEvents>(event: K, handler: (payload: BackendEvents[K]) => void): Promise<Unlisten>;
 }
+
+/** The update `checkUpdate` found, for `installUpdate`. */
+let found: import("@tauri-apps/plugin-updater").Update | null = null;
 
 const tauriApi: Api = {
   live: true,
@@ -88,6 +95,21 @@ const tauriApi: Api = {
   exportFlight: (id, format, identity) => invoke<string | null>("export_flight", { id, format, identity }),
   exportLogbook: (identity) => invoke<string | null>("export_logbook", { identity }),
   saveImage: async (png, name) => invoke<string | null>("save_image", { name, png: Array.from(new Uint8Array(await png.arrayBuffer())) }),
+  async checkUpdate() {
+    const { check } = await import("@tauri-apps/plugin-updater");
+    found = await check();
+    return found && { version: found.version, notes: found.body ?? "" };
+  },
+  async installUpdate(onProgress) {
+    if (!found) throw new Error("Check for updates first.");
+    let done = 0;
+    let total: number | undefined;
+    await found.downloadAndInstall((event) => {
+      if (event.event === "Started") total = event.data.contentLength;
+      else if (event.event === "Progress") done += event.data.chunkLength;
+      onProgress(done, total);
+    });
+  },
   challengesList: () => invoke<ChallengeEntry[]>("challenges_list"),
   challengeImport: () => invoke<ChallengeEntry | null>("challenge_import"),
   challengeRemove: (key) => invoke<void>("challenge_remove", { key }),
@@ -192,6 +214,10 @@ const mockApi: Api = {
     if (state === "connected") return { state };
     if (state === "error") return { state, message: "SimConnect closed the connection" };
     return { state: "waiting_for_sim" };
+  },
+  checkUpdate: async () => null,
+  async installUpdate() {
+    throw new Error("Updating needs the desktop app.");
   },
   async openFlightsFolder() {
     throw new Error("Opening the flights folder needs the desktop app.");
