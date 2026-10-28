@@ -69,6 +69,8 @@ impl RawWriter {
             Telemetry::Event(SimEvent::Attempt(m)) => {
                 json!({ "event": "Attempt", "marker": marker_json::to_json(m) })
             }
+            // Written by the recorder itself, never delivered by a source.
+            Telemetry::Event(SimEvent::GearScaledV1) => return Ok(()),
         };
         self.line(&line)?;
         self.unflushed += 1;

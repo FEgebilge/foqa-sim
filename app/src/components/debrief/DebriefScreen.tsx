@@ -1,17 +1,19 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ArrowLeft, FileWarning, Pause, Play, PlaneLanding, ScanSearch, ServerCrash, UserRoundX, ZoomOut } from "lucide-react";
+import { ArrowLeft, Database, FileWarning, Globe, Image, Pause, Play, PlaneLanding, Route, ScanSearch, ServerCrash, Sheet, UserRoundX, ZoomOut } from "lucide-react";
 import { Button } from "@ui/components/button/button";
 import { EmptyState } from "@ui/components/empty-state/empty-state";
+import { api, type ExportFormat } from "../../api";
 import { verdict } from "../../lib/explain";
 import { clock, number, phaseName } from "../../lib/format";
 import { levelVar } from "../../lib/palette";
 import { openFlights } from "../../lib/route";
-import { useTheme } from "../../lib/context";
+import { useNotify, useTheme } from "../../lib/context";
 import { groupLandings } from "../../lib/landings";
 import { adjacentEvent, valueAt } from "../../lib/series";
 import { TimeBus, useHover, type TimeRange } from "../../lib/time";
 import { useDebrief } from "../../lib/use-backend";
 import type { Debrief, Series } from "../../types";
+import { ExportMenu, type ExportItem } from "../ExportMenu";
 import { useOpenFolder } from "../use-open-folder";
 import { AssessmentPanel } from "./AssessmentPanel";
 import { DebriefHeader } from "./DebriefHeader";
@@ -19,6 +21,7 @@ import { EventList, LevelLegend } from "./EventList";
 import { LandingCard } from "./LandingCard";
 import { PhaseTimeline } from "./PhaseTimeline";
 import { ReplayPfd } from "./ReplayPfd";
+import { ShareCard } from "./ShareCard";
 
 // uPlot and MapLibre are the heavy parts; they load after the debrief itself.
 const Charts = lazy(() => import("./Charts"));
@@ -122,6 +125,8 @@ function DebriefView({ debrief, refreshing, onRefresh, onOpenFolder }: { debrief
   const runwayWidth = (icao: string, runway: string) => debrief.airports.find((a) => a.icao === icao)?.runways.find((r) => r.ends.some((e) => e.runway === runway))?.width_m;
   const eventsAt = (t: number) => events.filter((e) => Math.abs(e.start_s - t) < 1);
   const isFlown = !!view && !!flown && view[0] === flown[0] && view[1] === flown[1];
+  const [share, setShare] = useState<number | null>(null);
+  const exportMenu = <ExportMenu items={useExports(debrief, landings.length, setShare)} />;
 
   const controls = (
     <div className="flex flex-wrap items-center gap-2">
@@ -144,7 +149,8 @@ function DebriefView({ debrief, refreshing, onRefresh, onOpenFolder }: { debrief
 
   return (
     <>
-      <DebriefHeader flight={flight} refreshing={refreshing} onRefresh={onRefresh} onOpenFolder={onOpenFolder} />
+      <DebriefHeader flight={flight} refreshing={refreshing} onRefresh={onRefresh} onOpenFolder={onOpenFolder} exportMenu={exportMenu} />
+      <ShareCard debrief={debrief} landing={share} onLanding={setShare} onClose={() => setShare(null)} />
       <Verdict debrief={debrief} />
       <AssessmentPanel debrief={debrief} onSelectEvent={selectEvent} />
 
@@ -205,7 +211,7 @@ function DebriefView({ debrief, refreshing, onRefresh, onOpenFolder }: { debrief
                 {landings.length ? (
                   <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(min(100%,400px),1fr))]">
                     {landings.map((landing, index) => (
-                      <LandingCard key={landing.touchdown.t_s} index={index} landing={landing} events={[landing.touchdown, ...landing.bounces].flatMap((td) => eventsAt(td.t_s))} debrief={debrief} runwayWidth={landing.touchdown.runway ? runwayWidth(landing.touchdown.runway.icao, landing.touchdown.runway.runway) : undefined} onShow={showTime} />
+                      <LandingCard key={landing.touchdown.t_s} index={index} landing={landing} events={[landing.touchdown, ...landing.bounces].flatMap((td) => eventsAt(td.t_s))} debrief={debrief} runwayWidth={landing.touchdown.runway ? runwayWidth(landing.touchdown.runway.icao, landing.touchdown.runway.runway) : undefined} onShow={showTime} onShare={setShare} />
                     ))}
                   </div>
                 ) : (
@@ -218,6 +224,26 @@ function DebriefView({ debrief, refreshing, onRefresh, onOpenFolder }: { debrief
       </section>
     </>
   );
+}
+
+/** The Export/Share menu's items: the flight in each format, and the landing card of the graded landing. */
+function useExports(debrief: Debrief, landings: number, share: (landing: number) => void): ExportItem[] {
+  const notify = useNotify();
+  const id = debrief.flight.id;
+  const save = (format: ExportFormat) => (identity: boolean) => api.exportFlight(id, format, identity).then(
+    (file) => { if (file) notify({ title: "Flight exported", body: file }); },
+    (error: unknown) => notify({ title: "Could not export the flight", body: String(error), tone: "error" }));
+  const items: ExportItem[] = [
+    { label: "CSV", hint: "Every recorded parameter at 8 Hz, for spreadsheets", icon: <Sheet size={16} />, run: save("csv") },
+    { label: "KML", hint: "3D path by phase with touchdowns and findings, for Google Earth", icon: <Globe size={16} />, run: save("kml") },
+    { label: "GPX", hint: "Track with time and altitude, for Little Navmap and map viewers", icon: <Route size={16} />, run: save("gpx") },
+    { label: "Parquet", hint: "Every sample at its own rate, for pandas or DuckDB", icon: <Database size={16} />, run: save("parquet") },
+  ];
+  if (landings) {
+    const graded = debrief.flight.assessment_detail.graded_by ?? landings - 1;
+    items.push({ label: "Landing card", hint: "An image of a landing's score to copy or save", icon: <Image size={16} />, anonymous: true, run: () => share(Math.min(graded, landings - 1)) });
+  }
+  return items;
 }
 
 /** One plain-language sentence on top: the worst level, the key issue, where the aircraft landed. */

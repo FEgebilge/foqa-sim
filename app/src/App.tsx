@@ -15,6 +15,7 @@ import { FlightsScreen } from "./components/flights/FlightsScreen";
 import { RecorderStatusPill } from "./components/RecorderStatusPill";
 import { SetupScreen } from "./components/setup/SetupScreen";
 import { measured, number } from "./lib/format";
+import { LOGO } from "./lib/logo";
 import { CHALLENGES_HREF, challengeHref, DEVLOG_HREF, flightHref, openFlight, openSetup, SETUP_HREF, useRoute } from "./lib/route";
 import { useNotify, useTheme } from "./lib/context";
 import { useBackendEvent, useRecorderStatus, useSetup } from "./lib/use-backend";
@@ -116,9 +117,9 @@ const SETUP_SHOWN = "foqa-sim.setup-shown";
 
 /** Attitude-indicator mark: horizon line and aircraft symbol in a ring. */
 const Logo = () => (
-  <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true">
-    <circle cx="13" cy="13" r="11.5" fill="none" stroke="var(--accent)" strokeWidth="1.5" />
-    <path d="M1.8 14.5 Q13 11 24.2 14.5" fill="none" stroke="var(--text-muted)" strokeWidth="1.2" />
-    <path d="M6.5 13 H10.5 L13 15.5 L15.5 13 H19.5" fill="none" stroke="var(--foreground)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+  <svg width={LOGO.size} height={LOGO.size} viewBox={`0 0 ${LOGO.size} ${LOGO.size}`} aria-hidden="true">
+    <circle {...LOGO.ring} fill="none" stroke="var(--accent)" strokeWidth="1.5" />
+    <path d={LOGO.horizon} fill="none" stroke="var(--text-muted)" strokeWidth="1.2" />
+    <path d={LOGO.symbol} fill="none" stroke="var(--foreground)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 );

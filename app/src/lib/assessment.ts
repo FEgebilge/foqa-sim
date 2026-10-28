@@ -2,7 +2,7 @@
 // and the words for values, levels and deductions. Pure functions, so the panel, the landing card's gauges and the EFB
 // mirror read one set of bands and cannot disagree with the score.
 import type { Anchors, CriterionAssessment, Debrief, DomainAssessment, LandingAssessment } from "../types";
-import { number } from "./format";
+import { number } from "./format.ts";
 
 /** The six zones of the scale: before the ideal anchor, then past each anchor in turn. */
 export const ZONES = ["Ideal", "Within tolerance", "Outside tolerance", "Level 1", "Level 2", "Level 3"] as const;

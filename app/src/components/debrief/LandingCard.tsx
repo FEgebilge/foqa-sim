@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Crosshair, Info, MapPinOff } from "lucide-react";
+import { Crosshair, Info, MapPinOff, Share2 } from "lucide-react";
 import { Button } from "@ui/components/button/button";
 import { Tooltip } from "@ui/components/tooltip/tooltip";
 import { bySeverity, eventsIn, landingWindow } from "../../lib/explain";
@@ -26,9 +26,11 @@ interface Props {
   /** The whole debrief: the approach's events, the class and the type profile's references. */
   debrief: Debrief;
   onShow: (t: number) => void;
+  /** Opens the landing card of this landing. */
+  onShare?: (index: number) => void;
 }
 
-export function LandingCard({ index, landing: { touchdown: td, bounces }, events, runwayWidth, debrief, onShow }: Props) {
+export function LandingCard({ index, landing: { touchdown: td, bounces }, events, runwayWidth, debrief, onShow, onShare }: Props) {
   // A measure is flagged with the most severe event that judged it.
   const flags = new Map<string, Level>();
   for (const event of events) {
@@ -140,7 +142,10 @@ export function LandingCard({ index, landing: { touchdown: td, bounces }, events
 
       <div className="flex items-center justify-between gap-2">
         <span className="text-xs text-fg-3">{judged.length ? `${judged.length} event${judged.length > 1 ? "s" : ""} from approach to rollout` : "No events from approach to rollout"}</span>
-        <Button size="xs" variant="ghost" onClick={() => onShow(td.t_s)}><Crosshair size={14} aria-hidden="true" />Show in charts</Button>
+        <span className="flex gap-1">
+          {onShare ? <Button size="xs" variant="ghost" onClick={() => onShare(index)}><Share2 size={14} aria-hidden="true" />Share</Button> : null}
+          <Button size="xs" variant="ghost" onClick={() => onShow(td.t_s)}><Crosshair size={14} aria-hidden="true" />Show in charts</Button>
+        </span>
       </div>
     </article>
   );

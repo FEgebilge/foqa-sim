@@ -133,7 +133,11 @@ impl Recording {
                 airports.insert(&a.icao, i);
             }
         }
-        let carried = |i: usize| Some(i) == identity || airports.values().any(|&k| k == i);
+        let carried = |i: usize| {
+            Some(i) == identity
+                || airports.values().any(|&k| k == i)
+                || self.events[i].1 == SimEvent::GearScaledV1
+        };
         let events = self
             .events
             .iter()

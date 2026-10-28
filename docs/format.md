@@ -76,8 +76,16 @@ Appended one after another until the end of the file:
 | Field | Type | |
 |---|---|---|
 | t | i64 | Sim time of the last frame before the event, µs |
-| code | u8 | `1` sim start, `2` sim stop, `3` crashed, `4` flight loaded, `5` airport snapshot, `6` aircraft identity, `7` pilot report, `8` attempt marker, `32 + n` MSFS flow event `n` (`SIMCONNECT_FLOW_EVENT`) |
+| code | u8 | `1` sim start, `2` sim stop, `3` crashed, `4` flight loaded, `5` airport snapshot, `6` aircraft identity, `7` pilot report, `8` attempt marker, `9` gear scaled (v1), `32 + n` MSFS flow event `n` (`SIMCONNECT_FLOW_EVENT`) |
 | text | UTF-8, rest of payload | Flight file for code `4`, airport snapshot JSON for code `5`, aircraft identity JSON for code `6`, the pilot's note for code `7` (may be empty), attempt marker JSON for code `8`, else empty |
+
+A **gear-scaled marker** (code `9`, no text) is written once at the start of
+every recording made since 0.5.0, stamped `0`: its `gear.extended` is in
+percent. MSFS reports `GEAR TOTAL PCT EXTENDED` as a 0-1 fraction; earlier
+recordings stored it unscaled and have no marker, so a reader scales
+`gear.extended` by 100 only when the marker is absent and the series never
+passes 1. A slice and a compact flight keep it. Readers that predate it skip
+it as an unknown code.
 
 A **pilot report** (code `7`) marks a moment the pilot chose in the in-sim
 panel (`mark`, [ingame-panel.md](ingame-panel.md)), stamped like any

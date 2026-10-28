@@ -53,6 +53,9 @@ pub enum SimEvent {
     PilotReport(String),
     /// Where an attempt at a landing challenge begins or ends.
     Attempt(AttemptMarker),
+    /// Written once at the start of a recording: its `gear.extended` is
+    /// already in percent. Recordings without it predate the scaling.
+    GearScaledV1,
 }
 
 /// The start or end of an attempt, tied to it by an opaque `reference`

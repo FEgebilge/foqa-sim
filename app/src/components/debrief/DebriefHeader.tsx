@@ -9,9 +9,9 @@ import type { Debrief } from "../../types";
 import { AssessmentBreakdown } from "./AssessmentBreakdown";
 import { EventCounts, GradeBadge, GradeTag } from "../level";
 
-interface Props { flight: Debrief["flight"]; refreshing: boolean; onRefresh: () => void; onOpenFolder: () => void }
+interface Props { flight: Debrief["flight"]; refreshing: boolean; onRefresh: () => void; onOpenFolder: () => void; /** The Export/Share menu. */ exportMenu?: ReactNode }
 
-export function DebriefHeader({ flight, refreshing, onRefresh, onOpenFolder }: Props) {
+export function DebriefHeader({ flight, refreshing, onRefresh, onOpenFolder, exportMenu }: Props) {
   const facts: [string, ReactNode][] = [
     ["Date", <>{flightDate(flight.started_utc)} <span className="text-fg-3">{flightTimeUtc(flight.started_utc)}</span></>],
     ["Duration", duration(flight.duration_s)],
@@ -23,6 +23,7 @@ export function DebriefHeader({ flight, refreshing, onRefresh, onOpenFolder }: P
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Button variant="ghost" size="sm" onClick={openFlights}><ArrowLeft size={15} aria-hidden="true" />All flights</Button>
         <div className="flex items-center gap-2">
+          {exportMenu}
           <Button variant="secondary" size="sm" onClick={onRefresh} loading={refreshing}><RefreshCw size={15} aria-hidden="true" />Refresh</Button>
           <Button variant="secondary" size="sm" onClick={onOpenFolder}><FolderOpen size={15} aria-hidden="true" />Open flights folder</Button>
         </div>

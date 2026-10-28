@@ -62,6 +62,11 @@ protocol.
 - **In-sim panel and EFB app.** Live approach monitor with the 1000 ft and 500 ft stabilised
   gates, event feed, recent landings with charts and scores, past flights, a Challenges tab
   with the attempt status, and controls to start, end, discard or mark a recording.
+- **Export and share.** Any flight as CSV (every parameter, 8 Hz), KML (the 3D path by phase
+  in Google Earth, with touchdowns and findings), GPX (Little Navmap and map viewers) or
+  Parquet; the flight list as a Little Navmap logbook; a landing card image to copy or save.
+  Written on your PC only, without file paths, and with the aircraft's title and tail number
+  only if you ask ([exports.md](docs/exports.md)).
 - **What's new.** After an update the app shows the release notes once
   ([devlog/](devlog/)).
 
@@ -96,7 +101,8 @@ The app sits in the tray, waits for the sim and records. Without the sim, `npm r
 cargo run -p cli --bin fdm -- debrief <flight.fqz>         # events, landings, runway fix
 cargo run -p cli --bin fdm -- debrief <flight.fqz> --json  # the app's Debrief JSON
 cargo run -p cli --bin fdm -- analyze <flight> [--rules my.yaml]
-cargo run -p cli --bin fdm -- export <flight> [out_dir]    # Parquet
+cargo run -p cli --bin fdm -- export <flight> [--format parquet|csv|kml|gpx] [-o file]
+cargo run -p cli --bin fdm -- logbook <dir>                # Little Navmap logbook CSV
 cargo run -p cli --bin fdm -- compact <file|dir>           # .fqj -> .fqz
 cargo run -p cli --bin fdm -- list <dir>                   # the app's flight list
 cargo run -p cli --bin fdm -- challenge <challenge.json> <flight>  # a landing-challenge attempt
@@ -131,7 +137,8 @@ Worth reading first: [format.md](docs/format.md) (recording formats),
 [rules.md](docs/rules.md) (rule language and type profiles), [phases.md](docs/phases.md)
 (flight phases), [debrief-api.md](docs/debrief-api.md) (backend and UI contract),
 [ingame-panel.md](docs/ingame-panel.md) (app and in-sim panel),
-[challenges.md](docs/challenges.md) (landing challenges).
+[challenges.md](docs/challenges.md) (landing challenges), [exports.md](docs/exports.md)
+(exports and the landing card).
 
 ## Development
 

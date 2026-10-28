@@ -2,7 +2,10 @@
 //!
 //! `fdm analyze <flight> [--rules file.yaml]`   phases, touchdowns, events
 //! `fdm debrief <flight> [--json]`              the app's debrief, as JSON
-//! `fdm export <flight> [out-dir]`              long-format Parquet (+ events)
+//! `fdm export <flight> [--format parquet|csv|kml|gpx] [--identity] [-o file]`
+//!                                              the flight for other tools (docs/exports.md)
+//! `fdm export <flight> <out-dir>`               long-format Parquet (+ events) into a folder
+//! `fdm logbook <folder|flight> [--identity] [-o file]` a Little Navmap logbook CSV
 //! `fdm compact <journal.fqj|folder>`           journals to compact flights
 //! `fdm list <folder>`                          the app's flight list, as JSON
 //! `fdm challenge <challenge.json> <flight.fqz>` a landing-challenge attempt, as JSON
@@ -24,7 +27,8 @@ use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use analyzer::{RunwayFix, export};
+use analyzer::RunwayFix;
+use debrief::export::{self, Format, Options};
 use debrief::{Analysis, Index, Station, flight_id};
 use fdm_core::SimTime;
 use rules::Event;
@@ -32,7 +36,9 @@ use rules::Event;
 const USAGE: &str =
     "usage: fdm analyze <flight.fqj|flight.fqz|capture.raw.jsonl.gz> [--rules file.yaml]
        fdm debrief <flight> [--json]
-       fdm export <flight> [out-dir]
+       fdm export <flight> [--format parquet|csv|kml|gpx] [--identity] [-o file]
+       fdm export <flight> <out-dir>
+       fdm logbook <folder|flight> [--identity] [-o file]
        fdm compact <journal.fqj|folder>
        fdm list <folder>
        fdm challenge <challenge.json> <flight.fqz>
@@ -45,8 +51,14 @@ fn main() -> ExitCode {
         ["analyze", path] => analyze(Path::new(path), None),
         ["analyze", path, "--rules", rules] => analyze(Path::new(path), Some(Path::new(rules))),
         ["debrief", path] | ["debrief", path, "--json"] => debrief(Path::new(path)),
-        ["export", path] => export(Path::new(path), Path::new(".")),
-        ["export", path, out] => export(Path::new(path), Path::new(out)),
+        ["export", path, ref rest @ ..] => match export_args(rest) {
+            Some(a) => export(Path::new(path), a),
+            None => Err(USAGE.into()),
+        },
+        ["logbook", path, ref rest @ ..] => match export_args(rest) {
+            Some(a @ Export { format: None, .. }) => logbook(Path::new(path), a),
+            _ => Err(USAGE.into()),
+        },
         ["compact", path] => compact(Path::new(path)),
         ["list", dir] => list(Path::new(dir)),
         ["challenge", "--check", def] => check(Path::new(def)),
@@ -189,14 +201,84 @@ fn secs(t: SimTime) -> String {
     format!("{:.1}", t.as_secs_f64())
 }
 
-fn export(path: &Path, out: &Path) -> Result<(), Box<dyn Error>> {
-    let flight = debrief::load(path)?;
-    let base: PathBuf = out.join(flight_id(path));
-    let samples = base.with_extension("parquet");
-    let events = base.with_extension("events.parquet");
-    export::write_samples(&flight, &samples)?;
-    export::write_events(&flight, &events)?;
-    println!("{}\n{}", samples.display(), events.display());
+/// `fdm export` / `fdm logbook` options after the flight.
+#[derive(Debug, Default, PartialEq)]
+struct Export<'a> {
+    format: Option<Format>,
+    options: Options,
+    out: Option<&'a str>,
+    /// The older `fdm export <flight> <out-dir>`: Parquet into that folder.
+    dir: Option<&'a str>,
+}
+
+/// `[--format <f>] [--identity] [-o <file>]` in any order, or one folder.
+fn export_args<'a>(args: &[&'a str]) -> Option<Export<'a>> {
+    if let [dir] = args
+        && !dir.starts_with('-')
+    {
+        return Some(Export {
+            dir: Some(dir),
+            ..Export::default()
+        });
+    }
+    let mut a = Export::default();
+    let mut rest = args;
+    while let [flag, tail @ ..] = rest {
+        rest = match (*flag, tail) {
+            ("--format", [f, tail @ ..]) if a.format.is_none() => {
+                a.format = Some(Format::parse(f)?);
+                tail
+            }
+            ("-o", [out, tail @ ..]) if a.out.is_none() => {
+                a.out = Some(out);
+                tail
+            }
+            ("--identity", tail) if !a.options.identity => {
+                a.options.identity = true;
+                tail
+            }
+            _ => return None,
+        };
+    }
+    Some(a)
+}
+
+/// Writes the export and prints the files written. Parquet needs no
+/// analysis, so it also takes a flight without air/ground data.
+fn export(path: &Path, a: Export) -> Result<(), Box<dyn Error>> {
+    let format = a.format.unwrap_or(Format::Parquet);
+    let out = match (a.out, a.dir) {
+        (Some(out), _) => PathBuf::from(out),
+        (None, dir) => {
+            let file = PathBuf::from(flight_id(path)).with_extension(format.ext());
+            dir.map_or(file.clone(), |d| Path::new(d).join(file))
+        }
+    };
+    let written = match format {
+        Format::Parquet => export::parquet(&debrief::load(path)?, a.options, &out)?,
+        _ => open(&Station::core()?, path)?.export(format, a.options, &out)?,
+    };
+    for file in written {
+        println!("{}", file.display());
+    }
+    Ok(())
+}
+
+/// The flights of a folder (its index), or one flight, as a Little Navmap
+/// logbook, `logbook.csv` by default.
+fn logbook(path: &Path, a: Export) -> Result<(), Box<dyn Error>> {
+    let station = Station::core()?;
+    let summaries = match path.is_dir() {
+        true => Index::open(path).summaries(&station),
+        false => vec![open(&station, path)?.summary()],
+    };
+    let out = Path::new(a.out.unwrap_or("logbook.csv"));
+    let n = export::logbook_file(&summaries, a.options, out)?;
+    let skipped = summaries.len() - n;
+    if skipped > 0 {
+        eprintln!("note: {skipped} flight(s) without a departure or arrival airport left out");
+    }
+    println!("{}", out.display());
     Ok(())
 }
 
@@ -309,6 +391,27 @@ fn list(dir: &Path) -> Result<(), Box<dyn Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn export_takes_a_format_identity_and_output_or_a_folder() {
+        let a = export_args(&["--format", "kml", "--identity", "-o", "a.kml"]).unwrap();
+        assert_eq!(a.format, Some(Format::Kml));
+        assert!(a.options.identity);
+        assert_eq!(a.out, Some("a.kml"));
+        assert_eq!(export_args(&["out"]).unwrap().dir, Some("out"));
+        assert_eq!(export_args(&[]), Some(Export::default()));
+        assert!(!export_args(&["-o", "x.csv"]).unwrap().options.identity);
+        for bad in [
+            &["--format", "xlsx"][..],
+            &["--format"],
+            &["-o"],
+            &["--identity", "--identity"],
+            &["--format", "csv", "--format", "kml"],
+            &["out", "-o", "x"],
+        ] {
+            assert!(export_args(bad).is_none(), "{bad:?}");
+        }
+    }
 
     #[test]
     fn slice_takes_a_ref_or_a_range_and_an_output() {
