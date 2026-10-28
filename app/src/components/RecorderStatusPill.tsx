@@ -29,12 +29,12 @@ export function RecorderStatusPill({ status }: { status: RecorderState | null })
 
   return (
     <Tooltip content={hint} side="bottom">
-      <span role="status" tabIndex={0} className="inline-flex h-8 items-center gap-2 rounded-full border border-line bg-surface px-3 text-sm">
+      <span role="status" tabIndex={0} className="inline-flex h-8 items-center gap-2 rounded-full border border-line bg-surface px-3 text-sm whitespace-nowrap">
         <span className="relative flex size-2.5" aria-hidden="true">
           {recording || value.state === "connected" ? <span className="absolute inline-flex size-full animate-ping rounded-full opacity-60" style={{ background: copy.color }} /> : null}
           <span className="relative inline-flex size-2.5 rounded-full" style={{ background: copy.color }} />
         </span>
-        <span className="font-medium">{copy.label}</span>
+        <span className="sr-only font-medium sm:not-sr-only">{copy.label}</span>
         {elapsed ? <span className="readout text-fg-2">{elapsed}</span> : null}
       </span>
     </Tooltip>

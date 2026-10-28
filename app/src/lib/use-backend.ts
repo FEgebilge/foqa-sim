@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type BackendEvents } from "../api";
-import type { Debrief, FlightSummary, RecorderStatus, SetupStatus } from "../types";
+import type { Debrief, FlightSummary, RecorderStatus, SetupStatus, TrendFilter } from "../types";
 
 export type Load<T> = { status: "loading" } | { status: "ready"; data: T } | { status: "error"; message: string };
 
@@ -19,13 +19,19 @@ export function useBackendEvent<K extends keyof BackendEvents>(event: K, handler
   }, [event, handler]);
 }
 
-/** A load that can be repeated; the previous data stays on screen while a refresh runs. */
+/** A load that can be repeated; the previous data stays on screen while a refresh runs, and only the latest request's
+ * answer is kept, so a slow earlier one (an older filter) never replaces a newer one. */
 function useLoad<T>(load: () => Promise<T>) {
   const [state, setState] = useState<Load<T>>({ status: "loading" });
   const [refreshing, setRefreshing] = useState(false);
-  const fetchData = useCallback(() => load()
-    .then((data) => setState({ status: "ready", data }))
-    .catch((error: unknown) => setState({ status: "error", message: message(error) })), [load]);
+  const latest = useRef(0);
+  const fetchData = useCallback(() => {
+    const request = ++latest.current;
+    const keep = (next: Load<T>) => { if (request === latest.current) setState(next); };
+    return load()
+      .then((data) => keep({ status: "ready", data }))
+      .catch((error: unknown) => keep({ status: "error", message: message(error) }));
+  }, [load]);
   useEffect(() => { fetchData(); }, [fetchData]);
   const refresh = useCallback(() => {
     setRefreshing(true);
@@ -89,5 +95,17 @@ export function useAttempts() {
   const result = useLoad(load);
   const { refresh } = result;
   useBackendEvent("attempt-changed", useCallback(() => refresh(), [refresh]));
+  return result;
+}
+
+/** The trends for a filter; the previous numbers stay on screen while a changed filter loads. */
+export function useTrends(filter: TrendFilter) {
+  const { aircraft, airport, days } = filter;
+  const load = useCallback(() => api.trends({ aircraft, airport, days }), [aircraft, airport, days]);
+  const result = useLoad(load);
+  // A newly saved flight changes every aggregate: ask again.
+  const { refresh } = result;
+  const onSaved = useCallback(() => refresh(), [refresh]);
+  useBackendEvent("flight-saved", onSaved);
   return result;
 }

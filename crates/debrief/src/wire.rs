@@ -53,6 +53,98 @@ pub struct FlightSummary {
     /// Every level, zero included.
     pub event_counts: BTreeMap<Level, usize>,
     pub assessment: Assessment,
+    /// One per landing, bounces grouped with theirs (docs/trends.md).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub landings_detail: Vec<LandingFacts>,
+    /// Each rule that fired at low or above, by rule id.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub rule_counts: BTreeMap<String, RuleCount>,
+}
+
+/// What a landing contributes to the trends: where and how it touched
+/// down and how it was scored.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LandingFacts {
+    /// Its first touchdown.
+    pub t_s: f64,
+    /// `false` for a touch-and-go.
+    pub full_stop: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icao: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runway: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub score: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grade: Option<Grade>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<Confidence>,
+    /// Each domain's level, 0-3; `None`: not applicable. Empty when the
+    /// landing was not scored.
+    pub domains: BTreeMap<Domain, Option<u8>>,
+    pub sink_fpm: f64,
+    pub peak_g: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub along_m: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cross_m: Option<f64>,
+    /// `In TDZ`, `Long` or `Short`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zone: Option<String>,
+    /// The runway's touchdown zone length, aiming point and landing
+    /// distance available, so a footprint draws each runway as it is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tdz_m: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub aiming_point_m: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lda_m: Option<f64>,
+    /// Positive from the right.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crosswind_kt: Option<f64>,
+    /// Negative is a headwind.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tailwind_kt: Option<f64>,
+    pub bounces: usize,
+}
+
+impl LandingFacts {
+    /// The landing whose first touchdown is `td`, as `assessed`.
+    pub fn new(td: &Touchdown, assessed: &LandingAssessment) -> Self {
+        let fix = td.runway.as_ref();
+        Self {
+            t_s: td.t_s,
+            full_stop: assessed.full_stop,
+            icao: fix.map(|r| r.icao.clone()),
+            runway: fix.map(|r| r.runway.clone()),
+            score: assessed.score,
+            grade: assessed.grade,
+            confidence: assessed.confidence,
+            domains: assessed
+                .domains
+                .iter()
+                .map(|d| (d.id, d.loss.map(|_| d.level)))
+                .collect(),
+            sink_fpm: td.sink_fpm,
+            peak_g: td.peak_g,
+            along_m: fix.map(|r| r.along_m),
+            cross_m: fix.map(|r| r.cross_m),
+            zone: fix.map(|r| r.zone.to_owned()),
+            tdz_m: fix.map(|r| r.tdz_m),
+            aiming_point_m: fix.map(|r| r.aiming_point_m),
+            lda_m: fix.map(|r| r.lda_m),
+            crosswind_kt: td.wind.as_ref().map(|w| w.crosswind_kt),
+            tailwind_kt: td.wind.as_ref().map(|w| -w.headwind_kt),
+            bounces: 0,
+        }
+    }
+}
+
+/// How often a rule fired in a flight and its worst level.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuleCount {
+    pub level: Level,
+    pub count: usize,
 }
 
 /// The flight graded as a whole, as the flight list shows it: by

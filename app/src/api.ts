@@ -6,7 +6,7 @@ import { mockChallenges } from "./lib/challenges-mock";
 import { mockSetup } from "./lib/setup-mock";
 import { mockSites } from "./lib/sites-mock";
 import type { DeepLink, LinkOpened, SiteAttempt, SiteChallenge, SiteSettings, SitesApi, SiteView } from "./lib/sites";
-import type { AttemptRecord, AttemptView, Briefing, ChallengeEntry, Debrief, FlightSummary, LandingNotice, OpenFlight, PreflightLine, RecorderStatus, SetupStatus, StorageUsage } from "./types";
+import type { AttemptRecord, AttemptView, Briefing, ChallengeEntry, Debrief, FlightSummary, LandingNotice, OpenFlight, PreflightLine, RecorderStatus, SetupStatus, StorageUsage, TrendFilter, Trends } from "./types";
 
 export type Unlisten = () => void;
 
@@ -49,6 +49,8 @@ export interface Api extends ChallengesApi, SitesApi {
   readonly live: boolean;
   listFlights(): Promise<FlightSummary[]>;
   debrief(id: string): Promise<Debrief>;
+  /** One pilot's flights over time (docs/trends.md); an absent filter field means all. */
+  trends(filter: TrendFilter): Promise<Trends>;
   /** Removes the flight's recording files for good; the flight being recorded is refused. */
   deleteFlight(id: string): Promise<void>;
   recorderStatus(): Promise<RecorderStatus>;
@@ -73,6 +75,7 @@ const tauriApi: Api = {
   live: true,
   listFlights: () => invoke<FlightSummary[]>("list_flights"),
   debrief: (id) => invoke<Debrief>("debrief", { id }),
+  trends: (filter) => invoke<Trends>("trends", { filter }),
   deleteFlight: (id) => invoke<void>("delete_flight", { id }),
   recorderStatus: () => invoke<RecorderStatus>("recorder_status"),
   openFlightsFolder: () => invoke<void>("open_flights_folder"),
@@ -165,6 +168,19 @@ const mockApi: Api = {
       const started = base.started_utc ? new Date(Date.parse(base.started_utc) - index * 86_400_000 * 0.7).toISOString() : undefined;
       return { ...base, id: `${base.id}${COPY}${index}`, started_utc: started };
     }).filter((f) => !deleted.has(f.id));
+  },
+  /** The sample, narrowed to the filter: its landings, counts and mean score follow; the other tables stay as sampled. */
+  async trends({ aircraft, airport, days }) {
+    const all = await firstJson<Trends>(["/mock/trends.json"]);
+    const newest = Date.parse(all.landings.at(-1)?.started_utc ?? "") || 0;
+    const rows = all.landings.filter((l) => (!aircraft || l.aircraft === aircraft) && (!airport || l.icao === airport)
+      && (days === undefined || Date.parse(l.started_utc ?? "") >= newest - days * 86_400_000));
+    const scores = rows.filter((l) => l.score !== undefined && l.full_stop).map((l) => l.score!);
+    const mean = scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : null;
+    const keep = (rows.length === all.landings.length);
+    return { ...all, filter: { aircraft, airport, days }, flights: rows.length, landing_count: rows.length, scored: scores.length, hours: Math.round(rows.length * 9.5) / 10,
+      landings: rows, score: keep ? all.score : { mean, median: mean, recent: null, earlier: null },
+      by_aircraft: all.by_aircraft.filter((r) => !aircraft || r.icao === aircraft), by_airport: all.by_airport.filter((r) => !airport || r.icao === airport) };
   },
   async deleteFlight(id) {
     deleted.add(id);
