@@ -68,6 +68,21 @@ pub struct FlightSummary {
     /// What was flown, which decides whether trends count the recording.
     #[serde(default)]
     pub flown: Flown,
+    /// `flown` judged by the trends rule, so the list can set the rest apart.
+    #[serde(default)]
+    pub kind: RecordingKind,
+}
+
+/// What a recording was (docs/trends.md): a flight trends count, or not.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RecordingKind {
+    Flight,
+    /// Never airborne; also a summary from before `flown` existed.
+    #[default]
+    GroundOnly,
+    /// Airborne, but under the rule.
+    TooShort,
 }
 
 /// How much of a recording was real flying (docs/trends.md), from the

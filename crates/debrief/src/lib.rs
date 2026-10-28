@@ -159,13 +159,18 @@ pub fn storage_usage(dir: &Path) -> StorageUsage {
     }
 }
 
-/// Deletes the stored files of flight `id` in `dir`: its journal, compact
-/// flight and raw capture, those exact names and nothing else. Returns how
-/// many were there.
+/// The names of flight `id`'s stored files that may exist: its raw capture,
+/// journal and compact flight, those exact names and nothing else.
+pub fn flight_file_names(id: &str) -> [String; 3] {
+    suffixes().map(|ext| format!("{id}{ext}"))
+}
+
+/// Deletes the stored files of flight `id` in `dir` (`flight_file_names`).
+/// Returns how many were there.
 pub fn delete_flight(dir: &Path, id: &str) -> io::Result<usize> {
     let mut deleted = 0;
-    for ext in suffixes() {
-        match fs::remove_file(dir.join(format!("{id}{ext}"))) {
+    for name in flight_file_names(id) {
+        match fs::remove_file(dir.join(name)) {
             Ok(()) => deleted += 1,
             Err(e) if e.kind() == io::ErrorKind::NotFound => {}
             Err(e) => return Err(e),
@@ -281,6 +286,10 @@ impl Analysis<'_> {
         skills: SkillsSummary,
     ) -> FlightSummary {
         let t = &self.track.t;
+        let flown = Flown::of(
+            &self.track,
+            &self.flight.resample("sim.slew", &self.track.t),
+        );
         let mut event_counts: BTreeMap<_, usize> = Level::ALL.map(|l| (l, 0)).into();
         for e in events {
             *event_counts.entry(e.level).or_default() += 1;
@@ -307,10 +316,8 @@ impl Analysis<'_> {
             assessment: detail.into(),
             landings_detail: self.landings_detail(detail),
             skills,
-            flown: Flown::of(
-                &self.track,
-                &self.flight.resample("sim.slew", &self.track.t),
-            ),
+            kind: RecordingKind::of(&flown),
+            flown,
             rule_counts: detail
                 .parts
                 .iter()

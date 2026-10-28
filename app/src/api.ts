@@ -3,12 +3,10 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { DeepLink, LinkOpened, SiteAttempt, SiteChallenge, SiteSettings, SitesApi, SiteView } from "./lib/sites";
-import type { AppUpdate, AttemptRecord, AttemptView, Briefing, ChallengeEntry, Debrief, FlightSummary, LandingNotice, OpenFlight, PreflightLine, RecorderStatus, SetupStatus, StorageUsage, TrendFilter, Trends } from "./types";
+import type { AppUpdate, AttemptRecord, AttemptView, Briefing, ChallengeEntry, Debrief, Deleted, FlightMeta, FlightSummary, LandingNotice, OpenFlight, PreflightLine, RecorderStatus, SetupStatus, StorageUsage, TrendFilter, Trends } from "./types";
 
 export type Unlisten = () => void;
 
-/** What the pilot wrote about a flight: a title, free notes and tags; saved beside the recording. */
-export interface FlightMeta { title?: string; notes?: string; tags: string[] }
 
 /** The flight exports of `fdm export` (docs/exports.md). */
 export type ExportFormat = "csv" | "kml" | "gpx" | "parquet";
@@ -51,12 +49,15 @@ export interface Api extends ChallengesApi, SitesApi {
   debrief(id: string): Promise<Debrief>;
   /** One pilot's flights over time (docs/trends.md); an absent filter field means all. */
   trends(filter: TrendFilter): Promise<Trends>;
-  /** The pilot's title, notes and tags of a flight; empty for a flight never written about. */
+  /** Moves the flights' files to the trash, where `restoreFlights` finds them for 30 days; the flight being recorded is refused. */
+  deleteFlights(ids: string[]): Promise<Deleted>;
+  /** Brings trashed flights back; the ids restored. */
+  restoreFlights(ids: string[]): Promise<string[]>;
+  /** Deletes the trash for good; how many flights went. */
+  purgeTrash(): Promise<number>;
   flightMetaGet(id: string): Promise<FlightMeta>;
-  /** Replaces the flight's title, notes and tags. */
-  flightMetaSet(id: string, meta: FlightMeta): Promise<void>;
-  /** Removes the flight's recording files for good; the flight being recorded is refused. */
-  deleteFlight(id: string): Promise<void>;
+  /** Replaces the flight's title, notes and tags; the meta as kept (trimmed, tags without repeats). Too long a value rejects in plain words. */
+  flightMetaSet(id: string, meta: FlightMeta): Promise<FlightMeta>;
   recorderStatus(): Promise<RecorderStatus>;
   openFlightsFolder(): Promise<void>;
   /** Opens the folder holding the app's log file, for a recorder error. */
@@ -70,8 +71,8 @@ export interface Api extends ChallengesApi, SitesApi {
   setupPickCommunity(): Promise<SetupStatus>;
   /** Saves the flight in a format other tools read, where the user picks; the file, null when cancelled. `identity` adds the aircraft's title and tail number. */
   exportFlight(id: string, format: ExportFormat, identity: boolean): Promise<string | null>;
-  /** Saves the flight list as a Little Navmap logbook CSV; the file, null when cancelled. */
-  exportLogbook(identity: boolean): Promise<string | null>;
+  /** Saves the flight list, or only flights `ids`, as a Little Navmap logbook CSV; the file, null when cancelled. */
+  exportLogbook(identity: boolean, ids?: string[]): Promise<string | null>;
   /** Asks the release feed for a newer version; null when this is the newest. Rejects when the feed cannot be reached. */
   checkUpdate(): Promise<AppUpdate | null>;
   /** Downloads and installs the update `checkUpdate` found, reporting bytes done and the total when known. The installer closes the app and starts it again. */
@@ -89,9 +90,11 @@ const tauriApi: Api = {
   listFlights: () => invoke<FlightSummary[]>("list_flights"),
   debrief: (id) => invoke<Debrief>("debrief", { id }),
   trends: (filter) => invoke<Trends>("trends", { filter }),
-  deleteFlight: (id) => invoke<void>("delete_flight", { id }),
+  deleteFlights: (ids) => invoke<Deleted>("delete_flights", { ids }),
+  restoreFlights: (ids) => invoke<string[]>("restore_flights", { ids }),
+  purgeTrash: () => invoke<number>("purge_trash"),
   flightMetaGet: (id) => invoke<FlightMeta>("flight_meta_get", { id }),
-  flightMetaSet: (id, meta) => invoke<void>("flight_meta_set", { id, meta }),
+  flightMetaSet: (id, meta) => invoke<FlightMeta>("flight_meta_set", { id, meta }),
   recorderStatus: () => invoke<RecorderStatus>("recorder_status"),
   openFlightsFolder: () => invoke<void>("open_flights_folder"),
   openLogFolder: () => invoke<void>("open_log_folder"),
@@ -102,7 +105,7 @@ const tauriApi: Api = {
   setupUseCommunity: (path) => invoke<SetupStatus>("setup_use_community", { path }),
   setupPickCommunity: () => invoke<SetupStatus>("setup_pick_community"),
   exportFlight: (id, format, identity) => invoke<string | null>("export_flight", { id, format, identity }),
-  exportLogbook: (identity) => invoke<string | null>("export_logbook", { identity }),
+  exportLogbook: (identity, ids) => invoke<string | null>("export_logbook", { identity, ids }),
   saveImage: async (png, name) => invoke<string | null>("save_image", { name, png: Array.from(new Uint8Array(await png.arrayBuffer())) }),
   async checkUpdate() {
     const { check } = await import("@tauri-apps/plugin-updater");

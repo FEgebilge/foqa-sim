@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, type FlightMeta } from "../../api";
+import { api } from "../../api";
+import type { FlightMeta } from "../../types";
 import { adjacentFlights, typeMedian, type TypeMedian } from "../../lib/history";
 import { useFlights } from "../../lib/use-backend";
 

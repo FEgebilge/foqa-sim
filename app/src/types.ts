@@ -213,6 +213,26 @@ export interface FlightSummary {
   skills?: SkillsSummary;
   /** What Trends counts a flight by (docs/trends.md); absent on older summaries: not flown. */
   flown?: Flown;
+  /** `flown` judged by the Trends rule; absent on mocks made before 0.11, read as a flight. */
+  kind?: RecordingKind;
+  /** The pilot's title, notes and tags (`list_flights` only); absent when none were given. */
+  meta?: FlightMeta;
+}
+
+/** A flight Trends counts, or a recording that is not one: never airborne, or airborne under the rule. */
+export type RecordingKind = "flight" | "ground_only" | "too_short";
+
+/** What the pilot wrote about a flight, kept beside it in `<id>.meta.json`. */
+export interface FlightMeta {
+  title?: string;
+  notes?: string;
+  tags?: string[];
+}
+
+/** What `delete_flights` did: the flights now in the trash, and why the others are not. */
+export interface Deleted {
+  trashed: string[];
+  failed: string[];
 }
 
 /** How much of a recording was real flying: airborne legs, slewed points left out. */
@@ -538,8 +558,11 @@ export interface AppUpdate {
 
 export interface StorageUsage {
   flights: number;
+  /** The folder's files, the trash not included. */
   bytes: number;
   folder: string;
+  /** Deleted flights waiting to be restored or purged. */
+  trash: { flights: number; bytes: number };
 }
 
 export type CheckState = "pass" | "warn" | "fail";

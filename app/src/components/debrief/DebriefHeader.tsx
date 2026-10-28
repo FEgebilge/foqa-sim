@@ -5,7 +5,7 @@ import { Button } from "@ui/components/button/button";
 import { InlineEdit } from "@ui/components/inline-edit/inline-edit";
 import { TagInput } from "@ui/components/tag-input/tag-input";
 import { Tooltip } from "@ui/components/tooltip/tooltip";
-import type { FlightMeta } from "../../api";
+import type { FlightMeta } from "../../types";
 import { aircraftName, assessmentText, duration, flightDate, flightTimeUtc, number } from "../../lib/format";
 import { useNotify } from "../../lib/context";
 import { openFlight, openFlights } from "../../lib/route";

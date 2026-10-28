@@ -102,11 +102,13 @@ pub async fn export_flight(
     .await
 }
 
-/// Saves the flight list as a Little Navmap logbook CSV.
+/// Saves the flight list as a Little Navmap logbook CSV; only flights
+/// `ids` when given.
 #[tauri::command]
 pub async fn export_logbook(
     app: AppHandle,
     identity: bool,
+    ids: Option<Vec<String>>,
     shared: State<'_, Arc<Shared>>,
 ) -> Result<Option<String>, String> {
     let shared = Arc::clone(&shared);
@@ -121,8 +123,11 @@ pub async fn export_logbook(
         else {
             return Ok(None);
         };
-        export::logbook_file(&shared.saved(), Options { identity }, &out)
-            .map_err(|e| e.to_string())?;
+        let mut flights = shared.saved();
+        if let Some(ids) = ids {
+            flights.retain(|f| ids.contains(&f.id));
+        }
+        export::logbook_file(&flights, Options { identity }, &out).map_err(|e| e.to_string())?;
         Ok(Some(out.display().to_string()))
     })
     .await

@@ -29,6 +29,7 @@ use crate::attempts::{Attempts, Cut, Record, State as AttemptState, Uncut, View}
 use crate::diag;
 use crate::library::{Briefing, Entry, Library};
 use crate::setup::{Setup, SetupStatus};
+use crate::store::{FlightMeta, Listed, Store, TRASH_KEEP, TrashUsage};
 
 /// What the commands, the tray and the recorder thread share.
 pub struct Shared {
@@ -162,16 +163,33 @@ impl Shared {
         self.index.saved(&self.station)
     }
 
-    /// Deletes a stored flight's files for good, unless it is the one being
-    /// recorded.
+    pub(crate) fn store(&self) -> Store<'_> {
+        Store::new(&self.dir)
+    }
+
+    /// The flight list with each flight's meta.
+    fn listed(&self) -> Vec<Listed> {
+        let mut meta = self.store().all_meta();
+        let summaries = self.summaries().into_iter();
+        summaries
+            .map(|summary| Listed {
+                meta: meta.remove(&summary.id).unwrap_or_default(),
+                summary,
+            })
+            .collect()
+    }
+
+    /// Moves a stored flight's files to the trash, unless it is the one
+    /// being recorded.
     fn delete(&self, id: &str) -> Result<(), String> {
         self.flight(id)?;
         if matches!(&*lock(&self.status), RecorderStatus::Recording { flight_id, .. } if flight_id == id)
         {
             return Err(format!("{id} is being recorded"));
         }
-        ::debrief::delete_flight(&self.dir, id).map_err(|e| format!("{id}: {e}"))?;
-        Ok(())
+        self.store()
+            .trash(id, SystemTime::now())
+            .map_err(|e| format!("{id}: {e}"))
     }
 
     fn setup_status(&self) -> SetupStatus {
@@ -181,15 +199,19 @@ impl Shared {
     /// The stored file of a flight id. Ids are file stems from `list_flights`;
     /// anything else could name a file outside the folder.
     pub(crate) fn flight(&self, id: &str) -> Result<PathBuf, String> {
-        let stem = !id.is_empty()
-            && id
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || "-_".contains(c));
-        if !stem {
-            return Err(format!("no flight {id:?}"));
-        }
+        checked(id)?;
         ::debrief::flight_path(&self.dir, id).ok_or_else(|| format!("no flight {id:?}"))
     }
+}
+
+/// `id` when it can only be a file stem from `list_flights`.
+fn checked(id: &str) -> Result<&str, String> {
+    let stem = !id.is_empty()
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "-_".contains(c));
+    stem.then_some(id)
+        .ok_or_else(|| format!("no flight {id:?}"))
 }
 
 /// What optional modules use.
@@ -225,9 +247,9 @@ pub(crate) async fn blocking<T: Send + 'static>(
 }
 
 #[tauri::command]
-pub async fn list_flights(shared: State<'_, Arc<Shared>>) -> Result<Vec<FlightSummary>, String> {
+pub async fn list_flights(shared: State<'_, Arc<Shared>>) -> Result<Vec<Listed>, String> {
     let shared = Arc::clone(&shared);
-    blocking(move || Ok(shared.summaries())).await
+    blocking(move || Ok(shared.listed())).await
 }
 
 /// The saved flights' trends (docs/trends.md) from the cached summaries.
@@ -247,10 +269,83 @@ pub async fn debrief(id: String, shared: State<'_, Arc<Shared>>) -> Result<Debri
     .await
 }
 
+/// What `delete_flights` did: the flights now in the trash and, in plain
+/// words, why the others are not.
+#[derive(Debug, Serialize)]
+pub struct Deleted {
+    pub trashed: Vec<String>,
+    pub failed: Vec<String>,
+}
+
+/// Moves flights to the trash, from where `restore_flights` brings them
+/// back; the one being recorded is refused. Trash older than `TRASH_KEEP`
+/// is purged on the way.
 #[tauri::command]
-pub async fn delete_flight(id: String, shared: State<'_, Arc<Shared>>) -> Result<(), String> {
+pub async fn delete_flights(
+    ids: Vec<String>,
+    shared: State<'_, Arc<Shared>>,
+) -> Result<Deleted, String> {
     let shared = Arc::clone(&shared);
-    blocking(move || shared.delete(&id)).await
+    blocking(move || {
+        shared.store().purge(TRASH_KEEP, SystemTime::now());
+        let (mut trashed, mut failed) = (Vec::new(), Vec::new());
+        for id in ids {
+            match shared.delete(&id) {
+                Ok(()) => trashed.push(id),
+                Err(e) => failed.push(e),
+            }
+        }
+        Ok(Deleted { trashed, failed })
+    })
+    .await
+}
+
+/// Brings trashed flights back; the ids restored.
+#[tauri::command]
+pub async fn restore_flights(
+    ids: Vec<String>,
+    shared: State<'_, Arc<Shared>>,
+) -> Result<Vec<String>, String> {
+    let shared = Arc::clone(&shared);
+    blocking(move || {
+        let store = shared.store();
+        let restored =
+            ids.into_iter()
+                .filter(|id| match checked(id).and_then(|id| store.restore(id)) {
+                    Ok(()) => true,
+                    Err(e) => {
+                        eprintln!("restore: {e}");
+                        false
+                    }
+                });
+        Ok(restored.collect())
+    })
+    .await
+}
+
+/// Deletes the trash for good; how many flights went.
+#[tauri::command]
+pub async fn purge_trash(shared: State<'_, Arc<Shared>>) -> Result<usize, String> {
+    let shared = Arc::clone(&shared);
+    blocking(move || Ok(shared.store().purge(Duration::ZERO, SystemTime::now()))).await
+}
+
+#[tauri::command]
+pub fn flight_meta_get(id: String, shared: State<'_, Arc<Shared>>) -> Result<FlightMeta, String> {
+    shared.flight(&id)?;
+    Ok(shared.store().meta(&id))
+}
+
+/// Replaces the flight's title, notes and tags; the meta as kept (trimmed,
+/// tags without repeats). Too long a value is refused in plain words.
+#[tauri::command]
+pub fn flight_meta_set(
+    id: String,
+    meta: FlightMeta,
+    shared: State<'_, Arc<Shared>>,
+) -> Result<FlightMeta, String> {
+    shared.flight(&id)?;
+    shared.store().set_meta(&id, meta)
 }
 
 /// Places the aircraft at a landing challenge's start (docs/challenges.md):
@@ -854,10 +949,24 @@ pub fn open_log_folder() -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+/// `StorageUsage` and the trash's share of it.
+#[derive(Debug, Serialize)]
+pub struct Usage {
+    #[serde(flatten)]
+    pub folder: StorageUsage,
+    pub trash: TrashUsage,
+}
+
 #[tauri::command]
-pub async fn storage_usage(shared: State<'_, Arc<Shared>>) -> Result<StorageUsage, String> {
+pub async fn storage_usage(shared: State<'_, Arc<Shared>>) -> Result<Usage, String> {
     let shared = Arc::clone(&shared);
-    blocking(move || Ok(::debrief::storage_usage(&shared.dir))).await
+    blocking(move || {
+        Ok(Usage {
+            folder: ::debrief::storage_usage(&shared.dir),
+            trash: shared.store().trash_usage(),
+        })
+    })
+    .await
 }
 
 /// Runs a fix off the IPC thread, then checks again.
