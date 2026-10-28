@@ -310,6 +310,10 @@ impl Analysis<'_> {
             assessment: detail.into(),
             landings_detail: self.landings_detail(detail),
             skills,
+            flown: Flown::of(
+                &self.track,
+                &self.flight.resample("sim.slew", &self.track.t),
+            ),
             rule_counts: detail
                 .parts
                 .iter()

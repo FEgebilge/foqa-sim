@@ -33,7 +33,7 @@ export function TrendsScreen() {
   let body: ReactNode;
   if (state.status === "loading") body = <div className="grid gap-5 xl:grid-cols-3" aria-label="Loading trends">{Array.from({ length: 3 }, (_, i) => <div key={i} className="panel h-64 animate-pulse" />)}</div>;
   else if (state.status === "error") body = <div className="panel"><EmptyState icon={<ServerCrash size={20} />} title="Could not read the trends" description={state.message} action={<Button variant="secondary" size="sm" onClick={refresh}>Try again</Button>} /></div>;
-  else if (!state.data.flights) body = <NoFlights filtered={filtered} onReset={() => setFilter({})} />;
+  else if (!state.data.flights) body = <NoFlights filtered={filtered} onReset={() => setFilter({})} recordings={state.data.recordings} />;
   else body = <Content data={state.data} theme={theme} stale={refreshing} />;
 
   return (
@@ -76,10 +76,12 @@ function Filters({ options, filter, onChange, filtered }: { options: Trends["opt
   );
 }
 
-function NoFlights({ filtered, onReset }: { filtered: boolean; onReset: () => void }) {
+function NoFlights({ filtered, onReset, recordings }: { filtered: boolean; onReset: () => void; recordings: Trends["recordings"] }) {
   const openFolder = useOpenFolder();
   return (
     <div className="panel">
+      {/* Recordings that exist but did not count say why, so an empty screen is never a mystery. */}
+      <LeftOut recordings={recordings} className="px-5 pt-4" />
       {filtered ? (
         <EmptyState icon={<SearchX size={20} />} title="No flights match these filters" description="Widen the period or pick another aircraft or airport." action={<Button variant="secondary" size="sm" onClick={onReset}>Clear filters</Button>} />
       ) : (
@@ -98,6 +100,17 @@ const Kpi = ({ label, children, note }: { label: string; children: ReactNode; no
   </div>
 );
 
+/** Plain words for the recordings Trends did not count (docs/trends.md). */
+function LeftOut({ recordings: r, className = "" }: { recordings: Trends["recordings"]; className?: string }) {
+  const out = r.total - r.counted;
+  if (!out && !r.partial) return null;
+  const parts = [
+    out ? `${number(out)} ${out === 1 ? "recording was" : "recordings were"} left out: ${[r.ground_only ? `${number(r.ground_only)} never left the ground` : "", r.too_short ? `${number(r.too_short)} ${r.too_short === 1 ? "was" : "were"} too short to be a flight (under a minute or a mile in the air)` : ""].filter(Boolean).join(", ")}.` : "",
+    r.partial ? `${number(r.partial)} counted ${r.partial === 1 ? "flight" : "flights"} started or ended in the air.` : "",
+  ];
+  return <p className={`text-xs text-fg-3 ${className}`}>{parts.filter(Boolean).join(" ")}</p>;
+}
+
 const Nothing = ({ text }: { text: string }) => <EmptyState size="sm" icon={<TrendingUp size={18} />} title="Nothing to chart yet" description={text} />;
 
 function Content({ data, theme, stale }: { data: Trends; theme: Theme; stale: boolean }) {
@@ -106,13 +119,14 @@ function Content({ data, theme, stale }: { data: Trends; theme: Theme; stale: bo
   return (
     <div className={`flex flex-col gap-5 transition-opacity ${stale ? "opacity-60" : ""}`}>
       <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-[var(--radius-panel)] border border-line bg-line sm:grid-cols-4">
-        <Kpi label="Flights">{number(data.flights)}</Kpi>
-        <Kpi label="Flight time">{number(data.hours, 1)} h</Kpi>
+        <Kpi label="Flights" note={<span className="text-xs text-fg-3">of {number(data.recordings.total)} recordings</span>}>{number(data.flights)}</Kpi>
+        <Kpi label="Hours flown">{number(data.hours, 1)} h</Kpi>
         <Kpi label="Landings" note={data.scored < data.landing_count ? <span className="text-xs text-fg-3">{data.scored} scored</span> : undefined}>{number(data.landing_count)}</Kpi>
         <Kpi label="Mean landing score" note={score.mean === null ? undefined : <Change change={delta(score.recent, score.earlier)} higherIsBetter />}>
           {score.mean === null ? "–" : number(score.mean, 1)}
         </Kpi>
       </dl>
+      <LeftOut recordings={data.recordings} className="-mt-2" />
       <div className="grid items-start gap-5 xl:grid-cols-3">
         <Panel className="xl:col-span-2" title="Landing score over time" why="Each dot is one landing, coloured by grade. The line smooths the last five, so you see the direction rather than the luck of one touchdown.">
           {noScores ? <Nothing text="No scored landings yet. A landing is scored when the recording has enough data around touchdown." /> : <ScoreChart landings={data.landings} theme={theme} />}

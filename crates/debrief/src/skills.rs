@@ -192,7 +192,7 @@ impl<'a> Ctx<'a> {
             spans,
             touchdowns,
             transport,
-            air: track.legs.iter().flat_map(|l| l.airborne.clone()).collect(),
+            air: track.airborne().collect(),
             ap: flag("ap.engaged"),
             at: flag("at.engaged"),
             phase,
