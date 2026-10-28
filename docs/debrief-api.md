@@ -18,6 +18,8 @@ the recording; units are in the field names.
 | `place_challenge(definition: string)` | `StartState` | Puts the aircraft at a landing challenge's start (the challenge JSON, [challenges.md](challenges.md)); an error while the sim is not connected or for a `self` start |
 | `recorder_status()` | `RecorderStatus` | Current state, also pushed as an event |
 | `open_flights_folder()` | `void` | Opens the folder in Explorer |
+| `open_log_folder()` | `void` | Opens the folder holding `foqa-sim.log` (stderr of the app and its crates; rotated at 2 MB) |
+| `update_mark_clear()` | `void` | Removes the mark `update_mark` left; call it when the download or install fails |
 | `storage_usage()` | `StorageUsage` | Flight count and the folder's total size on disk (raw captures included) |
 | `setup_status()` | `SetupStatus` | The [installation](#installation) checks |
 | `setup_install(package: string)` | `SetupStatus` | Installs, updates or repairs an in-sim package, then checks again |
