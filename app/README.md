@@ -15,8 +15,9 @@ npm run lint
   to the mocks when it isn't running inside Tauri.
 - Regenerate a mock from a real flight:
   `cargo run -p cli --bin fdm -- debrief <flight.fqz> --json > public/mock/debrief-<id>.json`
-- `src/ui/` is vendored from egebilge/ui. Edit it here if needed and keep the manifest in sync
-  (`npm run ui:check` expects the library checked out next to this repo).
+- `src/ui/` is vendored from egebilge/ui and is part of this repo: nothing else is needed to build. Edit it here if
+  needed; `npm run ui:check` (maintainers) compares it with the library when that is checked out next to this repo
+  or `EGEBILGE_UI` points to it, and skips otherwise.
 
 ## Devlog
 
@@ -24,16 +25,25 @@ Release notes are plain Markdown, one file per version: `../devlog/<version>.md`
 format in `../devlog/README.md`). Vite bundles them at build time (`src/lib/devlog.ts`): after an update the app shows a
 "What's new" dialog with the versions since the last one seen (kept in `localStorage`; a first install only stores the
 version), and the header's newspaper button opens the full list. `npm run release -- <version>` refuses to run without a
-matching `devlog/<version>.md` and prints its path at the end, for the GitHub release notes.
+matching `devlog/<version>.md`, whose body is the release notes (in `latest.json` and on GitHub).
 
 ## Installer and start with Windows
 
 - `npm run tauri build` writes `target/release/bundle/nsis/FOQA-Sim_<version>_x64-setup.exe`:
   per-user install, unsigned.
+- Updates: `tauri-plugin-updater` reads `releases/latest/download/latest.json` (`plugins.updater` in `tauri.conf.json`;
+  the `pubkey` there must be the content of `~\.tauri\foqa-sim.key.pub`). The app checks once at start (at most once a
+  day) and from "Check for updates" on the What's new screen; a corner notice offers "Install and restart" (refused
+  while a flight records). Installs are passive and the installer relaunches the app. Details: `../docs/releasing.md`.
+- Releasing: `npm run release -- <version> --publish` (in `app/`). It needs `gh auth login`, the updater key
+  (`~\.tauri\foqa-sim.key`, or `FOQA_UPDATER_KEY`) and asks for the key's password (hidden; or set
+  `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`). It builds and signs, writes `latest.json`, copies `FOQA-Sim_x64-setup.exe`,
+  prints the SHA-256 and creates a **draft** GitHub release. Check the draft's assets, then publish it on GitHub.
+  Without `--publish` it stops after the build and prints the `gh release create --draft` command.
 - A new version: `npm run release -- 0.1.1` sets it in `tauri.conf.json`, `package.json`, `package-lock.json` and the
   workspace `Cargo.toml` (and `Cargo.lock`), then builds that installer; it refuses a version that is not newer.
   Run over an older install, the setup offers to uninstall it first (recommended); flights in
-  `Documents\FOQA-Simlights` and the settings stay (unless "Delete app data" is ticked), and the new app puts the
+  `Documents\FOQA-Simflights` and the settings stay (unless "Delete app data" is ticked), and the new app puts the
   in-sim packages back on its first start (see [installation](../docs/debrief-api.md#installation)).
 - Every cargo build of the app crate (`src-tauri/build.rs`, also `cargo test`/`clippy` and a fresh clone) runs
   `msfs-panel/assemble.ps1` when its inputs are newer than its output (no MSFS needed): it assembles the panel and EFB

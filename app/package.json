@@ -12,7 +12,7 @@
     "test": "node --experimental-strip-types --test \"test/*.test.ts\"",
     "tauri": "tauri",
     "release": "node scripts/release.mjs",
-    "ui:check": "node ../../GitHub/egebilge-ui/scripts/vendor.mjs --to src/ui --check"
+    "ui:check": "node scripts/ui-check.mjs"
   },
   "dependencies": {
     "@fontsource/ibm-plex-mono": "^5.2.0",
@@ -20,6 +20,7 @@
     "@radix-ui/react-tooltip": "^1.3.0",
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/plugin-autostart": "^2.7.0",
+    "@tauri-apps/plugin-updater": "^2.14.1",
     "lucide-react": "^1.55.0",
     "maplibre-gl": "^6.16.0",
     "motion": "^14.1.0",

@@ -123,6 +123,8 @@ fn main() {
     builder
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
+        // The app checks and installs through `plugin:updater|*` (lib/updater.ts).
+        .plugin(tauri_plugin_updater::Builder::new().build())
         // Off until the user enables it (`plugin:autostart|enable`).
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
