@@ -10,12 +10,18 @@ use rules::{Domain, Level};
 use serde::{Deserialize, Serialize};
 
 use crate::assessment::{domain_short, domain_title};
-use crate::{FlightSummary, LandingFacts, SkillsSummary, Station, iso_utc};
+use crate::{FlightSummary, Flown, LandingFacts, SkillsSummary, Station, iso_utc};
 
 /// A comparison of the newest half with the older half needs this many in
 /// each, else it is `None`.
 const MIN_HALF: usize = 5;
 const DAY_S: i64 = 86_400;
+/// A recording counts as a flight when it has flown at least this long, this
+/// far and this fast (all three). EASA's EOFDM KPI document leaves the
+/// validity thresholds to the programme, so these are FOQA-Sim's own.
+const MIN_FLOWN_S: f64 = 60.0;
+const MIN_FLOWN_NM: f64 = 1.0;
+const MIN_FLOWN_GS_KT: f64 = 40.0;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -33,8 +39,11 @@ pub struct Trends {
     pub filter: TrendFilter,
     /// What the filters can be set to, from all flights.
     pub options: Options,
+    /// Counted flights only (see `Recordings`).
     pub flights: usize,
+    /// Airborne hours of the counted flights.
     pub hours: f64,
+    pub recordings: Recordings,
     pub landing_count: usize,
     /// Full-stop landings with a score: what the means are over.
     pub scored: usize,
@@ -46,6 +55,47 @@ pub struct Trends {
     pub by_aircraft: Vec<AircraftTrend>,
     pub by_airport: Vec<AirportTrend>,
     pub skills: SkillsTrend,
+}
+
+/// What the filter-matching recordings were, counted or not.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Recordings {
+    pub total: usize,
+    pub counted: usize,
+    /// Never airborne.
+    pub ground_only: usize,
+    /// Airborne, but under the rule.
+    pub too_short: usize,
+    /// Counted, and began or ended in the air.
+    pub partial: usize,
+}
+
+impl Recordings {
+    fn of(recordings: &[&FlightSummary]) -> Self {
+        let (mut ground_only, mut too_short, mut partial) = (0, 0, 0);
+        for f in recordings {
+            match (counts(&f.flown), f.flown.airborne_s > 0.0) {
+                (false, false) => ground_only += 1,
+                (false, true) => too_short += 1,
+                (true, _) => {
+                    partial += usize::from(f.flown.started_airborne || f.flown.ended_airborne)
+                }
+            }
+        }
+        Self {
+            total: recordings.len(),
+            counted: recordings.len() - ground_only - too_short,
+            ground_only,
+            too_short,
+            partial,
+        }
+    }
+}
+
+/// The one rule for what a flight is: no takeoff or landing is needed, so a
+/// practice from final or a flight left in the air counts.
+fn counts(f: &Flown) -> bool {
+    f.airborne_s >= MIN_FLOWN_S && f.distance_nm >= MIN_FLOWN_NM && f.max_gs_kt >= MIN_FLOWN_GS_KT
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -168,7 +218,8 @@ fn build(summaries: &[FlightSummary], filter: &TrendFilter, station: &Station, n
     let since = filter
         .days
         .map(|d| iso_utc((now - i64::from(d) * DAY_S) * 1_000_000, false));
-    let mut flights: Vec<&FlightSummary> = summaries
+    let counted: Vec<&FlightSummary> = summaries.iter().filter(|f| counts(&f.flown)).collect();
+    let matching: Vec<&FlightSummary> = summaries
         .iter()
         .filter(|f| same(icao(f).unwrap_or(""), &filter.aircraft))
         .filter(|f| {
@@ -184,6 +235,9 @@ fn build(summaries: &[FlightSummary], filter: &TrendFilter, station: &Station, n
                 .is_none_or(|s| f.started_utc.as_ref() >= Some(s))
         })
         .collect();
+    let recordings = Recordings::of(&matching);
+    let mut flights: Vec<&FlightSummary> =
+        matching.into_iter().filter(|f| counts(&f.flown)).collect();
     flights.sort_by(|a, b| (&a.started_utc, &a.id).cmp(&(&b.started_utc, &b.id)));
     let rows: Vec<Row> = flights
         .iter()
@@ -202,9 +256,10 @@ fn build(summaries: &[FlightSummary], filter: &TrendFilter, station: &Station, n
 
     Trends {
         filter: filter.clone(),
-        options: options(summaries),
+        options: options(&counted),
         flights: flights.len(),
-        hours: r1(flights.iter().map(|f| f.duration_s).sum::<f64>() / 3600.0),
+        hours: r1(flights.iter().map(|f| f.flown.airborne_s).sum::<f64>() / 3600.0),
+        recordings,
         landing_count: rows.len(),
         scored: scored.len(),
         score: ScoreTrend {
@@ -247,7 +302,7 @@ fn build(summaries: &[FlightSummary], filter: &TrendFilter, station: &Station, n
 }
 
 /// The aircraft types and airports there are flights and landings for.
-fn options(summaries: &[FlightSummary]) -> Options {
+fn options(summaries: &[&FlightSummary]) -> Options {
     let count = |keys: Vec<&str>| {
         let mut n: BTreeMap<&str, usize> = BTreeMap::new();
         for k in keys {
@@ -529,6 +584,21 @@ mod tests {
             landings_detail: landings,
             skills: SkillsSummary::default(),
             rule_counts: BTreeMap::new(),
+            flown: Flown {
+                airborne_s: 3600.0,
+                distance_nm: 400.0,
+                max_gs_kt: 450.0,
+                ..Default::default()
+            },
+        }
+    }
+
+    fn flown(airborne_s: f64, distance_nm: f64, max_gs_kt: f64) -> Flown {
+        Flown {
+            airborne_s,
+            distance_nm,
+            max_gs_kt,
+            ..Default::default()
         }
     }
 
@@ -797,5 +867,88 @@ mod tests {
         )
         .unwrap();
         assert_eq!(old.skills, SkillsSummary::default());
+    }
+
+    #[test]
+    fn only_real_flights_count_and_the_rest_are_accounted_for() {
+        let with = |n, f: Flown| FlightSummary {
+            flown: f,
+            ..flight(
+                n,
+                Some(10 - n as i64),
+                "B738",
+                vec![landing("LTBJ", Some(80.0), "In TDZ", 0.0)],
+            )
+        };
+        let rule = "unstable-speed-above-500";
+        let mut s = vec![
+            with(0, Flown::default()),            // ground run
+            with(1, flown(15.0, 0.3, 90.0)),      // a hop
+            with(2, flown(6.0, 0.0, 0.0)),        // junk placeholder
+            with(3, flown(3000.0, 300.0, 450.0)), // a normal sector
+            with(
+                4,
+                Flown {
+                    started_airborne: true,
+                    ..flown(90.0, 3.0, 140.0) // teleported onto final
+                },
+            ),
+            with(
+                5,
+                Flown {
+                    ended_airborne: true,
+                    ..flown(600.0, 40.0, 150.0)
+                },
+            ),
+        ];
+        s[1] = fires(s[1].clone(), rule, 1);
+        s[3] = fires(s[3].clone(), rule, 1);
+        let t = all(&s);
+        let r = &t.recordings;
+        assert_eq!(
+            (r.total, r.counted, r.ground_only, r.too_short, r.partial),
+            (6, 3, 1, 2, 2)
+        );
+        assert_eq!((t.flights, t.landing_count), (3, 3));
+        // Airborne hours of the counted flights: 3690 s.
+        assert_eq!(t.hours, 1.0);
+        // The hop's event is out of the rates: 1 flight of 3.
+        assert_eq!(t.events[0].flights, 1);
+        assert_eq!(t.events[0].per_100, 33.3);
+        assert_eq!(t.by_aircraft[0].flights, 3);
+        assert_eq!(t.options.aircraft[0].flights, 3);
+        // The filter narrows the recordings too.
+        let t = build(
+            &s,
+            &TrendFilter {
+                aircraft: Some("C172".into()),
+                ..Default::default()
+            },
+            station(),
+            NOW,
+        );
+        assert_eq!((t.recordings.total, t.flights), (0, 0));
+    }
+
+    #[test]
+    fn each_threshold_of_the_rule_is_needed() {
+        for (f, counted) in [
+            (flown(60.0, 1.0, 40.0), true),
+            (flown(59.9, 1.0, 40.0), false),
+            (flown(60.0, 0.9, 40.0), false),
+            (flown(60.0, 1.0, 39.9), false),
+        ] {
+            assert_eq!(counts(&f), counted, "{f:?}");
+        }
+    }
+
+    #[test]
+    fn a_summary_without_flown_counts_as_not_flown() {
+        let mut v = serde_json::to_value(flight(1, None, "C172", vec![])).unwrap();
+        v.as_object_mut().unwrap().remove("flown");
+        let old: FlightSummary = serde_json::from_value(v).unwrap();
+        assert_eq!(old.flown, Flown::default());
+        let t = all(&[old]);
+        assert_eq!((t.flights, t.recordings.ground_only), (0, 1));
     }
 }

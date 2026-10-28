@@ -211,6 +211,17 @@ export interface FlightSummary {
   rule_counts?: Record<string, { level: Level; count: number }>;
   /** The figures Trends needs from the flying skills (docs/skills.md); absent on older summaries. */
   skills?: SkillsSummary;
+  /** What Trends counts a flight by (docs/trends.md); absent on older summaries: not flown. */
+  flown?: Flown;
+}
+
+/** How much of a recording was real flying: airborne legs, slewed points left out. */
+export interface Flown {
+  airborne_s: number;
+  distance_nm: number;
+  max_gs_kt: number;
+  started_airborne: boolean;
+  ended_airborne: boolean;
 }
 
 /** ISO 2631-1 Annex C comfort band, from the lowest to the highest. */
@@ -329,8 +340,12 @@ export interface Trends {
   filter: TrendFilter;
   /** What the filters can be set to, from all flights. */
   options: { aircraft: { icao: string; flights: number }[]; airports: { icao: string; landings: number }[] };
+  /** Counted flights only. */
   flights: number;
+  /** Airborne hours of the counted flights. */
   hours: number;
+  /** Over the filter-matching recordings: what counted and what was left out. */
+  recordings: { total: number; counted: number; ground_only: number; too_short: number; partial: number };
   landing_count: number;
   scored: number;
   /** Scored full-stop landings; recent/earlier are null under 5 in each half. */

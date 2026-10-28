@@ -13,7 +13,7 @@ the recording; units are in the field names.
 |---|---|---|
 | `list_flights()` | `FlightSummary[]` | Newest first |
 | `debrief(id: string)` | `Debrief` | Full analysis of one flight |
-| `trends(filter: TrendFilter)` | `Trends` | The flights aggregated ([trends.md](trends.md)); `filter` is `{aircraft?, airport?, days?}` |
+| `trends(filter: TrendFilter)` | `Trends` | The counted flights aggregated ([trends.md](trends.md)), with `recordings: {total, counted, ground_only, too_short, partial}` saying what was left out; `filter` is `{aircraft?, airport?, days?}` |
 | `delete_flight(id: string)` | `void` | Deletes the flight's stored files for good; refused for the flight being recorded |
 | `place_challenge(definition: string)` | `StartState` | Puts the aircraft at a landing challenge's start (the challenge JSON, [challenges.md](challenges.md)); an error while the sim is not connected or for a `self` start |
 | `recorder_status()` | `RecorderStatus` | Current state, also pushed as an event |
@@ -166,6 +166,16 @@ interface FlightSummary {
   landings_detail?: LandingFacts[];                      // per landing (bounces grouped), time order; what trends.md reads
   rule_counts?: Record<string, { level: Level; count: number }>;   // rules fired at low or above, by rule id
   skills?: SkillsSummary;   // the flying-skills figures trends reads (docs/skills.md); absent on older summaries
+  flown?: Flown;            // what trends counts a flight by (trends.md); absent on older summaries: not flown
+}
+
+// How much of the recording was real flying, from the airborne legs, `sim.slew` points excluded.
+interface Flown {
+  airborne_s: number;
+  distance_nm: number;      // ground speed integrated over the airborne time
+  max_gs_kt: number;
+  started_airborne: boolean;   // the first leg begins at the first track point
+  ended_airborne: boolean;     // the last leg ends at the last track point
 }
 
 // One landing's facts for the trends ([trends.md](trends.md)); `Debrief.flight` carries them too.

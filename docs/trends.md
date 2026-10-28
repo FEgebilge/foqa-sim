@@ -16,9 +16,38 @@ reprocesses its archive. Trends therefore never mix rule or score versions.
 (`trends` command) and the CLI (`fdm trends <dir> [--aircraft ICAO] [--airport ICAO]
 [--days N] [--json]`) both call it.
 
+## What counts as a flight
+
+A recording is not always a flight: a session left running on the ramp, a slewed aircraft, a
+hop of a few seconds. Counting those would dilute every rate. A recording counts when it has
+**flown** (`FlightSummary.flown`, from the track's airborne legs; points with `sim.slew` on are
+left out, as a slewed aircraft can report not-on-ground):
+
+- at least 60 s airborne, **and**
+- at least 1.0 nm flown (ground speed integrated over the airborne time), **and**
+- a ground speed of at least 40 kt at some point in the air.
+
+These thresholds are FOQA-Sim's own (`trends.rs`). They follow the idea of the EASA EOFDM KPI
+document, which counts only valid flights and excludes ground runs and false flight
+detections, but it leaves the validity thresholds to each programme. A takeoff or landing is
+**not** required: a recording that starts on final (a challenge, a teleport) or ends in the
+air is a flight. Unlike EOFDM's complete-sector counts, such partial flights are counted and
+reported (`recordings.partial`), because FOQA-Sim's landing challenges start on final and
+would otherwise never count. One recording is one flight, with as many landings as it holds
+(a touch-and-go circuit session is one flight with N landings).
+
+Everything below (counts, rates, halves, scores, skills, by aircraft and airport, `options`)
+uses counted flights only. `hours` is **airborne hours**: the sum of the counted flights'
+airborne time, not the recording length.
+
 ## Summary additions
 
-`FlightSummary` gains two fields (both `#[serde(default)]`, empty when absent):
+`FlightSummary` gains three fields (all `#[serde(default)]`, empty when absent):
+
+- `flown: {airborne_s, distance_nm, max_gs_kt, started_airborne, ended_airborne}`: the airborne
+  time, distance and top ground speed over the airborne legs, slew excluded;
+  `started_airborne` when the first leg begins at the first track point, `ended_airborne` when
+  the last leg ends at the last point. A summary without it counts as not flown.
 
 - `landings_detail: [LandingFacts]`, one per landing (bounces grouped with their landing, as on
   the debrief), in time order:
@@ -51,7 +80,13 @@ reprocesses its archive. Trends therefore never mix rule or score versions.
     "aircraft": [{ "icao": "B738", "flights": 12 }],
     "airports": [{ "icao": "LTBJ", "landings": 7 }]
   },
-  "flights": 12, "hours": 21.4, "landing_count": 14, "scored": 13,   // scored: full-stop landings with a score
+  "flights": 12, "hours": 21.4, "landing_count": 14, "scored": 13,   // flights: counted ones; hours: airborne; scored: full-stop landings with a score
+  "recordings": {                      // over the filter-matching recordings
+    "total": 42, "counted": 12,
+    "ground_only": 4,                  // never airborne
+    "too_short": 25,                   // airborne, but under the rule
+    "partial": 1                       // counted, and began or ended in the air
+  },
   "score": {                           // scored full-stop landings
     "mean": 78.2, "median": 81.0,
     "recent": 82.5, "earlier": 74.0     // newest half vs older half; null under 5 in each
@@ -78,7 +113,7 @@ reprocesses its archive. Trends therefore never mix rule or score versions.
 
 Rules:
 
-- A flight counts when it matches the filter: `aircraft` its type, `airport` its departure or
+- A flight counts when it is a counted flight (above) and matches the filter: `aircraft` its type, `airport` its departure or
   arrival (a landing's runway for landing rows), `days` its start within the last N days.
 - Rates are flights with the event per 100 flights, the way an airline quotes events per 1,000
   sectors: a rule that fires seven times in one flight is one flight with the event (`count`

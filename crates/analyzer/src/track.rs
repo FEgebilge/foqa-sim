@@ -136,6 +136,11 @@ impl Track {
         self.t.is_empty()
     }
 
+    /// The airborne points: each leg from lift-off to touchdown.
+    pub fn airborne(&self) -> impl Iterator<Item = usize> + '_ {
+        self.legs.iter().flat_map(|l| l.airborne.clone())
+    }
+
     /// Index of the last point at or before `t`.
     pub fn index_at(&self, t: SimTime) -> usize {
         self.t.partition_point(|&x| x <= t).saturating_sub(1)

@@ -689,6 +689,7 @@ mod tests {
                 landings_detail: vec![],
                 skills: Default::default(),
                 rule_counts: BTreeMap::new(),
+                flown: Default::default(),
             },
             events: vec![],
             landings: vec![notice(); landings],
