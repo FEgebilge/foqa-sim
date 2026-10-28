@@ -252,7 +252,7 @@ so a hard landing is not counted twice.
 
 | Id | Measured | How | Class | ideal \| tol \| L1 \| L2 \| L3 | Standard |
 |---|---|---|---|---|---|
-| F1 | Deceleration delay | **new**: main-gear contact → first of reverser unlocked (`engN.reverser`), ground spoilers > 50% (`spoiler.handle`), brakes > 30% | T/J | 1 \| 2 \| 4 \| 6 \| 10 s | S8: 1 s per action, +200 ft per s beyond 2 s ✔; S9 immediate reverse ✔; L1–L3 est |
+| F1 | Deceleration delay | **new**: main-gear contact → first of reverser unlocked (`engN.reverser`), ground spoilers > 50% (`spoiler.handle`), brakes > 30%, or a deceleration (`accel.long`) past 0.1 g held 1 s, which catches autobrake, prop beta and add-on systems the controls do not show (free roll at idle ~0.05 g, est; the hold skips the wheel spin-up at contact) | T/J | 1 \| 2 \| 4 \| 6 \| 10 s | S8: 1 s per action, +200 ft per s beyond 2 s ✔; S9 immediate reverse ✔; L1–L3 est |
 | | | | light | n/a by design (POH: "braking minimum required" ✔) | |
 | F2 | Required deceleration | **new**: a = GS² / (2 · (LDA − along)) at touchdown, in g | all | 0.10 \| 0.15 \| 0.20 \| 0.30 \| 0.40 g | S6 RE.8 formula ✔; bands est |
 | F3 | Stopped on the runway | **new**: runway remaining when GS ≤ 20 kt (S2 taxi speed ✔) | all | ≥ 0 → ok; overrun or exit → excursion cap | S2 ✔ |

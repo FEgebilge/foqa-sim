@@ -131,3 +131,22 @@ fn a_slewed_approach_is_graded_from_the_end_of_the_slew() {
     let td = a.window.t.last().unwrap().as_secs_f64() + 6.4;
     assert!(near(td - start, 35.0, 0.5), "{}", td - start);
 }
+
+#[test]
+fn a_held_deceleration_is_a_means_in_use() {
+    // Autobrake from 3 s: -4 ft/s2 (0.124 g) with no brake pedal recorded;
+    // the 0.2 s wheel spin-up at contact (-10 ft/s2) is not it.
+    let a = approach(|t| {
+        let decel = match t - TD_S {
+            x if (0.0..0.2).contains(&x) => -10.0,
+            x if x >= 3.0 => -4.0,
+            _ => -1.0,
+        };
+        Pt {
+            set: vec![("ACCELERATION BODY Z", decel)],
+            ..landing(t, TD_S, 1.2)
+        }
+    });
+    let d = a.decel_delay_s.unwrap();
+    assert!((3.0..=3.3).contains(&d), "{d}");
+}

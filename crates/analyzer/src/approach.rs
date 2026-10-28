@@ -37,6 +37,12 @@ const REVERSERS: [&str; 4] = [
     "eng3.reverser",
     "eng4.reverser",
 ];
+/// Deceleration counts as a means in use whatever applied it (autobrake,
+/// prop beta, an add-on's own systems, none of them in the recorded
+/// controls): past the ~0.05 g of a free roll at idle (est), held this long
+/// so the wheel spin-up at contact is not taken for it.
+const DECEL_G: f64 = 0.1;
+const DECEL_HELD_US: i64 = 1_000_000;
 /// The first deceleration means is looked for this long after contact.
 const DECEL_SEARCH_US: i64 = 30_000_000;
 /// The rollout's centreline tracking ends below this ground speed (RE.7).
@@ -144,7 +150,8 @@ pub struct Approach {
     /// positive, kt.
     pub drift_kt: Option<f64>,
     /// From contact to the first deceleration means in use (reverser,
-    /// ground spoilers, brakes), s; known to the 1-2 Hz recording rate.
+    /// ground spoilers, brakes, or a deceleration past 0.1 g held 1 s), s;
+    /// known to the 1-2 Hz recording rate.
     pub decel_delay_s: Option<f64>,
     /// Constant deceleration that stops in the remaining landing distance
     /// from the ground speed at contact, GS² / 2d, g (EAFDM RE.8); `None`
@@ -417,8 +424,21 @@ fn decel_delay_s(flight: &Flight, td: SimTime) -> Option<f64> {
         ("brake.left", BRAKES_PCT),
         ("brake.right", BRAKES_PCT),
     ]);
+    // The start of the first stretch decelerating past DECEL_G held.
+    let mut from = None;
+    let decelerating = (flight.series("accel.long").iter())
+        .filter(|s| s.is_valid() && (0..=DECEL_SEARCH_US).contains(&s.t.us_since(td)))
+        .find_map(|s| {
+            if s.value > -DECEL_G {
+                from = None;
+                return None;
+            }
+            let start = *from.get_or_insert(s.t);
+            (s.t.us_since(start) >= DECEL_HELD_US).then_some(start)
+        });
     means
         .filter_map(|(name, past)| used(name, past))
+        .chain(decelerating)
         .min()
         .map(|t| t.us_since(td) as f64 / 1e6)
 }
