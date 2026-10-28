@@ -22,7 +22,7 @@ export function DebriefHeader({ flight, refreshing, onRefresh, onOpenFolder, exp
     <header className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Button variant="ghost" size="sm" onClick={openFlights}><ArrowLeft size={15} aria-hidden="true" />All flights</Button>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {exportMenu}
           <Button variant="secondary" size="sm" onClick={onRefresh} loading={refreshing}><RefreshCw size={15} aria-hidden="true" />Refresh</Button>
           <Button variant="secondary" size="sm" onClick={onOpenFolder}><FolderOpen size={15} aria-hidden="true" />Open flights folder</Button>

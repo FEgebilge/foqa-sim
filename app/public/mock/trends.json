@@ -844,5 +844,26 @@
    "in_tdz": 0.86,
    "mean_cross_m": -2.6
   }
- ]
+ ],
+ "skills": {
+  "ap_share": 0.41,
+  "ap_off_ft_median": 1250.0,
+  "autolands": 1,
+  "vertical_rms_median": 0.38,
+  "descent_level_s_median": 64.0,
+  "fuel_kg_h": [
+   {
+    "icao": "B738",
+    "median": 2480.0
+   },
+   {
+    "icao": "A20N",
+    "median": 2090.0
+   },
+   {
+    "icao": "C172",
+    "median": null
+   }
+  ]
+ }
 }

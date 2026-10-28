@@ -37,8 +37,8 @@ a debrief that says what happened, why it matters and what to do differently.
 
 ## Status
 
-Version 0.7. Works end to end with MSFS 2024 on Windows: installer, automatic recording,
-debrief with replay, trends across flights, exports, in-sim panel and EFB app, local landing
+Version 0.8. Works end to end with MSFS 2024 on Windows: installer, automatic recording,
+debrief with replay and flying skills, trends across flights, exports, in-sim panel and EFB app, local landing
 challenges. It is being tested with a small group of pilots before a first public release. In
 progress: challenges with the same weather for every pilot, and the first website running the
 open challenge protocol.
@@ -56,6 +56,10 @@ open challenge protocol.
   ([scoring.md](docs/scoring.md)). Missing data is reported as such, never as full marks.
 - **Flight phases** after the ICAO CICTT definitions, following the aircraft (a light aircraft
   flares lower, turboprops fly a higher pattern), each with the reason it started.
+- **Flying skills.** How the flight was flown, as measures with their sources rather than a
+  grade: autopilot use by phase and the height you took over, a cabin ride measure against the
+  ISO 2631 comfort bands, side load and bank, fuel per hour and per mile, level-offs in the
+  descent (EUROCONTROL), and control activity while hand-flying ([skills.md](docs/skills.md)).
 - **Trends.** What an airline safety department looks at first: landing scores over time, a
   touchdown footprint on the runway, the landing areas that cost points most often, and event
   rates per 100 flights with the newer half of your flights against the older, by aircraft and
@@ -102,7 +106,7 @@ The app sits in the tray, waits for the sim and records. Without the sim, `npm r
 ## CLI
 
 ```powershell
-cargo run -p cli --bin fdm -- debrief <flight.fqz>         # events, landings, runway fix
+cargo run -p cli --bin fdm -- debrief <flight.fqz>         # flying skills (docs/skills.md)
 cargo run -p cli --bin fdm -- debrief <flight.fqz> --json  # the app's Debrief JSON
 cargo run -p cli --bin fdm -- analyze <flight> [--rules my.yaml]
 cargo run -p cli --bin fdm -- export <flight> [--format parquet|csv|kml|gpx] [-o file]
@@ -143,7 +147,7 @@ Worth reading first: [format.md](docs/format.md) (recording formats),
 (flight phases), [debrief-api.md](docs/debrief-api.md) (backend and UI contract),
 [ingame-panel.md](docs/ingame-panel.md) (app and in-sim panel),
 [challenges.md](docs/challenges.md) (landing challenges), [exports.md](docs/exports.md)
-(exports and the landing card), [trends.md](docs/trends.md) (trends across flights).
+(exports and the landing card), [trends.md](docs/trends.md) (trends across flights), [skills.md](docs/skills.md) (flying skills).
 
 ## Development
 

@@ -16,6 +16,7 @@ import type { Debrief, Series } from "../../types";
 import { ExportMenu, type ExportItem } from "../ExportMenu";
 import { useOpenFolder } from "../use-open-folder";
 import { AssessmentPanel } from "./AssessmentPanel";
+import { SkillsPanel } from "./SkillsPanel";
 import { DebriefHeader } from "./DebriefHeader";
 import { EventList, LevelLegend } from "./EventList";
 import { LandingCard } from "./LandingCard";
@@ -153,6 +154,7 @@ function DebriefView({ debrief, refreshing, onRefresh, onOpenFolder }: { debrief
       <ShareCard debrief={debrief} landing={share} onLanding={setShare} onClose={() => setShare(null)} />
       <Verdict debrief={debrief} />
       <AssessmentPanel debrief={debrief} onSelectEvent={selectEvent} />
+      {debrief.skills ? <SkillsPanel skills={debrief.skills} /> : null}
 
 
       {flight.damaged_at !== undefined ? (

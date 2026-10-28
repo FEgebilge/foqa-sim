@@ -14,6 +14,7 @@ import { DomainBars } from "./DomainBars";
 import { Footprint } from "./Footprint";
 import { Panel } from "./Panel";
 import { ScoreChart } from "./ScoreChart";
+import { SkillsRow } from "./SkillsRow";
 import { ByAircraftTable, ByAirportTable, Change, EventsTable } from "./TrendTables";
 
 const PERIODS = [{ value: "30", label: "30 days" }, { value: "90", label: "90 days" }, { value: "365", label: "1 year" }, { value: "all", label: "All" }];
@@ -120,6 +121,7 @@ function Content({ data, theme, stale }: { data: Trends; theme: Theme; stale: bo
           {noScores ? <Nothing text="Appears once a landing has been scored." /> : <DomainBars domains={data.domains} />}
         </Panel>
       </div>
+      <SkillsRow skills={data.skills} />
       <Panel title="Touchdown footprint" why="Where the wheels touched, past the threshold and off the centreline. A tight cluster near the aiming point is a stable technique; a long smear is a habit to fix.">
         <Footprint landings={data.landings} />
       </Panel>

@@ -57,33 +57,33 @@ export default function App() {
     <div className="flex min-h-full flex-col">
       <header className="sticky top-0 z-40 border-b border-line bg-[color-mix(in_oklab,var(--background)_88%,transparent)] backdrop-blur">
         <div className="flex h-14 w-full items-center gap-3 px-4 sm:gap-4 sm:px-6 2xl:px-8">
-          <a href="#/" className="flex items-center gap-2.5 text-fg no-underline" aria-label="FOQA-Sim, all flights">
+          <a href="#/" className="flex shrink-0 items-center gap-2.5 text-fg no-underline" aria-label="FOQA-Sim, all flights">
             <Logo />
             <span className="hidden font-display text-[15px] font-semibold tracking-tight whitespace-nowrap sm:inline">FOQA-Sim</span>
           </a>
           {route.screen === "debrief" ? (
-            <nav aria-label="Breadcrumb" className="hidden items-center gap-2 text-sm text-fg-3 sm:flex">
+            <nav aria-label="Breadcrumb" className="hidden min-w-0 items-center gap-2 text-sm text-fg-3 md:flex">
               <span>/</span><a className="text-fg-2 no-underline hover:text-fg" href="#/">Flights</a><span>/</span>
-              <a className="readout text-fg no-underline" href={flightHref(route.id)} aria-current="page">{route.id}</a>
+              <a className="readout truncate text-fg no-underline" href={flightHref(route.id)} aria-current="page" title={route.id}>{route.id}</a>
             </nav>
           ) : route.screen === "setup" ? (
-            <nav aria-label="Breadcrumb" className="hidden items-center gap-2 text-sm text-fg-3 sm:flex">
+            <nav aria-label="Breadcrumb" className="hidden min-w-0 items-center gap-2 text-sm text-fg-3 md:flex">
               <span>/</span><a className="text-fg no-underline" href={SETUP_HREF} aria-current="page">Installation</a>
             </nav>
           ) : route.screen === "challenges" ? (
-            <nav aria-label="Breadcrumb" className="hidden items-center gap-2 text-sm text-fg-3 sm:flex">
+            <nav aria-label="Breadcrumb" className="hidden min-w-0 items-center gap-2 text-sm text-fg-3 md:flex">
               <span>/</span><a className="text-fg no-underline" href={CHALLENGES_HREF} aria-current="page">Challenges</a>
             </nav>
           ) : route.screen === "trends" ? (
-            <nav aria-label="Breadcrumb" className="hidden items-center gap-2 text-sm text-fg-3 sm:flex">
+            <nav aria-label="Breadcrumb" className="hidden min-w-0 items-center gap-2 text-sm text-fg-3 md:flex">
               <span>/</span><a className="text-fg no-underline" href={TRENDS_HREF} aria-current="page">Trends</a>
             </nav>
           ) : route.screen === "devlog" ? (
-            <nav aria-label="Breadcrumb" className="hidden items-center gap-2 text-sm text-fg-3 sm:flex">
+            <nav aria-label="Breadcrumb" className="hidden min-w-0 items-center gap-2 text-sm text-fg-3 md:flex">
               <span>/</span><a className="text-fg no-underline" href={DEVLOG_HREF} aria-current="page">What's new</a>
             </nav>
           ) : null}
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto flex shrink-0 items-center gap-1 md:gap-2">
             {failing ? (
               <a href={SETUP_HREF} className="no-underline" aria-label={`${failing} installation check${failing > 1 ? "s" : ""} failing`}>
                 <Badge tone="danger" size="sm" icon={<TriangleAlert size={12} aria-hidden="true" />}>{failing}<span className="hidden sm:inline">&nbsp;setup issue{failing > 1 ? "s" : ""}</span></Badge>

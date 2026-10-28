@@ -9,6 +9,7 @@
 mod assessment;
 pub mod export;
 mod index;
+mod skills;
 mod trends;
 mod wire;
 
@@ -27,6 +28,9 @@ use rules::{LoadError, PhaseField, ProfileField, ProfileSet, Rule, Selection, So
 
 pub use assessment::{POINTS, domain_title};
 pub use index::{INDEX_FILE, Index};
+pub use skills::{
+    Automation, Control, Fuel, PhaseAutomation, Reversals, Ride, Skills, SkillsSummary, skills,
+};
 pub use trends::{TrendFilter, Trends, trends};
 pub use wire::*;
 
@@ -269,10 +273,16 @@ impl Analysis<'_> {
 
     pub fn summary(&self) -> FlightSummary {
         let events = self.events();
-        self.summary_of(&events, &self.assessment(&events))
+        let skills = SkillsSummary::from(&skills(self));
+        self.summary_of(&events, &self.assessment(&events), skills)
     }
 
-    fn summary_of(&self, events: &[Event], detail: &AssessmentDetail) -> FlightSummary {
+    fn summary_of(
+        &self,
+        events: &[Event],
+        detail: &AssessmentDetail,
+        skills: SkillsSummary,
+    ) -> FlightSummary {
         let t = &self.track.t;
         let mut event_counts: BTreeMap<_, usize> = Level::ALL.map(|l| (l, 0)).into();
         for e in events {
@@ -299,6 +309,7 @@ impl Analysis<'_> {
             event_counts,
             assessment: detail.into(),
             landings_detail: self.landings_detail(detail),
+            skills,
             rule_counts: detail
                 .parts
                 .iter()
@@ -332,9 +343,10 @@ impl Analysis<'_> {
     pub fn debrief(&self) -> Debrief {
         let events = self.events();
         let assessment_detail = self.assessment(&events);
+        let skills = skills(self);
         Debrief {
             flight: FlightHeader {
-                summary: self.summary_of(&events, &assessment_detail),
+                summary: self.summary_of(&events, &assessment_detail, (&skills).into()),
                 lfl_version: self.flight.lfl_version(),
                 profile: self.selection.to_string(),
                 class: self.selection.class.map(|c| c.to_string()),
@@ -362,6 +374,7 @@ impl Analysis<'_> {
                 .collect(),
             events,
             series: self.series(),
+            skills,
 
             airports: self.airports(),
         }
@@ -522,12 +535,8 @@ impl Analysis<'_> {
             .filter(|&i| i % BASE_STEP == 0 || near_touchdown(track.t[i]))
             .collect();
         let pick = |v: &[f64]| points.iter().map(|&i| v[i]).collect();
-        let param = |name| {
-            points
-                .iter()
-                .map(|&i| self.flight.at(name, track.t[i]).unwrap_or(f64::NAN))
-                .collect()
-        };
+        let times: Vec<SimTime> = points.iter().map(|&i| track.t[i]).collect();
+        let param = |name| self.flight.resample(name, &times);
         let flap_deg: Vec<f64> = param("flap.te_angle");
         // The profile's flap-speed limit at each point; NaN without a profile band or with the flaps up.
         let vfe_kt = flap_deg

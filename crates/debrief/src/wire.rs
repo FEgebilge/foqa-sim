@@ -10,6 +10,8 @@ pub use rules::Level;
 use rules::{Domain, ScoringClass, Sourced};
 use serde::{Deserialize, Serialize};
 
+use crate::{Skills, SkillsSummary};
+
 /// What the recorder is doing, as the tray and the app header show it.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
@@ -56,6 +58,9 @@ pub struct FlightSummary {
     /// One per landing, bounces grouped with theirs (docs/trends.md).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub landings_detail: Vec<LandingFacts>,
+    /// The figures trends take from the flying skills (docs/skills.md).
+    #[serde(default)]
+    pub skills: SkillsSummary,
     /// Each rule that fired at low or above, by rule id.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub rule_counts: BTreeMap<String, RuleCount>,
@@ -483,6 +488,7 @@ pub struct Debrief {
     pub touchdowns: Vec<Touchdown>,
     pub events: Vec<Event>,
     pub series: Series,
+    pub skills: Skills,
     pub airports: Vec<Airport>,
 }
 

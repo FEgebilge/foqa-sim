@@ -145,6 +145,15 @@ impl Flight {
         self.value(self.def(name).id, t)
     }
 
+    /// `at` over `times`, `NaN` where a parameter has no valid value.
+    pub fn resample(&self, name: &str, times: &[SimTime]) -> Vec<f64> {
+        let id = self.def(name).id;
+        times
+            .iter()
+            .map(|&t| self.value(id, t).unwrap_or(f64::NAN))
+            .collect()
+    }
+
     /// `at` by parameter id; `None` for an id the LFL lacks.
     pub fn value(&self, id: SignalId, t: SimTime) -> Option<f64> {
         let def = self.lfl.get(id)?;

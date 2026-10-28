@@ -1,7 +1,7 @@
 //! fdm: ground-segment command line.
 //!
 //! `fdm analyze <flight> [--rules file.yaml]`   phases, touchdowns, events
-//! `fdm debrief <flight> [--json]`              the app's debrief, as JSON
+//! `fdm debrief <flight> [--json]`              the flying skills (docs/skills.md), or the app's debrief as JSON
 //! `fdm export <flight> [--format parquet|csv|kml|gpx] [--identity] [-o file]`
 //!                                              the flight for other tools (docs/exports.md)
 //! `fdm export <flight> <out-dir>`               long-format Parquet (+ events) into a folder
@@ -30,7 +30,7 @@ use std::process::ExitCode;
 
 use analyzer::RunwayFix;
 use debrief::export::{self, Format, Options};
-use debrief::{Analysis, Index, Station, TrendFilter, flight_id};
+use debrief::{Analysis, Index, Skills, Station, TrendFilter, flight_id};
 use fdm_core::SimTime;
 use rules::Event;
 
@@ -52,7 +52,8 @@ fn main() -> ExitCode {
     let result = match args.iter().map(String::as_str).collect::<Vec<_>>()[..] {
         ["analyze", path] => analyze(Path::new(path), None),
         ["analyze", path, "--rules", rules] => analyze(Path::new(path), Some(Path::new(rules))),
-        ["debrief", path] | ["debrief", path, "--json"] => debrief(Path::new(path)),
+        ["debrief", path] => debrief(Path::new(path), false),
+        ["debrief", path, "--json"] => debrief(Path::new(path), true),
         ["export", path, ref rest @ ..] => match export_args(rest) {
             Some(a) => export(Path::new(path), a),
             None => Err(USAGE.into()),
@@ -98,11 +99,63 @@ fn open<'s>(station: &'s Station, path: &Path) -> Result<Analysis<'s>, Box<dyn E
     Ok(analysis)
 }
 
-fn debrief(path: &Path) -> Result<(), Box<dyn Error>> {
+fn debrief(path: &Path, json: bool) -> Result<(), Box<dyn Error>> {
     let station = Station::core()?;
     let debrief = open(&station, path)?.debrief();
-    println!("{}", serde_json::to_string_pretty(&debrief)?);
+    if json {
+        println!("{}", serde_json::to_string_pretty(&debrief)?);
+    } else {
+        print_skills(&debrief.flight.summary.id, &debrief.skills);
+    }
     Ok(())
+}
+
+/// The flying skills (docs/skills.md) in a few lines; `-` is a measure the flight cannot give.
+fn print_skills(id: &str, s: &Skills) {
+    let num = |x: Option<f64>, unit: &str, dp: usize| {
+        x.map_or("-".to_owned(), |x| format!("{x:.dp$}{unit}"))
+    };
+    let (a, r, f, c) = (&s.automation, &s.ride, &s.fuel, &s.control);
+    let share = |on: Option<f64>| {
+        let share = on
+            .filter(|_| a.airborne_s > 0.0)
+            .map(|on| on / a.airborne_s * 100.0);
+        num(share, "%", 0)
+    };
+    let bank = r.max_bank_deg.values().copied().max_by(f64::total_cmp);
+    println!("{id}\n\nSkills (measures, not a grade)");
+    println!(
+        "  automation  {:.0} s airborne, autopilot {}, autothrottle {}, off at {} (hand-flown {} to touchdown)",
+        a.airborne_s,
+        share(a.ap_s),
+        share(a.at_s),
+        num(a.ap_off_ft, " ft", 0),
+        num(a.manual_final_s, " s", 0)
+    );
+    println!(
+        "  ride        vertical {} m/s2 ({}), lateral {} m/s2, sideslip {} deg, max bank {}, rotation {}",
+        num(r.vertical_rms, "", 2),
+        r.ride_band.unwrap_or("-"),
+        num(r.lateral_rms, "", 2),
+        num(r.sideslip_rms_deg, "", 1),
+        num(bank, " deg", 0),
+        num(r.rotation_rate_dps, " deg/s", 1)
+    );
+    println!(
+        "  fuel        {} kg ({} kg/h, {} kg/nm), taxi {} kg, descent level {} s in {} segments",
+        num(f.fuel_used_kg, "", 0),
+        num(f.fuel_kg_h, "", 0),
+        num(f.fuel_kg_nm, "", 1),
+        num(f.taxi_fuel_kg, "", 1),
+        num(f.descent_level_s, "", 0),
+        f.descent_levels.map_or("-".to_owned(), |n| n.to_string())
+    );
+    println!(
+        "  control     hand-flown {} s, reversals per min: pitch {}, roll {}",
+        num(c.manual_s, "", 0),
+        num(c.reversals_per_min.pitch, "", 1),
+        num(c.reversals_per_min.roll, "", 1)
+    );
 }
 
 fn analyze(path: &Path, rules_path: Option<&Path>) -> Result<(), Box<dyn Error>> {
