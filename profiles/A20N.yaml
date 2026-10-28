@@ -14,6 +14,13 @@ vle: { value: 280 kt, source: "EASA TCDS A.064 Issue 62 sec. 1 para 10 Landing g
 vlo: { value: 220 kt, source: "EASA TCDS A.064 Issue 62 sec. 1 para 10; FlyByWire docs (VLO ext 250 kt/M0.60, ret 220 kt/M0.54)", note: "extend 250, retract 220 (lower given)" }
 max_crosswind: { value: 38 kt, source: "FlyByWire A32NX docs https://docs.flybywiresim.com/pilots-corner/a32nx/a32nx-briefing/limitations/ (mirrors Airbus FCOM)", note: "landing max demonstrated incl. gusts 38 kt; takeoff max 35 kt incl. gusts. Demonstrated, not an AFM limit" }
 max_tailwind: { value: 15 kt, source: "FlyByWire A32NX docs (same URL); IVAO wiki https://wiki.ivao.aero/en/home/training/mediawiki/pending/Airbus_320_Limitations", note: "takeoff 15 kt; no separate landing number on those pages (FLAPS FULL advised above 10 kt). Some CEO variants 10 kt" }
+vref:
+  source: "Airbus A320 Aircraft Characteristics - Airport and Maintenance Planning, Rev Jul 15/25, subject 3-5-0 Final Approach Speed (A320neo: 131.5 kt at MLW 67 400 kg), https://www.aircraft.airbus.com/sites/g/files/jlcbta126/files/2025-07/AC_A320_20250715.pdf"
+  approximate: true
+  note: "published value is the ICAO threshold speed at maximum landing weight and the maximum certificated landing flap; lighter weights scaled by sqrt(W/MLW) (Vref is 1.3 Vs and Vs goes with sqrt(W) at constant CL max); other landing flaps read a few kt higher, not published"
+  flaps:
+    - { flap: 35 deg, weights_kg: [43800, 50600, 57300, 67400], ias: [106 kt, 114 kt, 121 kt, 131.5 kt] }
+    - { flap: 40 deg, weights_kg: [43800, 50600, 57300, 67400], ias: [106 kt, 114 kt, 121 kt, 131.5 kt] }
 flaps:
   - { up_to: 10 deg, vfe: { value: 215 kt, source: *tcds, note: "CONF 1+F (slats 18/flaps 10); auto retract 210 kt in takeoff config. CONF 1 slats-only 230 kt skipped" } }
   - { up_to: 15 deg, vfe: { value: 200 kt, source: *tcds, note: "CONF 2 (22/15)" } }

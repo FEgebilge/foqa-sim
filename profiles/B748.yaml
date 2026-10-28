@@ -12,6 +12,12 @@ vle: { value: 320 kt, source: "Quizlet 747-8 limitations (secondary)", approxima
 vlo: { value: 270 kt, source: "Quizlet 747-8 limitations (secondary)", approximate: true, note: "270 kt/0.82M gear operating; secondary source" }
 max_crosswind: { value: 35 kt, source: "forum recollection for the 747; a Boeing guideline deck cites 36 kt demonstrated (model unspecified)", approximate: true, note: "low confidence, demonstrated value" }
 max_tailwind: { value: 15 kt, source: "typical Boeing transport limit; the 747-8 TCDS section has no tailwind line", approximate: true, note: "typical Boeing transport limit, not specific to the 747-8" }
+vref:
+  source: "Boeing, Aerodrome Reference Code and Approach Speeds, Rev A, table row 747-8: approach speed 153 kt, MLW 312,072 kg, https://www.boeing.com/content/dam/boeing/v2/airports/faq/arcandapproachspeeds.pdf"
+  approximate: true
+  note: "published value is the ICAO threshold speed at maximum landing weight and the maximum certificated landing flap; lighter weights scaled by sqrt(W/MLW) (Vref is 1.3 Vs and Vs goes with sqrt(W) at constant CL max); other landing flaps read a few kt higher, not published"
+  flaps:
+    - { flap: 30 deg, weights_kg: [202800, 234100, 265300, 312072], ias: [123 kt, 133 kt, 141 kt, 153 kt] }
 flaps:
   - { up_to: 1 deg, vfe: { value: 285 kt, source: &q748 "Quizlet 747-8F limitations card (secondary; the -400 card differs by 5 kt: 280/260/240/230/205/180)", approximate: true, note: "747-8F value from a secondary card; flaps 1" } }
   - { up_to: 5 deg, vfe: { value: 265 kt, source: *q748, approximate: true, note: "747-8F value from a secondary card; flaps 5" } }

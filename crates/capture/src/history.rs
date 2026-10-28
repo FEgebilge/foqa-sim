@@ -685,7 +685,9 @@ mod tests {
         assert!(f["score"].as_f64().is_some_and(|s| s > 0.0 && s <= 100.0));
         let bars = f["bars"].as_array().unwrap();
         assert_eq!(bars.len(), 6);
-        assert_eq!(bars[0], json!([25.0, 0.0, 0, 0.0, "Approach"]));
+        // The fixture is a B738 with a Vref table: its approach speed now costs points.
+        assert_eq!((&bars[0][0], &bars[0][4]), (&json!(25.0), &json!("Approach")));
+        assert!(bars[0][1].as_f64().is_some_and(|p| p > 0.0));
         let top = f["top"].as_str().unwrap();
         // In the app's words: two decimals in g.
         assert_eq!(
