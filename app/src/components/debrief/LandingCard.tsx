@@ -3,7 +3,7 @@ import { Crosshair, Info, MapPinOff, Share2 } from "lucide-react";
 import { Button } from "@ui/components/button/button";
 import { Tooltip } from "@ui/components/tooltip/tooltip";
 import { bySeverity, eventsIn, landingWindow } from "../../lib/explain";
-import { clock, LEVEL_LABEL, levelRank, M_PER_FT, number } from "../../lib/format";
+import { clock, LEVEL_LABEL, levelRank, lengthM, lengthUnit, lengthValue, number } from "../../lib/format";
 
 import { criterion, landingAt } from "../../lib/assessment";
 import { contactLabel, type Landing } from "../../lib/landings";
@@ -124,12 +124,12 @@ export function LandingCard({ index, landing: { touchdown: td, bounces }, events
 
       {fix ? (
         <div className="flex flex-col gap-3 rounded-[var(--radius-control)] border border-line-subtle bg-bg px-3 py-2.5">
-          <Metric label="Touchdown" value={`${number(fix.along_m)} m`} sub={`${number(fix.along_m / M_PER_FT)} ft past the threshold · ${fix.zone}`} flag={flags.get("along")}>
+          <Metric label="Touchdown" value={lengthM(fix.along_m)} sub={`${lengthM(fix.along_m, 0, true)} past the threshold · ${fix.zone}`} flag={flags.get("along")}>
             <Gauge scale={distanceScale(fix, flight, c("C1"))} value={fix.along_m} unit="m" flag={flags.get("along")} />
           </Metric>
-          <Metric label="Centreline" value={fix.cross_m === 0 ? "0 m" : `${number(Math.abs(fix.cross_m), 1)} m ${fix.cross_m > 0 ? "R" : "L"}`} sub={`${number(Math.abs(fix.cross_m) / M_PER_FT)} ft off`} flag={flags.get("cross")}>
+          <Metric label="Centreline" value={fix.cross_m === 0 ? lengthM(0) : `${lengthM(Math.abs(fix.cross_m), 1)} ${fix.cross_m > 0 ? "R" : "L"}`} sub={`${lengthM(Math.abs(fix.cross_m), 0, true)} off`} flag={flags.get("cross")}>
             {(() => { const s = centrelineScale(fix.cross_m, width, c("D1")); return s ? <Gauge scale={s} value={Math.abs(fix.cross_m)} unit="m" digits={1} flag={flags.get("cross")} /> : null; })()}
-            <Note text={width ? `Target 0 m. The runway edge is ${number(width / 2, 1)} m from the centreline (measured at the aircraft's centre, not its wheels).` : "Target 0 m."} />
+            <Note text={width ? `Target 0. The runway edge is ${lengthM(width / 2, 1)} from the centreline (measured at the aircraft's centre, not its wheels).` : "Target 0."} />
           </Metric>
           <RunwayDiagram fix={fix} widthM={width ?? 45} />
         </div>
@@ -201,7 +201,10 @@ const pct = (scale: Scale, v: number) => Math.min(100, Math.max(0, ((v - scale.m
  * value brightest); published references sit on top, ranges as tinted segments and points as dashed ticks.
  */
 function Gauge({ scale, value, unit, digits = 0, flag }: { scale: Scale; value: number; unit: string; digits?: number; flag?: Level }) {
-  const fmt = (v: number) => number(v, digits);
+  // Distances arrive in metres; the runway-distance setting picks what is printed.
+  const metric = unit === "m";
+  const fmt = (v: number) => number(metric ? lengthValue(v) : v, digits);
+  unit = metric ? lengthUnit() : unit;
   const beyond = value > scale.max ? "›" : value < scale.min ? "‹" : null;
   const bands = (scale.bands?.bands.map((band, i, all) => ({ ...band, from: Math.max(scale.min, all[i - 1]?.to ?? scale.min) })) ?? []).filter((b) => b.to > scale.min && b.from < scale.max);
   const current = bands.find((b) => value <= b.to);

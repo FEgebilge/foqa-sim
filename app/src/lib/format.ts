@@ -1,3 +1,4 @@
+import { getPrefs } from "./prefs.ts";
 import type { Aircraft, Assessment, FlightEvent, Grade, Level } from "../types";
 
 /** Most severe first. */
@@ -37,17 +38,35 @@ export function duration(seconds: number) {
   return minutes >= 60 ? `${Math.floor(minutes / 60)} h ${pad(minutes % 60)} min` : `${minutes} min`;
 }
 
-const dateFormat = new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric" });
-const timeFormat = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "UTC" });
-export const flightDate = (iso?: string | null) => (iso ? dateFormat.format(new Date(iso)) : "Unknown date");
-export const flightTimeUtc = (iso?: string) => (iso ? `${timeFormat.format(new Date(iso))}Z` : "");
+/** The language tag for dates and numbers: the user's choice, or the system's (`undefined`). */
+const locale = () => { const l = getPrefs().locale; return l === "system" ? undefined : l; };
+const zone = () => (getPrefs().time === "utc" ? "UTC" : undefined);
+// Formats are cached per locale and zone, as building an Intl formatter per table cell is slow at 500 rows.
+const cache = new Map<string, Intl.DateTimeFormat>();
+function dateTime(options: Intl.DateTimeFormatOptions) {
+  const key = `${locale()}|${zone()}|${JSON.stringify(options)}`;
+  let format = cache.get(key);
+  if (!format) cache.set(key, (format = new Intl.DateTimeFormat(locale(), { ...options, timeZone: zone() })));
+  return format;
+}
+/** The date in the chosen time zone (UTC or local), so it never disagrees with the time beside it. */
+export const flightDate = (iso?: string | null) => (iso ? dateTime({ day: "2-digit", month: "short", year: "numeric" }).format(new Date(iso)) : "Unknown date");
+/** "14:32Z" in UTC; "14:32" in local time, where the zone is the user's own. The name is kept for its many call sites. */
+export const flightTimeUtc = (iso?: string) => (iso ? `${dateTime({ hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(iso))}${getPrefs().time === "utc" ? "Z" : ""}` : "");
 
 /** "InitialClimb" -> "Initial climb". Unknown names from a newer backend still read well. */
 export const phaseName = (phase: string) => phase.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/ (\w)/g, (_, c: string) => ` ${c.toLowerCase()}`);
 
 export const aircraftName = (aircraft?: Aircraft) => aircraft?.icao ?? aircraft?.title ?? "Unknown aircraft";
 
-export const number = (value: number, digits = 0) => value.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+/** A flight's readable name: the user's title when it has one, else "28 Oct 2026 · LTFM → LTAI · A320". */
+export function flightLabel(flight: { started_utc?: string; departure?: string; arrival?: string; aircraft?: Aircraft; title?: string }) {
+  if (flight.title?.trim()) return flight.title.trim();
+  const route = flight.departure || flight.arrival ? `${flight.departure ?? "?"} → ${flight.arrival ?? "?"}` : "";
+  return [flightDate(flight.started_utc), route, aircraftName(flight.aircraft)].filter(Boolean).join(" · ");
+}
+
+export const number = (value: number, digits = 0) => value.toLocaleString(locale(), { minimumFractionDigits: digits, maximumFractionDigits: digits });
 
 /** Decimals for a measured value: enough for g and Mach (M), none for fpm or ft unless `digits` asks for more. */
 export function measured(value: number, unit?: string, digits?: number) {
@@ -67,3 +86,20 @@ export function why(event: FlightEvent) {
 
 /** Metres per foot, exact. */
 export const M_PER_FT = 0.3048;
+
+const LB_PER_KG = 2.2046226218;
+
+/** A length given in metres, in the chosen runway unit: "1,830 m" or "6,004 ft". `other` gives the unit not chosen, for the secondary line. */
+export function lengthM(metres: number, digits = 0, other = false) {
+  const feet = (getPrefs().distance === "ft") !== other;
+  return feet ? `${number(metres / M_PER_FT, digits)} ft` : `${number(metres, digits)} m`;
+}
+/** The chosen runway length unit, "m" or "ft". */
+export const lengthUnit = () => getPrefs().distance;
+/** A length in metres as a bare number in the chosen unit, for gauges that print the unit apart. */
+export const lengthValue = (metres: number) => (getPrefs().distance === "ft" ? metres / M_PER_FT : metres);
+
+/** Fuel mass recorded in kg, as a bare number in the chosen unit (the unit comes from `fuelUnit`). */
+export const fuelValue = (kg: number, digits = 0) => number(getPrefs().fuel === "lb" ? kg * LB_PER_KG : kg, digits);
+/** "kg", "lb", "kg/h", "lb/nm": the chosen fuel unit, over `per` if given. */
+export const fuelUnit = (per?: string) => `${getPrefs().fuel}${per ? `/${per}` : ""}`;
