@@ -226,6 +226,7 @@ mod tests {
             atc_model: "ATCCOM.AC_MODEL C172.0.text".into(),
             atc_type: String::new(),
             atc_id: "BILGE".into(),
+            facts: Default::default(),
         }))
     }
 

@@ -355,6 +355,7 @@ mod tests {
             atc_model: "ATCCOM.AC_MODEL C172.0.text".into(),
             atc_type: String::new(),
             atc_id: String::new(),
+            facts: Default::default(),
         };
         m.record(&Telemetry::Event(SimEvent::Aircraft(id)));
         let ground = [("SIM ON GROUND", 1.0), ("PRESSURE ALTITUDE", 0.0)];

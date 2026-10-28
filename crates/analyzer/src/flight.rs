@@ -8,8 +8,9 @@ use recorder::{FlightRecords, FlowEvent, Record, SimEvent, read_records};
 /// Parameters whose value wraps around, as (name, lowest value, period).
 /// Interpolating across the wrap-around must take the short way round
 /// (359 deg to 1 deg passes through 0, not 180).
-const WRAPPING: [(&str, f64, f64); 4] = [
+const WRAPPING: [(&str, f64, f64); 5] = [
     ("heading.mag", 0.0, 360.0),
+    ("heading.true", 0.0, 360.0),
     ("sel.heading", 0.0, 360.0),
     ("wind.dir", 0.0, 360.0),
     ("pos.lon", -180.0, 360.0),
@@ -375,6 +376,7 @@ pub(crate) mod tests {
             atc_model: "ATCCOM.AC_MODEL C172.0.text".into(),
             atc_type: "ATCCOM.ATC_NAME CESSNA.0.text".into(),
             atc_id: "BILGE".into(),
+            facts: Default::default(),
         };
         let mut f = flight(&[]);
         assert_eq!(f.aircraft(), None);

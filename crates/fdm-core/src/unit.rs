@@ -21,6 +21,8 @@ pub enum Unit {
     Seconds,
     /// Dimensionless ratio, e.g. simulation rate.
     Ratio,
+    /// Mach number: true airspeed over the local speed of sound.
+    Mach,
     /// Two-state value recorded as 0.0 / 1.0.
     Discrete,
     /// Detent position, e.g. flap handle index.
@@ -42,6 +44,7 @@ impl Unit {
             Self::Hectopascal => "hPa",
             Self::Pounds => "lb",
             Self::Seconds => "s",
+            Self::Mach => "M",
             Self::Ratio | Self::Discrete | Self::Index => "",
         }
     }

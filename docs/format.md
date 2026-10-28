@@ -171,6 +171,18 @@ reports as a localisation key; older builds wrote
 `TT:ATCCOM.AC_MODEL_C172.0.text`, and some aircraft give the bare
 designator.
 
+Since 0.11 the object may also carry what the sim says about the airframe,
+each key only where the sim gave a value in its documented range (older
+recordings have none, and readers treat a missing key as unknown):
+
+| Key | SimVar | Value |
+|---|---|---|
+| `category` | `CATEGORY` | `Airplane`, `Helicopter`, ... (string) |
+| `engine_type` | `ENGINE TYPE` | 0 piston, 1 jet, 2 none, 3 helicopter turbine, 4 unsupported, 5 turboprop |
+| `engines` | `NUMBER OF ENGINES` | 0–4 |
+| `retractable`, `floats`, `skids` | `IS GEAR RETRACTABLE`, `IS GEAR FLOATS`, `IS GEAR SKIDS` | true / false |
+| `max_gross_lb` | `MAX GROSS WEIGHT` | lb, whole |
+
 ### Ordering and integrity
 
 - Packets carry their own time and are **not** in time order. The touchdown

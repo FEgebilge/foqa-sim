@@ -151,6 +151,8 @@ const WIRES: &[Wire] = &[
     scaled("sim.td.bank", "PLANE TOUCHDOWN BANK DEGREES", "degrees", FLIP),
     w("sim.rate", "SIMULATION RATE", "number"),
     w("sim.slew", "IS SLEW ACTIVE", "bool"),
+    w("heading.true", "PLANE HEADING DEGREES TRUE", "degrees"),
+    w("mach", "AIRSPEED MACH", "mach"),
 ];
 
 enum Gate {

@@ -242,5 +242,6 @@ pub fn identity(icao: &str) -> SimEvent {
         atc_model: format!("ATCCOM.AC_MODEL {icao}.0.text"),
         atc_type: String::new(),
         atc_id: "N123FQ".into(),
+        facts: Default::default(),
     })
 }
