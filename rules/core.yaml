@@ -417,9 +417,10 @@ version: 1
 title: Hard landing
 domain: contact
 description: >
-  Peak normal load at touchdown, transport aircraft. Levels 1.6 / 1.8 /
-  2.1 g; ~2.1 g is the 737 hard-landing indication on an 8 Hz recording
-  (EASA EOFDM RE30, ATSB).
+  Peak normal load at touchdown, transport aircraft, read at 16 samples/s.
+  Levels 1.6 / 1.8 / 2.1 g sit below the 737 AMM hard-landing indication,
+  2.2 g on a 16 samples/s DFDR (Flight Safety Digest Aug 2004 p. 6, ATSB
+  AO-2023-010; EASA EOFDM RE30).
 why_it_matters: >
   A high load at touchdown can damage the landing gear and airframe and may
   require a maintenance inspection.

@@ -92,7 +92,7 @@ false).
 | `takeoff.rotation_rate` | deg/s | From the takeoff roll to the end of the initial climb after it: the rotation's peak pitch rate over 0.5 s, from the pitch 1 deg above the roll's (the `rotation_rate_dps` skill measure); unknown elsewhere |
 | `takeoff.flap` | deg | Over the same points: the flap angle at liftoff |
 | `td.sink` | fpm | Touchdown rules: rate of descent at contact |
-| `td.peak_g` | g | Highest normal load around contact |
+| `td.peak_g` | g | Highest normal load around contact, read at 16 samples/s (a 62.5 ms mean of the frame-rate window), the rate of the 737 AMM hard-landing indication |
 | `td.pitch`, `td.roll` | deg | Attitude at contact |
 | `td.ias` | kt | Airspeed at contact |
 | `td.bounce` | condition | A touchdown after a short hop |

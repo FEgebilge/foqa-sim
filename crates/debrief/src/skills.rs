@@ -640,6 +640,23 @@ mod tests {
     }
 
     #[test]
+    fn ride_bands_take_the_lowest_iso_2631_band() {
+        // Annex C bands overlap (0.5-1 fairly, 0.8-1.6 uncomfortable, ...).
+        let bands = [0.3, 0.55, 0.9, 1.4, 2.2, 2.5].map(ride_band);
+        assert_eq!(
+            bands,
+            [
+                "not uncomfortable",
+                "a little uncomfortable",
+                "fairly uncomfortable",
+                "uncomfortable",
+                "very uncomfortable",
+                "extremely uncomfortable"
+            ]
+        );
+    }
+
+    #[test]
     fn vertical_rms_removes_the_moving_mean() {
         // 1 g plus a 0.1 g sine of 1 s: the mean is the 1 g, the RMS 0.1 g / sqrt 2.
         let s = fly_skills(|t, p| p.g = 1.0 + 0.1 * (std::f64::consts::TAU * t).sin());

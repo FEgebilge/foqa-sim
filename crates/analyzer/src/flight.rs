@@ -1,7 +1,9 @@
 use std::io::{self, Read};
+use std::ops::Range;
 
+use fdm_core::geo::distance_m;
 use fdm_core::{AircraftId, Airport, Lfl, Sample, SignalDef, SignalId, SimTime, Unit};
-use recorder::{FlightRecords, Record, SimEvent, read_records};
+use recorder::{FlightRecords, FlowEvent, Record, SimEvent, read_records};
 
 /// Parameters whose value wraps around, as (name, lowest value, period).
 /// Interpolating across the wrap-around must take the short way round
@@ -20,6 +22,13 @@ const WRAPPING: [(&str, f64, f64); 4] = [
 /// 100 % across 4 s) and give short-sustain rules (gear operated above VLO,
 /// 1 s) a 4 s ramp to fire on.
 const STEPPED: [&str; 1] = ["gear.extended"];
+/// An aircraft the sim placed (spawn, slew, teleport) settles on its gear
+/// within this long: no touchdown in it is a landing.
+pub(crate) const SETTLE_US: i64 = 5_000_000;
+/// Faster over the ground than any aircraft flies (Concorde cruised at
+/// ~1,200 kt): a position that moved faster jumped (teleport, flight
+/// reload), the only trace of one in recordings without flow events. m/s.
+const JUMP_MS: f64 = 2000.0 * 1852.0 / 3600.0;
 
 /// Recordings made before the wiring scaled `GEAR TOTAL PCT EXTENDED` (a
 /// 0-1 fraction in MSFS 2024, docs/format.md) hold `gear.extended` as 0-1
@@ -122,6 +131,67 @@ impl Flight {
             SimEvent::Aircraft(id) => Some(id),
             _ => None,
         })
+    }
+
+    /// Where the sim, not the pilot, moved the aircraft: slew, a teleport,
+    /// a flight (re)load, skip or back-on-track (flow events), or a position
+    /// jump; each with `SETTLE_US` after it. No touchdown in one is a
+    /// landing, and no approach or rollout is graded across one. A pause is
+    /// none: the recorder drops frames whose sim time stands still, so it
+    /// leaves no samples and no jump.
+    pub fn breaks(&self) -> Vec<Range<SimTime>> {
+        let Some((_, end)) = self.span() else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        let mut open: Option<SimTime> = None;
+        for s in self.series("sim.slew").iter().filter(|s| s.is_valid()) {
+            match (open, s.value >= 0.5) {
+                (None, true) => open = Some(s.t),
+                (Some(from), false) => {
+                    out.push(from..s.t);
+                    open = None;
+                }
+                _ => {}
+            }
+        }
+        out.extend(open.take().map(|from| from..end));
+        for &(t, ref e) in &self.events {
+            use FlowEvent::*;
+            match e {
+                SimEvent::Flow(FltLoad | TeleportStart | BackOnTrackStart | SkipStart) => {
+                    open.get_or_insert(t);
+                }
+                SimEvent::Flow(FltLoaded | TeleportDone | BackOnTrackDone | SkipDone)
+                | SimEvent::FlightLoaded(_) => out.push(open.take().unwrap_or(t)..t),
+                _ => {}
+            }
+        }
+        out.extend(open.map(|from| from..end));
+        let fixes: Vec<_> = (self.series("pos.lat").iter())
+            .filter(|s| s.is_valid())
+            .filter_map(|s| Some((s.t, (s.value, self.at("pos.lon", s.t)?))))
+            .collect();
+        out.extend(
+            fixes
+                .windows(2)
+                .filter(|w| {
+                    distance_m(w[0].1, w[1].1) > JUMP_MS * w[1].0.us_since(w[0].0) as f64 / 1e6
+                })
+                .map(|w| w[0].0..w[1].0),
+        );
+        for b in &mut out {
+            b.end = b.end.add_us(SETTLE_US);
+        }
+        out
+    }
+
+    /// When the sim reported a crash: its `Crashed` system event or the
+    /// `PlaneCrash` flow event, sent only with crash detection on.
+    pub fn crashes(&self) -> impl Iterator<Item = SimTime> + '_ {
+        (self.events.iter())
+            .filter(|(_, e)| matches!(e, SimEvent::Crashed | SimEvent::Flow(FlowEvent::PlaneCrash)))
+            .map(|&(t, _)| t)
     }
 
     pub fn lfl_version(&self) -> u16 {

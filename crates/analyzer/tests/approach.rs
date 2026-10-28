@@ -94,3 +94,59 @@ fn a_flap_change_in_the_window_is_found_once() {
     // 60 s before contact: 700 ft.
     assert!(near(c.height_ft, 700.0, 40.0), "{c:?}");
 }
+
+#[test]
+fn a_fast_turn_off_past_the_tdz_ends_the_centreline_tracking() {
+    // 140 kt slowing 3 kt/s: 40 kt at 33.3 s, ~1940 m past the threshold
+    // (TDZ 914 m); then a 35 deg turn that goes 30 m right by 30 kt.
+    let exit = |turn_kt: f64| {
+        let at = TD_S + (140.0 - turn_kt) / 3.0;
+        approach(move |t| {
+            let track = if t > at { 235.0 } else { TRACK_DEG };
+            Pt {
+                heading: track,
+                track,
+                ..landing(t, TD_S, 1.2)
+            }
+        })
+    };
+    // The 1 s chord of the 1 Hz positions passes 15 deg within a second
+    // of the turn: 20.6 m/s x sin 35 deg x < 1 s, under 12 m.
+    let a = exit(40.0);
+    assert!(a.rollout_cross_m.unwrap() < 12.0, "{:?}", a.rollout_cross_m);
+    // The same turn at 80 kt is a veer-off: tracked to 30 kt, 22.5 m off.
+    let a = exit(80.0);
+    assert!(a.rollout_cross_m.unwrap() > 22.5, "{:?}", a.rollout_cross_m);
+}
+
+#[test]
+fn a_slewed_approach_is_graded_from_the_end_of_the_slew() {
+    // Slewed until 40 s before contact (~470 ft): the window starts 5 s
+    // after it, not at 1000 ft.
+    let a = approach(|t| Pt {
+        set: vec![("IS SLEW ACTIVE", f64::from(u8::from(t < TD_S - 40.0)))],
+        ..landing(t, TD_S, 1.2)
+    });
+    let start = a.window.t[0].as_secs_f64();
+    let td = a.window.t.last().unwrap().as_secs_f64() + 6.4;
+    assert!(near(td - start, 35.0, 0.5), "{}", td - start);
+}
+
+#[test]
+fn a_held_deceleration_is_a_means_in_use() {
+    // Autobrake from 3 s: -4 ft/s2 (0.124 g) with no brake pedal recorded;
+    // the 0.2 s wheel spin-up at contact (-10 ft/s2) is not it.
+    let a = approach(|t| {
+        let decel = match t - TD_S {
+            x if (0.0..0.2).contains(&x) => -10.0,
+            x if x >= 3.0 => -4.0,
+            _ => -1.0,
+        };
+        Pt {
+            set: vec![("ACCELERATION BODY Z", decel)],
+            ..landing(t, TD_S, 1.2)
+        }
+    });
+    let d = a.decel_delay_s.unwrap();
+    assert!((3.0..=3.3).contains(&d), "{d}");
+}

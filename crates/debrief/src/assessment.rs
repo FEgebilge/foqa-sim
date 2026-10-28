@@ -330,7 +330,7 @@ pub fn domain_summary(d: Domain) -> &'static str {
             "Speed, descent rate, bank, pitch, glideslope and configuration on final"
         }
         Domain::Energy => "Height over the threshold, touchdown speed and float down the runway",
-        Domain::Point => "How far from the aiming point the wheels touched down",
+        Domain::Point => "How far from the touchdown target the wheels touched down",
         Domain::Lateral => {
             "Offset from the centreline, crab and drift at touchdown, then on the rollout"
         }

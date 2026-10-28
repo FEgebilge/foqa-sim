@@ -37,10 +37,23 @@ const REVERSERS: [&str; 4] = [
     "eng3.reverser",
     "eng4.reverser",
 ];
+/// Deceleration counts as a means in use whatever applied it (autobrake,
+/// prop beta, an add-on's own systems, none of them in the recorded
+/// controls): past the ~0.05 g of a free roll at idle (est), held this long
+/// so the wheel spin-up at contact is not taken for it.
+const DECEL_G: f64 = 0.1;
+const DECEL_HELD_US: i64 = 1_000_000;
 /// The first deceleration means is looked for this long after contact.
 const DECEL_SEARCH_US: i64 = 30_000_000;
 /// The rollout's centreline tracking ends below this ground speed (RE.7).
 const ROLLOUT_END_KT: f64 = 30.0;
+/// Or where the aircraft turns off: ground track this far off the runway
+/// heading, at no more than exit speed, past the touchdown zone. Rapid exit
+/// taxiways leave at 25-45 deg and are designed for 93 km/h, 50 kt (ICAO
+/// Annex 14 Vol I 3.9, Doc 9157 Part 2); a veer-off at that speed and place
+/// cannot be told from an exit without taxiway data.
+const TURN_OFF_DEG: f64 = 15.0;
+const EXIT_MAX_KT: f64 = 50.0;
 /// Taxi speed on a dry runway (FAA-S-ACS-11A): stopped on the runway.
 const TAXI_KT: f64 = 20.0;
 
@@ -137,7 +150,8 @@ pub struct Approach {
     /// positive, kt.
     pub drift_kt: Option<f64>,
     /// From contact to the first deceleration means in use (reverser,
-    /// ground spoilers, brakes), s; known to the 1-2 Hz recording rate.
+    /// ground spoilers, brakes, or a deceleration past 0.1 g held 1 s), s;
+    /// known to the 1-2 Hz recording rate.
     pub decel_delay_s: Option<f64>,
     /// Constant deceleration that stops in the remaining landing distance
     /// from the ground speed at contact, GS² / 2d, g (EAFDM RE.8); `None`
@@ -147,8 +161,8 @@ pub struct Approach {
     /// a touch-and-go, or the recording ending airborne; `None` if it ends
     /// on the ground. The rollout ends there.
     pub liftoff: Option<SimTime>,
-    /// Largest centreline offset from contact down to 30 kt or the
-    /// liftoff, m.
+    /// Largest centreline offset from contact down to 30 kt, the turn-off
+    /// onto an exit or the liftoff, m.
     pub rollout_cross_m: Option<f64>,
     /// Taxi speed reached before the liftoff.
     pub slowed: Option<Slowed>,
@@ -175,11 +189,18 @@ impl Approach {
         let gs = flight.at("groundspeed", td.t);
         let td_i = track.index_at(td.t);
         let liftoff = liftoff(track, td_i);
-        let ground_end = liftoff.unwrap_or(track.len());
+        // The rollout also ends where the sim next moves the aircraft.
+        let moved = (flight.breaks().into_iter())
+            .filter(|b| b.start > td.t)
+            .map(|b| track.t.partition_point(|&x| x < b.start))
+            .min();
+        let ground_end = liftoff
+            .unwrap_or(track.len())
+            .min(moved.unwrap_or(track.len()));
         Self {
             config_changes,
             threshold: fix.and_then(|f| crossing(flight, track, f, td.t)),
-            float_s: float_s(track, td.t),
+            float_s: float_s(flight, track, td.t),
             crab_deg: fix.and_then(|f| {
                 let magnetic = flight.at("heading.mag", td.t)?;
                 Some(wrap180(magnetic - f.magvar_deg - f.heading_deg))
@@ -197,7 +218,7 @@ impl Approach {
             }),
             rollout_cross_m: fix.and_then(|f| {
                 let end = (td_i..ground_end)
-                    .find(|&i| track.gs_kt[i] < ROLLOUT_END_KT)
+                    .find(|&i| track.gs_kt[i] < ROLLOUT_END_KT || turning_off(flight, track, f, i))
                     .unwrap_or(ground_end);
                 (td_i..end)
                     .filter_map(|i| position(flight, track.t[i]))
@@ -225,15 +246,20 @@ fn height(track: &Track, i: usize) -> f64 {
 }
 
 /// The airborne points of the leg that ends at the contact `t`, up to the
-/// last one before it.
-fn before_contact(track: &Track, t: SimTime) -> Range<usize> {
+/// last one before it, from the end of the last `Flight::breaks` span in
+/// it (an approach slewed or teleported into is graded from there).
+fn before_contact(flight: &Flight, track: &Track, t: SimTime) -> Range<usize> {
     let last = track.t.partition_point(|&x| x < t);
     let start = track
         .legs
         .iter()
         .find(|l| l.airborne.contains(&last.saturating_sub(1)))
         .map_or(0, |l| l.airborne.start);
-    start..last
+    let resumed = (flight.breaks().into_iter())
+        .filter(|b| b.end <= t)
+        .map(|b| track.t.partition_point(|&x| x < b.end))
+        .max();
+    start.max(resumed.unwrap_or(0))..last
 }
 
 /// The first point from `from` that leaves the ground for longer than a
@@ -253,7 +279,7 @@ impl Window {
     /// The window before the contact at `td`: from just below the last point
     /// above `top_ft` to the first point under `bottom_ft`.
     pub fn of(flight: &Flight, track: &Track, td: SimTime, top_ft: f64, bottom_ft: f64) -> Self {
-        let leg = before_contact(track, td);
+        let leg = before_contact(flight, track, td);
         let start = leg
             .clone()
             .rev()
@@ -328,7 +354,7 @@ fn changes(
 /// The last crossing of the threshold before contact (along 0 m).
 fn crossing(flight: &Flight, track: &Track, fix: &RunwayFix, td: SimTime) -> Option<Crossing> {
     let along = |i: usize| position(flight, track.t[i]).map(|(lat, lon)| fix.offsets(lat, lon).0);
-    let leg = before_contact(track, td);
+    let leg = before_contact(flight, track, td);
     let mut next: Option<(usize, f64)> = None;
     for i in leg.rev() {
         let Some(a) = along(i) else {
@@ -352,9 +378,24 @@ fn crossing(flight: &Flight, track: &Track, fix: &RunwayFix, td: SimTime) -> Opt
     None
 }
 
+/// Whether the rollout at track point `i` is a turn-off onto an exit.
+fn turning_off(flight: &Flight, track: &Track, fix: &RunwayFix, i: usize) -> bool {
+    let t = track.t[i];
+    let (Some(a), Some(b)) = (
+        position(flight, t.add_us(-DRIFT_SPAN_US)),
+        position(flight, t),
+    ) else {
+        return false;
+    };
+    track.gs_kt[i] <= EXIT_MAX_KT
+        && fix.offsets(b.0, b.1).0 > fix.tdz_m
+        && distance_m(a, b) >= DRIFT_MIN_M
+        && wrap180(ground_track_deg(a, b) - fix.heading_deg).abs() >= TURN_OFF_DEG
+}
+
 /// Time from the last descent through 50 ft above the runway to contact.
-fn float_s(track: &Track, td: SimTime) -> Option<f64> {
-    let leg = before_contact(track, td);
+fn float_s(flight: &Flight, track: &Track, td: SimTime) -> Option<f64> {
+    let leg = before_contact(flight, track, td);
     let i = leg
         .clone()
         .rev()
@@ -383,8 +424,21 @@ fn decel_delay_s(flight: &Flight, td: SimTime) -> Option<f64> {
         ("brake.left", BRAKES_PCT),
         ("brake.right", BRAKES_PCT),
     ]);
+    // The start of the first stretch decelerating past DECEL_G held.
+    let mut from = None;
+    let decelerating = (flight.series("accel.long").iter())
+        .filter(|s| s.is_valid() && (0..=DECEL_SEARCH_US).contains(&s.t.us_since(td)))
+        .find_map(|s| {
+            if s.value > -DECEL_G {
+                from = None;
+                return None;
+            }
+            let start = *from.get_or_insert(s.t);
+            (s.t.us_since(start) >= DECEL_HELD_US).then_some(start)
+        });
     means
         .filter_map(|(name, past)| used(name, past))
+        .chain(decelerating)
         .min()
         .map(|t| t.us_since(td) as f64 / 1e6)
 }
