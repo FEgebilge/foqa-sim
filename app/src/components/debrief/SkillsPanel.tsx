@@ -1,7 +1,7 @@
 import type { CSSProperties, ReactNode } from "react";
 import { Activity, Fuel, Gauge, Info, Plane, Waves } from "lucide-react";
 import { Tooltip } from "@ui/components/tooltip/tooltip";
-import { duration, number, phaseName } from "../../lib/format";
+import { duration, fuelUnit, fuelValue, number, phaseName } from "../../lib/format";
 import { BANK_LIMIT_DEG, RIDE_BANDS, ROTATION_RATE_DPS, percent, rideStepOf } from "../../lib/skills";
 import type { Skills } from "../../types";
 import { Measure } from "../Measure";
@@ -167,10 +167,10 @@ function FuelBody({ f }: { f: Skills["fuel"] }) {
   const levels = f.descent_levels === null ? "" : `in ${f.descent_levels} ${f.descent_levels === 1 ? "level segment" : "level segments"}`;
   return (
     <Stats>
-      <Stat label="Fuel used" value={f.fuel_used_kg} unit="kg" tip="not recorded, or fuel rose during the flight (refuelled or slewed)">{number(f.fuel_used_kg ?? 0)}</Stat>
-      <Stat label="Burn rate" value={f.fuel_kg_h} unit="kg/h">{number(f.fuel_kg_h ?? 0)}</Stat>
-      <Stat label="Per distance" value={f.fuel_kg_nm} unit="kg/nm">{number(f.fuel_kg_nm ?? 0, 1)}</Stat>
-      <Stat label="Taxi fuel" value={f.taxi_fuel_kg} unit="kg">{number(f.taxi_fuel_kg ?? 0)}</Stat>
+      <Stat label="Fuel used" value={f.fuel_used_kg} unit={fuelUnit()} tip="not recorded, or fuel rose during the flight (refuelled or slewed)">{fuelValue(f.fuel_used_kg ?? 0)}</Stat>
+      <Stat label="Burn rate" value={f.fuel_kg_h} unit={fuelUnit("h")}>{fuelValue(f.fuel_kg_h ?? 0)}</Stat>
+      <Stat label="Per distance" value={f.fuel_kg_nm} unit={fuelUnit("nm")}>{fuelValue(f.fuel_kg_nm ?? 0, 1)}</Stat>
+      <Stat label="Taxi fuel" value={f.taxi_fuel_kg} unit={fuelUnit()}>{fuelValue(f.taxi_fuel_kg ?? 0)}</Stat>
       <Stat className="col-span-2" label="Level-offs in descent" value={f.descent_level_s} unit={levels} tip="not recorded, or the flight has no descent">{duration(f.descent_level_s ?? 0)}</Stat>
     </Stats>
   );

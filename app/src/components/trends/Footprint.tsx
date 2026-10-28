@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { aircraftName, flightDate, number } from "../../lib/format";
+import { aircraftName, flightDate, lengthM, number } from "../../lib/format";
 import { openFlight } from "../../lib/route";
 import { GRADE_VAR } from "../../lib/trends";
 import type { TrendLanding } from "../../types";
@@ -72,7 +72,7 @@ export function Footprint({ landings }: { landings: TrendLanding[] }) {
             <g key={`${l.flight_id}-${l.t_s}`} tabIndex={0} role="link" aria-label={`Open flight of ${flightDate(l.started_utc)}`} className="cursor-pointer outline-none [&:focus-visible>circle]:stroke-[var(--foreground)]"
               onClick={() => openFlight(l.flight_id)} onKeyDown={(e) => { if (e.key === "Enter") openFlight(l.flight_id); }}>
               <circle cx={sx(l.along_m!)} cy={sy(l.cross_m!)} r={5.5} fill={l.grade ? `var(${GRADE_VAR[l.grade]})` : "var(--text-muted)"} fillOpacity={0.9} stroke="var(--surface)" strokeWidth={1.5} />
-              <title>{`${aircraftName(l.aircraft ? { icao: l.aircraft, title: "" } : undefined)} · ${flightDate(l.started_utc)}\n${number(l.along_m!)} m past the threshold, ${number(Math.abs(l.cross_m!), 1)} m ${l.cross_m! >= 0 ? "right" : "left"}${l.score !== undefined ? `\nScore ${number(l.score, 1)}` : ""}`}</title>
+              <title>{`${aircraftName(l.aircraft ? { icao: l.aircraft, title: "" } : undefined)} · ${flightDate(l.started_utc)}\n${lengthM(l.along_m!)} past the threshold, ${lengthM(Math.abs(l.cross_m!), 1)} ${l.cross_m! >= 0 ? "right" : "left"}${l.score !== undefined ? `\nScore ${number(l.score, 1)}` : ""}`}</title>
             </g>
           ))}
         </svg>
@@ -81,7 +81,7 @@ export function Footprint({ landings }: { landings: TrendLanding[] }) {
         <div className="flex gap-1.5"><dt>In zone</dt><dd className="readout text-fg">{rows.length ? `${Math.round((100 * inTdz) / rows.length)}%` : "–"}</dd></div>
         <div className="flex gap-1.5"><dt>Long</dt><dd className="readout text-fg">{count("Long")}</dd></div>
         <div className="flex gap-1.5"><dt>Short</dt><dd className="readout text-fg">{count("Short")}</dd></div>
-        <div className="flex gap-1.5"><dt>Mean offset</dt><dd className="readout text-fg">{number(Math.abs(meanCross), 1)} m {meanCross >= 0 ? "right" : "left"}</dd></div>
+        <div className="flex gap-1.5"><dt>Mean offset</dt><dd className="readout text-fg">{lengthM(Math.abs(meanCross), 1)} {meanCross >= 0 ? "right" : "left"}</dd></div>
         <p className="ml-auto">Metres past the threshold; across-runway scale stretched</p>
       </dl>
     </div>
