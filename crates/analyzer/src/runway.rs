@@ -12,8 +12,9 @@ use fdm_core::{Airport, Runway, RunwayEnd};
 const TDZ_MAX_M: f64 = 914.4;
 const TDZ_RUNWAY_FRACTION: f64 = 1.0 / 3.0;
 
-/// Gates: a touchdown slightly before the threshold or well past the far end
-/// is still a landing on this runway (position error, undershoot, overrun).
+/// Gates: a touchdown slightly before the threshold (or its displaced
+/// pavement) or well past the far end is still a landing on this runway
+/// (position error, undershoot, overrun).
 const ALONG_BEFORE_M: f64 = 150.0;
 const ALONG_AFTER_M: f64 = 300.0;
 /// Margin beyond the paved edge; covers the aircraft-reference-point bias.
@@ -230,7 +231,8 @@ pub fn locate(
             let (along_m, cross_m) = e.offsets(&frame);
             let lda_m = e.lda_m();
             let aligned = wrap180(track_deg - e.heading_deg).abs() <= TRACK_GATE_DEG;
-            let on_runway = (-ALONG_BEFORE_M..=lda_m + ALONG_AFTER_M).contains(&along_m)
+            let before_m = e.displaced_m + ALONG_BEFORE_M;
+            let on_runway = (-before_m..=lda_m + ALONG_AFTER_M).contains(&along_m)
                 && cross_m.abs() <= e.runway.width_m / 2.0 + CROSS_MARGIN_M;
             let tdz_m = tdz_m(lda_m);
             let (east, north) = e.threshold(&frame);
@@ -346,6 +348,10 @@ mod tests {
         let fix = locate(&ap, lat, lon, 200.0).unwrap();
         assert!((fix.along_m - 100.0).abs() < 0.5);
         assert_eq!(fix.lda_m, 2700.0);
+        // On the displaced pavement, 250 m before the landing threshold: a
+        // short landing on this runway, not an unmatched one.
+        let (lat, lon) = point(200.0, 1200.0, -250.0, 0.0);
+        assert!(locate(&ap, lat, lon, 200.0).unwrap().short_landing);
     }
 
     #[test]
