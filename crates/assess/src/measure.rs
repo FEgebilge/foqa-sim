@@ -278,7 +278,6 @@ impl Method {
             false,
         );
 
-        let retractable = l.selection.profile.is_some_and(|p| p.vle.is_some());
         let mut crossing = a.threshold.as_ref();
         if crossing.is_some_and(|c| track.ra_ft[track.index_at(c.t)].is_nan()) {
             partial.push(
@@ -291,7 +290,7 @@ impl Method {
         let scalars = [
             (
                 "A6",
-                configuration(&a, light, self.windows[&class].split_ft, retractable),
+                configuration(&a, light, self.windows[&class].split_ft),
             ),
             ("B1", crossing.map(|c| c.height_ft - tch_ft)),
             ("B2", td.ias_kt.zip(reference).map(|(ias, r)| ias - r)),
@@ -401,9 +400,9 @@ fn gap(t: &[SimTime], x: &[f64]) -> bool {
 /// A6 as a level: a jet's flap or gear change at or above the split L2,
 /// below it L3, gear not down at the bottom of the window L3 (Data4Safety
 /// late flap and gear, SL2A / SL3); a light
-/// aircraft's flap change under 200 ft L1, retractable gear not down below
-/// its split L3 (est). `None` without flap or gear data.
-fn configuration(a: &Approach, light: bool, split: f64, retractable: bool) -> Option<f64> {
+/// aircraft's flap change under 200 ft L1, gear not down below its split L3
+/// (est; fixed gear reads 100 %). `None` without flap or gear data.
+fn configuration(a: &Approach, light: bool, split: f64) -> Option<f64> {
     let w = &a.window;
     let known = |v: &[f64]| v.iter().any(|x| x.is_finite());
     if !known(&w.flap_deg) && !known(&w.gear_pct) {
@@ -419,8 +418,7 @@ fn configuration(a: &Approach, light: bool, split: f64, retractable: bool) -> Op
         let late = changes(analyzer::Config::Flaps)
             .filter(|c| c.height_ft < LIGHT_LATE_FLAP_FT)
             .map(|_| 1.0);
-        late.chain((retractable && gear_up).then_some(3.0))
-            .fold(0.0, f64::max)
+        late.chain(gear_up.then_some(3.0)).fold(0.0, f64::max)
     } else {
         let not_down = w
             .gear_pct

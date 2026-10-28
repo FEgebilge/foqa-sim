@@ -270,13 +270,13 @@ domain. The core set maps as follows:
 
 | Domain | Rules |
 |---|---|
-| A stability | unstable-speed-above-500, unstable-speed-below-500, unstable-speed-light, high-sink-above-500, high-sink-below-500, high-sink-light, bank-above-500, bank-below-500, bank-light, localizer-deviation-above-500, glideslope-deviation-above-500, localizer-deviation-500, glideslope-deviation-500, gear-not-down-500, unstable-sink-500 and unstable-bank-500 (advisory gate notes) |
-| B energy | stall-warning, flap-overspeed, vmo-exceedance, gear-extended-overspeed, gear-operating-overspeed |
+| A stability | unstable-speed-above-500, unstable-speed-below-500, unstable-speed-light, high-sink-above-500, high-sink-below-500, high-sink-light, high-sink-light-above-500, bank-above-500, bank-below-500, bank-light, bank-light-above-300, localizer-deviation-above-500, glideslope-deviation-above-500, localizer-deviation-500, glideslope-deviation-500, gear-not-down-500, unstable-sink-500 and unstable-bank-500 (advisory gate notes) |
+| B energy | stall-warning, stall-warning-light, flap-overspeed, vmo-exceedance, gear-extended-overspeed, gear-operating-overspeed |
 | C point | long-landing, short-landing |
 | D lateral | off-centreline-touchdown, crosswind-above-demonstrated |
 | E contact | hard-landing, hard-landing-light, high-sink-touchdown, high-sink-touchdown-light, bounced-landing, tailstrike-risk-landing, hard-landing-inspection |
 | F rollout | tailwind-landing-limit |
-| other (never in a landing score) | tailstrike-risk-takeoff, go-around (advisory) |
+| other (never in a landing score) | tailstrike-risk-takeoff, rejected-takeoff, rejected-takeoff-light, rotation-rate, early-flap-retraction, go-around (advisory) |
 
 How a finding is scored:
 

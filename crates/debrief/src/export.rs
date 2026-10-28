@@ -91,10 +91,11 @@ const PATH_HZ: usize = 1;
 const COORD_DECIMALS: usize = 6;
 /// Line colours of the flight phases, the app's dark-theme palette
 /// (app/src/lib/palette.ts), as `#rrggbb`.
-const PHASE_COLORS: [(&str, &str); 8] = [
+const PHASE_COLORS: [(&str, &str); 9] = [
     ("Standing", "#5d6679"),
     ("Taxi", "#9a8b5e"),
     ("Takeoff", "#34b87e"),
+    ("RejectedTakeoff", "#c97a55"),
     ("InitialClimb", "#3cbab2"),
     ("EnRoute", "#5294e4"),
     ("Approach", "#9c79e8"),

@@ -7,7 +7,7 @@ import { tickStep, useElementWidth, useHover, type TimeBus, type TimeRange } fro
 import type { Debrief, FlightEvent, PhaseSpan, Touchdown } from "../../types";
 import { PhasesPanel } from "./PhasesPanel";
 
-const CODES: Record<string, string> = { Standing: "STD", Taxi: "TXI", Takeoff: "TOF", InitialClimb: "ICL", EnRoute: "ENR", Approach: "APR", Landing: "LDG", GoAround: "GA" };
+const CODES: Record<string, string> = { Standing: "STD", Taxi: "TXI", Takeoff: "TOF", RejectedTakeoff: "RTO", InitialClimb: "ICL", EnRoute: "ENR", Approach: "APR", Landing: "LDG", GoAround: "GA" };
 
 interface Props {
   phases: PhaseSpan[];

@@ -8,6 +8,7 @@ const PHASES: Record<string, [light: string, dark: string]> = {
   Standing: ["#7a8396", "#5d6679"],
   Taxi: ["#8c7b4a", "#9a8b5e"],
   Takeoff: ["#1d8f5c", "#34b87e"],
+  RejectedTakeoff: ["#9b4d2f", "#c97a55"],
   InitialClimb: ["#13827d", "#3cbab2"],
   EnRoute: ["#2f6fc0", "#5294e4"],
   Approach: ["#7650c8", "#9c79e8"],
