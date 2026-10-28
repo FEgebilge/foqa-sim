@@ -14,6 +14,13 @@ pub(crate) const RA_BIAS_MAX_GS_KT: f64 = 30.0;
 /// not the end of a leg. (Landing grading uses a separate, longer limit on
 /// the airborne hop between two touchdowns.)
 pub(crate) const BOUNCE_MAX_US: i64 = 3_000_000;
+/// A hop off the ground shorter than this that rises less than
+/// `HOP_MIN_FT` of radio height is a wheel lifting for a moment (a bump,
+/// gear rebound, a stationary aircraft's flickering state): it stayed on
+/// the ground, so the hop is no liftoff and its end no touchdown. Legs and
+/// touchdowns share this one definition (`hops`).
+const HOP_MIN_US: i64 = 1_000_000;
+const HOP_MIN_FT: f64 = 3.0;
 
 /// One airborne period, bounces included.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -89,7 +96,7 @@ impl Track {
             .map(|&t| flight.at("air_ground", t).map(|v| v >= 0.5))
             .collect();
         let mut state = known.iter().flatten().next().copied()?;
-        let on_ground: Vec<_> = known
+        let mut on_ground: Vec<_> = known
             .into_iter()
             .map(|g| {
                 state = g.unwrap_or(state);
@@ -102,6 +109,11 @@ impl Track {
         let pitch_deg = sample("pitch");
         let roll_deg = sample("roll");
         let ra_ft = calibrate_ra(sample("alt.radio"), &on_ground, &gs_kt);
+        for hop in hops(&t, &ra_ft, &ground_edges(flight)) {
+            let from = t.partition_point(|&x| x < hop.start);
+            let to = t.partition_point(|&x| x < hop.end);
+            on_ground[from..to].fill(true);
+        }
         let vs_fpm = vs::inertial(
             &alt_ft,
             &nz_g,
@@ -145,6 +157,41 @@ impl Track {
     pub fn index_at(&self, t: SimTime) -> usize {
         self.t.partition_point(|&x| x <= t).saturating_sub(1)
     }
+}
+
+/// Air/ground transitions of the valid samples, as (time, true for a
+/// touchdown); a failed sample is not a state change.
+pub(crate) fn ground_edges(flight: &Flight) -> Vec<(SimTime, bool)> {
+    let valid: Vec<_> = flight
+        .series("air_ground")
+        .iter()
+        .filter(|s| s.is_valid())
+        .collect();
+    valid
+        .windows(2)
+        .filter(|w| (w[0].value >= 0.5) != (w[1].value >= 0.5))
+        .map(|w| (w[1].t, w[1].value >= 0.5))
+        .collect()
+}
+
+/// Liftoff to touchdown spans of `edges` that are no real hop: off the
+/// ground under `HOP_MIN_US` and never `HOP_MIN_FT` up on the radio height
+/// `ra_ft` at times `t`.
+pub(crate) fn hops(t: &[SimTime], ra_ft: &[f64], edges: &[(SimTime, bool)]) -> Vec<Range<SimTime>> {
+    let flown = |off: SimTime, on: SimTime| {
+        let (from, to) = (
+            t.partition_point(|&x| x < off),
+            t.partition_point(|&x| x <= on),
+        );
+        on.us_since(off) >= HOP_MIN_US || ra_ft[from..to].iter().any(|&h| h >= HOP_MIN_FT)
+    };
+    edges
+        .windows(2)
+        .filter_map(|w| match (w[0], w[1]) {
+            ((off, false), (on, true)) if !flown(off, on) => Some(off..on),
+            _ => None,
+        })
+        .collect()
 }
 
 fn legs(on_ground: &[bool], alt_ft: &[f64]) -> Vec<Leg> {
@@ -236,6 +283,25 @@ mod tests {
         let at = |s: f64| track.on_ground[track.index_at(SimTime::from_secs_f64(s))];
         assert!(at(0.0) && at(2.0));
         assert!(!at(3.5));
+    }
+
+    #[test]
+    fn a_wheel_lifting_on_the_rollout_is_no_leg() {
+        // 4 Hz: airborne to 10 s, then rolling with 0.5 s off the ground at
+        // 15 s and no radio height: one leg, on the ground throughout the hop.
+        let rows: Vec<_> = (0..=80)
+            .map(|k| f64::from(k) * 0.25)
+            .map(|t| {
+                ok(
+                    "air_ground",
+                    t,
+                    f64::from(u8::from(t >= 10.0 && !(15.0..15.5).contains(&t))),
+                )
+            })
+            .collect();
+        let track = Track::new(&flight(&rows)).unwrap();
+        assert_eq!(track.legs.len(), 1);
+        assert!(track.on_ground[track.index_at(SimTime::from_secs_f64(15.25))]);
     }
 
     #[test]

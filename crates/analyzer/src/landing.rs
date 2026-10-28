@@ -4,6 +4,7 @@ use fdm_core::geo::distance_m;
 use fdm_core::{Airport, SimTime};
 
 use crate::runway::{RunwayFix, ground_track_deg, locate};
+use crate::track::{ground_edges, hops};
 use crate::{Flight, Track};
 
 /// Airborne hop between two touchdowns up to which the second makes the
@@ -13,12 +14,6 @@ pub(crate) const BOUNCE_AIRBORNE_MAX_US: i64 = 5_000_000;
 /// A flight loaded in the air that is on the ground within this long was
 /// placed there by the sim (spawn, slew), not landed.
 const SETTLE_MAX_US: i64 = 5_000_000;
-/// A hop off the ground shorter than this that rises less than
-/// `HOP_MIN_FT` of radio height is a wheel lifting for a moment (a bump,
-/// gear rebound, a stationary aircraft's flickering state): it stayed on
-/// the ground, so the hop is no liftoff and its end no touchdown.
-const HOP_MIN_US: i64 = 1_000_000;
-const HOP_MIN_FT: f64 = 3.0;
 /// Window for the touchdown load: just before contact to gear compression.
 const PEAK_G_BEFORE_US: i64 = 500_000;
 const PEAK_G_AFTER_US: i64 = 1_500_000;
@@ -76,20 +71,13 @@ pub fn touchdowns(flight: &Flight, track: &Track) -> Vec<Touchdown> {
 
 /// Edge pass: states alternate, so every touchdown's neighbours are liftoffs.
 fn contacts(flight: &Flight, track: &Track) -> Vec<Contact> {
-    let valid: Vec<_> = flight
-        .series("air_ground")
-        .iter()
-        .filter(|s| s.is_valid())
-        .collect();
-    // (time, true for touchdown)
-    let edges: Vec<(SimTime, bool)> = valid
-        .windows(2)
-        .filter(|w| (w[0].value >= 0.5) != (w[1].value >= 0.5))
-        .map(|w| (w[1].t, w[1].value >= 0.5))
-        .collect();
-    let settled = matches!((valid.first(), edges.first()), (Some(s), Some(&(t, true)))
+    let mut edges = ground_edges(flight);
+    let first = flight.series("air_ground").iter().find(|s| s.is_valid());
+    let settled = matches!((first, edges.first()), (Some(s), Some(&(t, true)))
         if t.us_since(s.t) < SETTLE_MAX_US);
-    let edges = without_hops(track, &edges[usize::from(settled)..]);
+    let hops = hops(&track.t, &track.ra_ft, &edges);
+    edges.retain(|&(t, _)| !hops.iter().any(|h| h.start == t || h.end == t));
+    let edges = &edges[usize::from(settled)..];
     let mut out = Vec::new();
     let (mut prev, mut liftoff): (Option<SimTime>, Option<SimTime>) = (None, None);
     for (i, &(t, is_touchdown)) in edges.iter().enumerate() {
@@ -116,30 +104,6 @@ fn contacts(flight: &Flight, track: &Track) -> Vec<Contact> {
         prev = Some(t);
     }
     out
-}
-
-/// `edges` less each liftoff and touchdown pair that is no real hop.
-fn without_hops(track: &Track, edges: &[(SimTime, bool)]) -> Vec<(SimTime, bool)> {
-    let flown = |off: SimTime, on: SimTime| {
-        let (from, to) = (
-            track.t.partition_point(|&t| t < off),
-            track.t.partition_point(|&t| t <= on),
-        );
-        on.us_since(off) >= HOP_MIN_US || track.ra_ft[from..to].iter().any(|&h| h >= HOP_MIN_FT)
-    };
-    let mut kept = Vec::with_capacity(edges.len());
-    let mut i = 0;
-    while i < edges.len() {
-        if let ((off, false), Some(&(on, true))) = (edges[i], edges.get(i + 1))
-            && !flown(off, on)
-        {
-            i += 2;
-            continue;
-        }
-        kept.push(edges[i]);
-        i += 1;
-    }
-    kept
 }
 
 /// The values that grade one touchdown.
