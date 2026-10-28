@@ -521,6 +521,22 @@ fn speed_limits_of_the_type_profile_drive_their_rules() {
     );
 }
 
+/// The gear retracted and put back down between two of its 4 s samples:
+/// no sample saw it in transit, so nothing says it moved above VLO.
+#[test]
+fn gear_unseen_in_transit_is_not_an_operating_overspeed() {
+    let events = [identity("TEST")];
+    let (flight, track) = fly_to(&events, AIRLINER_LB, TD_S + ROLLOUT_S, |t| Pt {
+        gear: if (30.0..33.0).contains(&t) { 0.0 } else { 100.0 },
+        ..landing(t, TD_S, 1.2)
+    });
+    let at = |s: f64| flight.at("gear.extended", flight.span().unwrap().0.add_us((s * 1e6) as i64));
+    assert!((29..34).all(|s| at(f64::from(s)).is_some_and(|g| g == 0.0 || g == 100.0)));
+    let profiles = ProfileSet::load([("TEST", LIMITS_PROFILE)]).unwrap();
+    let events = pairs(graded(&profiles, CORE, &flight, &track));
+    assert!(!events.iter().any(|(r, _)| r == "gear-operating-overspeed"), "{events:?}");
+}
+
 /// 17 kt square across runway 20 is 7 kt over the demonstrated crosswind
 /// (Medium); 12 kt straight behind it is 7 kt over the certified tailwind
 /// limit (High, more than 5 kt).

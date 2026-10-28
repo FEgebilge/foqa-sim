@@ -552,8 +552,11 @@ title: Flap overspeed
 domain: energy
 description: >
   IAS above the VFE for the flap angle, which comes from the aircraft's
-  type profile (profiles/<ICAO>.yaml, manufacturer's airspeed limitations). Silent without a profile. Levels above VFE are a FOQA-Sim
-  estimate.
+  type profile (profiles/<ICAO>.yaml, manufacturer's airspeed limitations).
+  The flap angle is recorded every 2 s and interpolated between samples;
+  the 2 s sustain spans at least one of them, so no event rests on the
+  interpolation alone. Silent without a profile. Levels above VFE are a
+  FOQA-Sim estimate.
 why_it_matters: >
   Exceeding VFE stresses the flap structure and its attachments beyond what
   they were certified for; it can damage the flaps and requires a
@@ -674,14 +677,15 @@ sustain: 2 s
 above: { low: 0 kt, medium: 5 kt, high: 10 kt }
 ---
 rule: gear-operating-overspeed
-version: 1
+version: 2
 title: Gear operated above its speed limit
 domain: energy
 description: >
   IAS above VLO while the landing gear is in transit, from the aircraft's
   type profile (AFM limitations; the lower of the extension and retraction
-  limits). Silent without a profile value. Levels above VLO are a FOQA-Sim
-  estimate.
+  limits). The gear position is recorded every 4 s and read as its last
+  sample, so a transit counts only where a sample saw it. Silent without a
+  profile value. Levels above VLO are a FOQA-Sim estimate.
 why_it_matters: >
   The gear doors are open while the gear moves; above VLO the airloads can
   damage the doors and the actuating mechanism.

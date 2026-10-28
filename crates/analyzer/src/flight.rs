@@ -13,6 +13,14 @@ const WRAPPING: [(&str, f64, f64); 4] = [
     ("pos.lon", -180.0, 360.0),
 ];
 
+/// Positions that stand for an FDR discrete, read as their last sample like
+/// one: `gear.extended` is the gear position of 14 CFR 121.344 Appendix M
+/// item 36 (up, in transit, down and locked), sampled every 4 s. A line
+/// between two samples would invent a transit the recorder never saw (0 to
+/// 100 % across 4 s) and give short-sustain rules (gear operated above VLO,
+/// 1 s) a 4 s ramp to fire on.
+const STEPPED: [&str; 1] = ["gear.extended"];
+
 /// Recordings made before the wiring scaled `GEAR TOTAL PCT EXTENDED` (a
 /// 0-1 fraction in MSFS 2024, docs/format.md) hold `gear.extended` as 0-1
 /// and lack the `GearScaledV1` marker. Of those, a series that never passes
@@ -138,7 +146,7 @@ impl Flight {
     }
 
     /// Value at `t`: interpolated between valid neighbours for continuous
-    /// parameters, the last value for discrete ones. `None` outside the
+    /// parameters, the last value for discrete and `STEPPED` ones. `None` outside the
     /// recording, across invalid (non-`Normal`) samples, or across a gap of
     /// more than two missed samples.
     pub fn at(&self, name: &str, t: SimTime) -> Option<f64> {
@@ -164,7 +172,7 @@ impl Flight {
         if prev.t == t {
             return Some(prev.value);
         }
-        if matches!(def.unit, Unit::Discrete | Unit::Index) {
+        if matches!(def.unit, Unit::Discrete | Unit::Index) || STEPPED.contains(&def.name) {
             return (t.us_since(prev.t) <= max_gap).then_some(prev.value);
         }
         let next = s
@@ -305,6 +313,13 @@ pub(crate) mod tests {
             .into();
         assert_eq!(f.aircraft(), Some(&id("C172SP Classic")));
         assert_eq!(f.aircraft().unwrap().icao_type().as_deref(), Some("C172"));
+    }
+
+    #[test]
+    fn gear_position_holds_its_last_sample() {
+        let f = flight(&[ok("gear.extended", 0.0, 0.0), ok("gear.extended", 4.0, 100.0)]);
+        let at = |s| f.at("gear.extended", SimTime::from_secs_f64(s));
+        assert_eq!((at(2.0), at(3.9), at(4.0)), (Some(0.0), Some(0.0), Some(100.0)));
     }
 
     #[test]
