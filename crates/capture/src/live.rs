@@ -692,7 +692,10 @@ mod tests {
             }
             recorder.record(&item).unwrap();
         });
-        (analyzer::Flight::read(&recorder.into_inner()[..]).unwrap(), frames)
+        (
+            analyzer::Flight::read(&recorder.into_inner()[..]).unwrap(),
+            frames,
+        )
     }
 
     #[test]
@@ -716,7 +719,10 @@ mod tests {
         let graded = |f: &analyzer::Flight| {
             let tds = analyzer::touchdowns(f, &analyzer::Track::new(f).unwrap());
             let at = |name, t| f.at(name, t);
-            let pos: Vec<_> = tds.iter().map(|d| (at("pos.lat", d.t), at("pos.lon", d.t))).collect();
+            let pos: Vec<_> = tds
+                .iter()
+                .map(|d| (at("pos.lat", d.t), at("pos.lon", d.t)))
+                .collect();
             (tds, pos)
         };
         let (tds, pos) = graded(&full);
