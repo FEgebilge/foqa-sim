@@ -4,12 +4,22 @@
 type: TBM9
 name: Daher TBM 930
 class: light
-vmo: { value: 271 kt, source: &tcds "EASA TCDS EASA.A.010 Issue 22 (24 Apr 2026), https://www.easa.europa.eu/en/downloads/16508/en (TBM930 = TBM700N with MOD70-0322/0342)", note: "VMO 271 KCAS; the Daher AFM barber pole is 266 KIAS (MSFS forum, secondary): consider 266 kt if compared against recorded IAS" }
-vle: { value: 180 kt, source: *tcds, note: "VLE 180 KCAS" }
-vlo: { value: 151 kt, source: *tcds, note: "VLO extension 180, retraction 151 KCAS; lower given" }
-max_crosswind: { value: 20 kt, source: "MSFS forum user quoting the TBM 930 manual (not primary)", approximate: true, note: "forum quote of the manual, not verified against the POH" }
+airframe: { kind: airplane, engine: turboprop, engines: 1, gear: retractable }
+mlw: { value: 7024 lb, source: "Daher TBM 930 Pilot Information Manual DMJPIPYEE0 (EASA approved), https://letsflyvfr.com/wp-content/uploads/2024/11/TBM-930-Flight-Manual-POH.pdf, Section 2.5 Weights: maximum landing weight 7024 lbs (3186 kg)", note: "TBM 940 the same; TBM 960 7110 lb (3225 kg)" }
+aliases: [TBM 930]
+vmo: { value: 266 kt, source: &pim "Daher TBM 930 Pilot Information Manual DMJPIPYEE0 (EASA approved), https://letsflyvfr.com/wp-content/uploads/2024/11/TBM-930-Flight-Manual-POH.pdf, Section 2.8 Markings and 4.2: maximum operating speed VMO 266 KIAS", note: "the EASA TCDS EASA.A.010 Issue 22 gives 271 KCAS" }
+vle: { value: 178 kt, source: &pim2 "Daher TBM 930 Pilot Information Manual DMJPIPYEE0 (EASA approved), https://letsflyvfr.com/wp-content/uploads/2024/11/TBM-930-Flight-Manual-POH.pdf, Section 4.2: maximum airspeed with landing gear down 178 KIAS", note: "VLE 178 KIAS; the EASA TCDS EASA.A.010 Issue 22 gives 180 KCAS (EASA TCDS EASA.A.010 Issue 22 (24 Apr 2026), https://www.easa.europa.eu/en/downloads/16508/en (TBM930 = TBM700N with MOD70-0322/0342))" }
+vlo: { value: 150 kt, source: *pim2, note: "VLO extension 178 KIAS, retraction 150 KIAS (EASA TCDS: 180 / 151 KCAS); lower given" }
+max_crosswind: { value: 20 kt, source: "Daher TBM 930 Pilot Information Manual DMJPIPYEE0 (EASA approved), https://letsflyvfr.com/wp-content/uploads/2024/11/TBM-930-Flight-Manual-POH.pdf, Section 4.5 Landing procedure with strong headwind or crosswind: maximum demonstrated crosswind for landing is 20 kt", note: "demonstrated, not a limitation" }
+vso: { value: 65 kt, source: "Daher TBM 930 Pilot Information Manual DMJPIPYEE0 (EASA approved), https://letsflyvfr.com/wp-content/uploads/2024/11/TBM-930-Flight-Manual-POH.pdf, Section 2.8 Markings: white strip 65-122 KIAS", note: "lower limit is the maximum weight VSO in landing configuration" }
 flaps:
-  - { up_to: 10 deg, vfe: { value: 180 kt, source: *tcds, note: "VFE take-off configuration 180 KCAS; TO flaps 10 deg (TCDS 10+-1)" } }
-  - { vfe: { value: 120 kt, source: *tcds, note: "VFE landing configuration 120 KCAS; LDG flaps 30 deg (TCDS 30+-1.5)" } }
+  - { up_to: 10 deg, vfe: { value: 178 kt, source: *pim2, note: "VFE flaps TO 178 KIAS (TCDS 180 KCAS); TO flaps 10 deg (TCDS 10+-1)" } }
+  - { vfe: { value: 122 kt, source: *pim2, note: "VFE flaps LDG 122 KIAS (TCDS 120 KCAS); LDG flaps 30 deg (TCDS 30+-1.5)" } }
+vref:
+  source: "Daher TBM 930 Pilot Information Manual DMJPIPYEE0 (EASA approved), https://letsflyvfr.com/wp-content/uploads/2024/11/TBM-930-Flight-Manual-POH.pdf, Section 4.2 Airspeeds for Normal Operation: approach airspeed, flaps LDG, 85 KIAS at the 7024 lb (3186 kg) maximum landing weight"
+  approximate: true
+  note: "published approach speed at maximum landing weight; lighter weights scaled by sqrt(W/MLW) (Vref is 1.3 Vs and Vs goes with sqrt(W) at constant CL max)"
+  flaps:
+    - { flap: 30 deg, weights_kg: [2070, 2390, 2710, 3186], ias: [68.5 kt, 73.5 kt, 78.5 kt, 85 kt] }
 phases:
   approach_ft: { value: 1500 ft, source: "FAA AIM 4-3-3 (traffic patterns): large and turbine-powered aircraft enter the pattern at 1500 ft AGL", note: "CICTT starts the approach at 1000 ft or at the VFR pattern entry" }

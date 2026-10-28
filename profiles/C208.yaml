@@ -6,11 +6,19 @@
 type: C208
 name: Cessna 208B Grand Caravan EX
 class: light
+airframe: { kind: airplane, engine: turboprop, engines: 1, gear: fixed }
+mlw: { value: 8500 lb, source: "Cessna 208B 867 SHP G1000 POH/AFM 208BPHCUS-00, https://pdfcoffee.com/208b-ex-grand-caravan-poh-pdf-free.html, Section 2 Weight Limits: maximum landing weight 8500 pounds (3855 kg); EASA TCDS IM.A.226 Issue 15 item 12 agrees, https://www.easa.europa.eu/en/downloads/7230/en" }
 vmo: { value: 175 kt, source: "FAA TCDS A37CE / EASA TCDS IM.A.226 Issue 15 (208B): VMO 175 KIAS (175 KCAS), https://www.easa.europa.eu/en/downloads/7230/en" }
-max_crosswind: { value: 20 kt, source: "Max demonstrated crosswind Cessna 208 Caravan, Boldmethod list https://www.boldmethod.com/learn-to-fly/maneuvers/maximum-demonstrated-crosswind/" }
+max_crosswind: { value: 20 kt, source: "Cessna 208B 867 SHP G1000 POH/AFM 208BPHCUS-00, https://pdfcoffee.com/208b-ex-grand-caravan-poh-pdf-free.html, Section 4 Airspeeds for Normal Operation: maximum demonstrated crosswind velocity, takeoff or landing, 20 knots", note: "demonstrated, not a limitation" }
 flaps:
   - { up_to: 10 deg, vfe: { value: 175 kt, source: &tcds "EASA TCDS IM.A.226 Issue 15", note: "VFE to 10 deg 175 KIAS" } }
   - { up_to: 20 deg, vfe: { value: 150 kt, source: *tcds, note: "VFE 10-20 deg 150 KIAS" } }
   - { vfe: { value: 125 kt, source: *tcds, note: "VFE 20-30 deg 125 KIAS; full flaps 30" } }
 phases:
   approach_ft: { value: 1500 ft, source: "FAA AIM 4-3-3 (traffic patterns): large and turbine-powered aircraft enter the pattern at 1500 ft AGL", note: "CICTT starts the approach at 1000 ft or at the VFR pattern entry" }
+approach_speed:
+  source: "Cessna 208B 867 SHP G1000 POH/AFM 208BPHCUS-00, https://pdfcoffee.com/208b-ex-grand-caravan-poh-pdf-free.html, Section 4 Airspeeds for Normal Operation, Landing Approach"
+  note: "Normal Approach flaps UP 100-115 KIAS, flaps LAND 75-85 KIAS; short field flaps LAND 78 KIAS; at the 8500 lb maximum landing weight. FLAPS LAND is 30 deg (EASA TCDS IM.A.226 Issue 15, flap travel 30 deg)"
+  flaps:
+    - { flap: 0 deg, ias: [100 kt, 115 kt] }
+    - { flap: 30 deg, ias: [75 kt, 85 kt] }
