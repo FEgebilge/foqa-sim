@@ -317,11 +317,16 @@ impl Method {
         ];
         values.extend(scalars.map(|(id, x)| (id.to_owned(), Value::Scalar(Height::All, x))));
 
+        let (from, to) = landing_span(l, &a, full_stop);
+        let crashed = flight.crashes().any(|t| (from..=to).contains(&t));
         let outcome = Outcome {
             undershoot: fix.short_landing,
-            excursion: full_stop.then(|| excursion(&a, fix)).flatten(),
+            excursion: if crashed {
+                Some("The sim reported a crash".into())
+            } else {
+                full_stop.then(|| excursion(&a, fix)).flatten()
+            },
         };
-        let (from, to) = landing_span(l, &a, full_stop);
         let findings = l
             .events
             .iter()

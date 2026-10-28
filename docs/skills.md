@@ -33,7 +33,7 @@ A **band-limited comfort proxy**, not ISO 2631 compliance: the recorder samples 
 
 | Field | Meaning | Reference |
 |---|---|---|
-| `vertical_rms` | RMS of normal load minus its 2 s moving mean, airborne, in m/s² | ISO 2631-1 Annex C bands: < 0.315 not uncomfortable, 0.315-0.63 a little, 0.5-1 fairly, 0.8-1.6 uncomfortable, 1.25-2.5 very, > 2 extremely |
+| `vertical_rms` | RMS of normal load minus its 2 s moving mean, airborne, in m/s² | ISO 2631-1 Annex C comfort reactions, which overlap: < 0.315 not uncomfortable, 0.315-0.63 a little, 0.5-1 fairly, 0.8-1.6 uncomfortable, 1.25-2.5 very, > 2 extremely uncomfortable. The lowest band that contains the value is taken, so the cut points are 0.315 / 0.63 / 1.0 / 1.6 / 2.5 m/s² (2-2.5 reads "very"). ISO grades the Wk-weighted RMS; this one is unweighted |
 | `ride_band` | The band `vertical_rms` falls in (the lowest that contains it, upper bounds exclusive): `not uncomfortable`, `a little uncomfortable`, `fairly uncomfortable`, `uncomfortable`, `very uncomfortable`, `extremely uncomfortable` | as above |
 | `lateral_rms` | RMS of the side load the ball shows, airborne, in m/s²: the recorded body acceleration minus gravity's share along the wing, sin(bank)·cos(pitch), which a coordinated turn carries (a 25° turn would otherwise read 0.4 g) | descriptive; "ball centred" is the reference (FAA PHAK ch. 8) |
 | `sideslip_rms_deg` | RMS sideslip, airborne below 10,000 ft above the aerodrome and at 40 kt or more (so out of the take-off and landing roll, where the vane means nothing) | descriptive |

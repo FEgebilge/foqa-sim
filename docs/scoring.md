@@ -336,7 +336,7 @@ event that caused it.
 | **Continued unstable approach**: T/J by the D4S rule (≥ 1 A criterion at SL2B/SL3, i.e. L2/L3 below 500 ft, or ≥ 3 distinct A criteria at L1/L2 above 500 ft, glideslope and localizer counting as one A5) without a go-around; light: any A criterion at L2+ below 300 ft, or ≥ 3 at L1+ | 59 (Poor) | S1 ✔, S5 "go around" ✔; light adaptation est |
 | **Inspection-level contact**: `hard-landing-inspection` (peak g > the manufacturer's `hard_landing_g`, Decision 5; no separate sink cap), or tail margin < 0 (tail strike) | 39 | S10 ✔, S12 ⚠ |
 | **Undershoot**: touchdown before the threshold | 39 | `short-landing` |
-| **Runway excursion or crash**: left the runway sides on the landing roll (D4: before 30 kt or the turn-off), overran (F3), sim crash/damage flag | 0, outcome shown | S6 RE.7/RE.8 |
+| **Runway excursion or crash**: left the runway sides on the landing roll (D4: before 30 kt or the turn-off), overran (F3), or a crash the sim reported in the landing span (`Crashed` / `PlaneCrash`, sent only with crash detection on) | 0, outcome shown | S6 RE.7/RE.8 |
 
 **Go-around.**
 

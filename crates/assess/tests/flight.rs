@@ -272,3 +272,36 @@ fn a_light_aircraft_aims_short_of_the_airline_aiming_point() {
     // 41.9 ft against 150 m x tan 3 deg = 25.8 ft less 6 ft eye to wheel.
     assert!((value("B1") - (41.9 - 19.8)).abs() < 1.0, "{}", value("B1"));
 }
+
+/// A crash the sim reports during the landing caps it as an excursion.
+#[test]
+fn a_crash_on_the_landing_caps_the_score() {
+    let events = [
+        (0.0, identity("TEST")),
+        (0.0, SimEvent::Airport(runway_behind_touchdown(400.0))),
+        (TD_S + 1.0, SimEvent::Crashed),
+    ];
+    let journal = journal(&events, AIRLINER_LB, TD_S + ROLLOUT_S, |t| {
+        landing(t, TD_S, 1.2)
+    });
+    let flight = Flight::read(&journal[..]).unwrap();
+    let track = Track::new(&flight).unwrap();
+    let profiles = ProfileSet::load([("TEST", PROFILE)]).unwrap();
+    let (rules, selection) = (load(CORE).unwrap(), profiles.select(&flight));
+    let tds = touchdowns(&flight, &track);
+    let Assessment::Scored { score, .. } = Method::landing_2().unwrap().assess(&Landing {
+        flight: &flight,
+        track: &track,
+        selection: &selection,
+        touchdowns: &tds,
+        index: 0,
+        events: &evaluate(&rules, &selection, &flight, &track),
+        rules: &rules,
+        ranked: false,
+        gate_ft: None,
+        target_m: None,
+    }) else {
+        panic!("not scored")
+    };
+    assert_eq!(score.score, 0.0, "{:?}", score.caps);
+}

@@ -132,5 +132,6 @@ Rules:
 
 `skills` (`docs/skills.md`) holds `{ap_share, ap_off_ft_median, autolands, vertical_rms_median,
 descent_level_s_median, fuel_kg_h: [{icao, median}]}` over the matching flights: the flights'
-autopilot shares averaged, the others medians (an autoland counts as 0 ft), fuel per type by ICAO.
+autopilot shares averaged, the others medians (`ap_off_ft_median` over hand-flown landings only: an
+autoland has no disconnect and counts in `autolands`), fuel per type by ICAO.
 A flight without a measure is left out of it; with none the value is `null`.

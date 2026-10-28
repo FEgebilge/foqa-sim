@@ -179,6 +179,14 @@ impl Flight {
         out
     }
 
+    /// When the sim reported a crash: its `Crashed` system event or the
+    /// `PlaneCrash` flow event, sent only with crash detection on.
+    pub fn crashes(&self) -> impl Iterator<Item = SimTime> + '_ {
+        (self.events.iter())
+            .filter(|(_, e)| matches!(e, SimEvent::Crashed | SimEvent::Flow(FlowEvent::PlaneCrash)))
+            .map(|&(t, _)| t)
+    }
+
     pub fn lfl_version(&self) -> u16 {
         self.lfl.version
     }
