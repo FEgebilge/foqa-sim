@@ -28,13 +28,17 @@ export function useUpdater(recording: boolean) {
   const [dismissed, setDismissed] = useState(false);
   const [error, setError] = useState<string>();
   const busy = useRef(false);
+  const stateRef = useRef(state);
+  useEffect(() => { stateRef.current = state; }, [state]);
   const recordingNow = useRef(recording);
   useEffect(() => { recordingNow.current = recording; }, [recording]);
 
   const check = useCallback(async (manual: boolean) => {
     if (busy.current) return;
     busy.current = true;
-    setState({ phase: "checking" });
+    // A found update stays offered while the next check runs and if it fails.
+    const found = stateRef.current.phase === "available" ? stateRef.current : null;
+    if (!found) setState({ phase: "checking" });
     setError(undefined);
     try {
       const update = await api.checkUpdate();
@@ -44,7 +48,7 @@ export function useUpdater(recording: boolean) {
       setState(update ? { phase: "available", update } : { phase: "idle" });
       if (manual && !update) notify({ title: "FOQA-Sim is up to date" });
     } catch (e) {
-      setState({ phase: "idle" });
+      setState(found ?? { phase: "idle" });
       if (manual) notify({ title: "Could not check for updates", body: message(e), tone: "error" });
     } finally {
       busy.current = false;
