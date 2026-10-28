@@ -202,8 +202,8 @@ impl Approach {
             threshold: fix.and_then(|f| crossing(flight, track, f, td.t)),
             float_s: float_s(flight, track, td.t),
             crab_deg: fix.and_then(|f| {
-                let magnetic = flight.at("heading.mag", td.t)?;
-                Some(wrap180(magnetic - f.magvar_deg - f.heading_deg))
+                let magnetic = flight.at("heading.mag", td.t);
+                crab_deg(f, flight.try_at("heading.true", td.t), magnetic)
             }),
             drift_kt: fix.zip(gs).and_then(|(f, gs)| {
                 let a = position(flight, td.t.add_us(-DRIFT_SPAN_US))?;
@@ -239,6 +239,14 @@ impl Approach {
             window,
         }
     }
+}
+
+/// The true heading less the runway's: `heading.true` where recorded, else
+/// the sim's magnetic heading less the scenery's variation at the airport,
+/// which the sim's own magnetic model need not match.
+fn crab_deg(fix: &RunwayFix, true_deg: Option<f64>, magnetic_deg: Option<f64>) -> Option<f64> {
+    let heading = true_deg.or(magnetic_deg.map(|m| m - fix.magvar_deg))?;
+    Some(wrap180(heading - fix.heading_deg))
 }
 
 fn height(track: &Track, i: usize) -> f64 {
@@ -483,6 +491,32 @@ mod tests {
         (0..n as i64)
             .map(|s| SimTime::from_micros(s * 1_000_000))
             .collect()
+    }
+
+    #[test]
+    fn crab_is_taken_from_the_true_heading_where_recorded() {
+        // Runway 090 true; the scenery puts the variation at 5 deg E (MSFS:
+        // -5), the sim's magnetic heading 82 deg says 8 deg E.
+        let fix = RunwayFix {
+            icao: "TEST".into(),
+            runway: "09".into(),
+            heading_deg: 90.0,
+            along_m: 300.0,
+            cross_m: 0.0,
+            lda_m: 2000.0,
+            tdz_m: 600.0,
+            aiming_point_m: 300.0,
+            width_m: 45.0,
+            threshold: (0.0, 0.0),
+            magvar_deg: -5.0,
+            in_tdz: true,
+            long_landing: false,
+            short_landing: false,
+        };
+        assert_eq!(crab_deg(&fix, Some(92.0), Some(82.0)), Some(2.0));
+        assert_eq!(crab_deg(&fix, None, Some(82.0)), Some(-3.0));
+        assert_eq!(crab_deg(&fix, Some(358.0), None), Some(-92.0));
+        assert_eq!(crab_deg(&fix, None, None), None);
     }
 
     #[test]

@@ -529,8 +529,9 @@ results.
 2. **Analyzer derived values** (`crates/analyzer`, new `approach.rs`
    beside `landing.rs`): threshold crossing (time, height, IAS, GS), float
    time 50 ft → TD, crab and drift at contact (true heading from
-   `heading.mag` less the airport's recorded magnetic variation, so no
-   LFL change),
+   `heading.true`; in a recording without it, `heading.mag` less the
+   airport's recorded magnetic variation, which the sim's own magnetic
+   model need not match),
    window series with sustained-worst per criterion and the stable height,
    config-change events, deceleration delay, required deceleration, GS ≤
    20 kt position. Tests: synthetic tracks from `crates/testkit` for each

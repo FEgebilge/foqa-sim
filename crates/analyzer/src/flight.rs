@@ -8,8 +8,9 @@ use recorder::{FlightRecords, FlowEvent, Record, SimEvent, read_records};
 /// Parameters whose value wraps around, as (name, lowest value, period).
 /// Interpolating across the wrap-around must take the short way round
 /// (359 deg to 1 deg passes through 0, not 180).
-const WRAPPING: [(&str, f64, f64); 4] = [
+const WRAPPING: [(&str, f64, f64); 5] = [
     ("heading.mag", 0.0, 360.0),
+    ("heading.true", 0.0, 360.0),
     ("sel.heading", 0.0, 360.0),
     ("wind.dir", 0.0, 360.0),
     ("pos.lon", -180.0, 360.0),
@@ -223,6 +224,12 @@ impl Flight {
         self.value(self.def(name).id, t)
     }
 
+    /// `at` for a parameter this build's LFL may lack (a row appended
+    /// later): `None` then, as for a recording made before the row.
+    pub fn try_at(&self, name: &str, t: SimTime) -> Option<f64> {
+        self.value(self.lfl.by_name(name)?.id, t)
+    }
+
     /// `at` over `times`, `NaN` where a parameter has no valid value.
     pub fn resample(&self, name: &str, times: &[SimTime]) -> Vec<f64> {
         let id = self.def(name).id;
@@ -407,5 +414,14 @@ pub(crate) mod tests {
         assert!((at("pos.lon", 179.0, -179.0, 0.75) + 179.5).abs() < 1e-9);
         // Ordinary parameters are untouched.
         assert!((at("pitch", 359.0, 1.0, 0.5) - 180.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_parameter_without_samples_or_row_is_unknown() {
+        let f = flight(&[ok("pitch", 0.0, 1.0), ok("pitch", 1.0, 1.0)]);
+        let t = SimTime::from_secs_f64(1.0);
+        assert_eq!(f.try_at("pitch", t), Some(1.0));
+        assert_eq!(f.try_at("heading.true", t), None);
+        assert_eq!(f.try_at("no.such", t), None);
     }
 }
