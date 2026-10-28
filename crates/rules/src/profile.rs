@@ -1852,6 +1852,7 @@ unreliable: [ap.engaged, sel.speed]
                 ("A320", Aircraft::Transport),
                 ("A333", Aircraft::Transport),
                 ("AT76", Aircraft::Transport),
+                ("B350", Aircraft::Transport),
                 ("B38M", Aircraft::Transport),
                 ("B738", Aircraft::Transport),
                 ("B748", Aircraft::Transport),

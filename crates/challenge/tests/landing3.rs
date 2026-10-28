@@ -50,8 +50,8 @@ fn only_types_with_a_vref_source_are_ranked() {
     let parse = |from: &str, to: &str| Challenge::parse(&CHALLENGE.replace(from, to));
     assert!(parse("", "").is_ok());
     assert_eq!(
-        parse(r#""C172""#, r#""C172", "SR22""#).unwrap_err(),
-        "no Vref source for SR22: landing-3 cannot rank it"
+        parse(r#""C172""#, r#""C172", "SF34""#).unwrap_err(),
+        "no Vref source for SF34: landing-3 cannot rank it"
     );
     assert_eq!(
         parse(r#""types": ["C172"]"#, r#""classes": ["light"]"#).unwrap_err(),
