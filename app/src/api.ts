@@ -7,6 +7,9 @@ import type { AppUpdate, AttemptRecord, AttemptView, Briefing, ChallengeEntry, D
 
 export type Unlisten = () => void;
 
+/** What the pilot wrote about a flight: a title, free notes and tags; saved beside the recording. */
+export interface FlightMeta { title?: string; notes?: string; tags: string[] }
+
 /** The flight exports of `fdm export` (docs/exports.md). */
 export type ExportFormat = "csv" | "kml" | "gpx" | "parquet";
 
@@ -48,6 +51,10 @@ export interface Api extends ChallengesApi, SitesApi {
   debrief(id: string): Promise<Debrief>;
   /** One pilot's flights over time (docs/trends.md); an absent filter field means all. */
   trends(filter: TrendFilter): Promise<Trends>;
+  /** The pilot's title, notes and tags of a flight; empty for a flight never written about. */
+  flightMetaGet(id: string): Promise<FlightMeta>;
+  /** Replaces the flight's title, notes and tags. */
+  flightMetaSet(id: string, meta: FlightMeta): Promise<void>;
   /** Removes the flight's recording files for good; the flight being recorded is refused. */
   deleteFlight(id: string): Promise<void>;
   recorderStatus(): Promise<RecorderStatus>;
@@ -81,6 +88,8 @@ const tauriApi: Api = {
   debrief: (id) => invoke<Debrief>("debrief", { id }),
   trends: (filter) => invoke<Trends>("trends", { filter }),
   deleteFlight: (id) => invoke<void>("delete_flight", { id }),
+  flightMetaGet: (id) => invoke<FlightMeta>("flight_meta_get", { id }),
+  flightMetaSet: (id, meta) => invoke<void>("flight_meta_set", { id, meta }),
   recorderStatus: () => invoke<RecorderStatus>("recorder_status"),
   openFlightsFolder: () => invoke<void>("open_flights_folder"),
   storageUsage: () => invoke<StorageUsage>("storage_usage"),

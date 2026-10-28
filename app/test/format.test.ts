@@ -13,7 +13,7 @@ test("a Mach number keeps three decimals, as the rules show it", () => {
 test("the assessment line has single spaces and no trailing one", () => {
   assert.equal(assessmentText(scored), "Fair · 77.4 of 100");
   assert.equal(assessmentText({ ...scored, confidence: "partial" }), "Fair · 77.4 of 100 (partial data)");
-  assert.equal(assessmentText({ ...scored, score: undefined, points: 1, findings: 1 }), "Fair · 1 pt from 1 finding (no scored landing)");
+  assert.equal(assessmentText({ ...scored, score: undefined, points: 1, findings: 1 }), "Fair · 1 pt from 1 event (no scored landing)");
 });
 
 // Units and time: the formatters read the preferences, so each test sets them and restores the defaults after.

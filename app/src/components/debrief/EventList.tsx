@@ -1,9 +1,13 @@
 import { useEffect, useRef } from "react";
-import { Info, ShieldCheck } from "lucide-react";
+import { Flag, Info, ShieldCheck } from "lucide-react";
 import { EmptyState } from "@ui/components/empty-state/empty-state";
 import { clock, duration, LEVEL_LABEL, LEVEL_MEANING, LEVELS, phaseName, why } from "../../lib/format";
 import { levelVar } from "../../lib/palette";
 import type { FlightEvent, PhaseSpan } from "../../types";
+import { Term } from "../Term";
+
+/** The rule of a moment the pilot marked from the in-sim panel; its note is the description. */
+export const PILOT_REPORT = "pilot-report";
 
 interface Props {
   events: FlightEvent[];
@@ -59,18 +63,23 @@ export function EventList({ events, phases, selected, onSelect }: Props) {
                 const active = index === selected;
                 const phase = phaseAt(phases, event.start_s);
                 const span = event.end_s - event.start_s;
+                const mark = event.rule === PILOT_REPORT;
                 return (
-                  <li key={index} data-index={index} className="rounded-[var(--radius-control)] border bg-surface transition-colors hover:border-line-strong"
+                  // The title, time and value are the button (its accessible name); the rest of the card is text that a click also selects.
+                  <li key={index} data-index={index} onClick={() => { if (!active) onSelect(index); }} className="cursor-pointer rounded-[var(--radius-control)] border bg-surface transition-colors hover:border-line-strong"
                     style={{ borderColor: active ? levelVar(level) : "var(--border)", boxShadow: `inset 3px 0 0 ${levelVar(level)}${active ? `, 0 0 0 1px ${levelVar(level)}` : ""}` }}>
-                    <button type="button" aria-pressed={active} onClick={() => onSelect(index)} className="block w-full cursor-pointer p-3 pb-2 text-left">
+                    <button type="button" aria-pressed={active} onClick={(e) => { e.stopPropagation(); onSelect(index); }} className="block w-full cursor-pointer rounded-[var(--radius-control)] px-3 pt-3 text-left">
                       <span className="flex items-baseline justify-between gap-2">
-                        <span className="font-medium">{event.title}</span>
+                        <span className="flex items-center gap-1.5 font-medium">{mark ? <><Flag size={13} className="text-accent" aria-hidden="true" />Your mark</> : event.title}</span>
                         <span className="readout shrink-0 text-xs text-fg-2">T+{clock(event.start_s)}</span>
                       </span>
+                      {mark && event.description ? <span className="mt-1 block text-sm italic text-fg-2">“{event.description}”</span> : null}
                       {event.detail ? <span className="readout mt-1 block text-sm font-semibold" style={{ color: levelVar(level) }}>{event.detail}</span> : null}
+                    </button>
+                    <div className="px-3 pb-2">
                       <span className="mt-1 flex flex-wrap gap-x-3 text-[11px] text-fg-3">
                         {phase ? <span>{phaseName(phase)}</span> : null}
-                        {span > 0 ? <span className="readout">lasted {duration(span)}</span> : null}
+                        {span > 0 ? <span className="readout"><Term id="sustain">lasted</Term> {duration(span)}</span> : null}
                       </span>
                       {event.why_it_matters ? <span className={`mt-1.5 block text-xs leading-relaxed text-fg-2 ${active ? "" : "line-clamp-2"}`}>{event.why_it_matters}</span> : null}
                       {active && event.advice ? (
@@ -78,13 +87,13 @@ export function EventList({ events, phases, selected, onSelect }: Props) {
                           <span className="eyebrow mr-1.5">What to do</span>{event.advice}
                         </span>
                       ) : null}
-                    </button>
-                    <details className="border-t border-line-subtle px-3 py-1.5 text-[11px] text-fg-3">
+                    </div>
+                    {mark ? null : <details className="cursor-auto border-t border-line-subtle px-3 py-1.5 text-[11px] text-fg-3" onClick={(e) => e.stopPropagation()}>
                       <summary className="cursor-pointer hover:text-fg">Details</summary>
                       <p className="mt-1 flex flex-wrap gap-x-1.5"><span>Measure</span><code className="readout text-fg-2">{event.measure}</code><span className="readout text-fg-2">{why(event).comparison}</span></p>
                       <p className="mt-1 leading-relaxed text-fg-2">{event.description}</p>
                       <p className="readout mt-1">{event.rule}@{event.version}</p>
-                    </details>
+                    </details>}
                   </li>
                 );
               })}
