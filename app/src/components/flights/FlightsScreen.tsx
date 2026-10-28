@@ -89,8 +89,8 @@ export function FlightsScreen({ recorder }: { recorder: RecorderState | null }) 
           icon={<PlaneLanding size={20} />}
           title="No flights yet"
           description={waiting
-            ? "Start MSFS 2024 and fly. FOQA-Sim records in the background and lists the flight here, analysed, when it closes."
-            : "Load a flight in MSFS 2024. It is recorded automatically and appears here, analysed, when it closes."}
+            ? "Start MSFS and fly. FOQA-Sim records in the background and lists the flight here, analysed, when it closes."
+            : "Load a flight in MSFS. It is recorded automatically and appears here, analysed, when it closes."}
           action={<Button variant="secondary" size="sm" onClick={openFolder}><FolderOpen size={15} aria-hidden="true" />Open flights folder</Button>}
         />
       </div>

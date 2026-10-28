@@ -16,7 +16,7 @@ const CHECK_STATE: Record<CheckState, { label: string; color: string; Icon: type
 };
 
 const GROUPS: { title: string; hint: string; has: (id: string) => boolean }[] = [
-  { title: "Simulator", hint: "Where MSFS 2024 is and where it loads community packages from.", has: (id) => ["sim", "community", "sim_running"].includes(id) },
+  { title: "Simulator", hint: "Where MSFS is and where it loads community packages from.", has: (id) => ["sim", "community", "sim_running"].includes(id) },
   { title: "In-sim packages", hint: "The toolbar panel and the EFB app, checked file by file against the copies this app ships.", has: (id) => id.startsWith("package:") },
   { title: "FOQA-Sim app", hint: "Where flights are saved and whether the recorder can reach the sim.", has: (id) => id === "flights" || id === "recorder" },
 ];

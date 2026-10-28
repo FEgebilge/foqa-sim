@@ -5,8 +5,8 @@ import type { RecorderState } from "../lib/use-backend";
 import type { RecorderStatus } from "../types";
 
 const COPY: Record<RecorderStatus["state"], { label: string; hint: string; color: string }> = {
-  waiting_for_sim: { label: "Waiting for sim", hint: "MSFS 2024 is not running. Recording starts on its own when the sim connects.", color: "var(--text-muted)" },
-  connected: { label: "Connected", hint: "Connected to MSFS 2024. A flight is recorded as soon as one is loaded.", color: "var(--success)" },
+  waiting_for_sim: { label: "Waiting for sim", hint: "MSFS is not running. Recording starts on its own when the sim connects.", color: "var(--text-muted)" },
+  connected: { label: "Connected", hint: "Connected to MSFS. A flight is recorded as soon as one is loaded.", color: "var(--success)" },
   recording: { label: "Recording", hint: "This flight is being recorded. It is analysed and listed when it closes.", color: "var(--level-high)" },
   error: { label: "Recorder error", hint: "", color: "var(--danger)" },
 };
