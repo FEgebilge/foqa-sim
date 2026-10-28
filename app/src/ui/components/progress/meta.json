@@ -1,0 +1,17 @@
+{
+  "title": "Progress",
+  "description": "Show how much of a known task is complete.",
+  "category": "Feedback",
+  "kind": "component",
+  "dependencies": [
+    "lucide-react",
+    "motion"
+  ],
+  "requires": [],
+  "tags": [
+    "status",
+    "loading"
+  ],
+  "source": "arc",
+  "canvas": []
+}

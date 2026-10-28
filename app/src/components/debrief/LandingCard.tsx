@@ -3,14 +3,15 @@ import { Crosshair, Info, MapPinOff, Share2 } from "lucide-react";
 import { Button } from "@ui/components/button/button";
 import { Tooltip } from "@ui/components/tooltip/tooltip";
 import { bySeverity, eventsIn, landingWindow } from "../../lib/explain";
-import { clock, LEVEL_LABEL, levelRank, M_PER_FT, number } from "../../lib/format";
-
+import { aircraftName, clock, LEVEL_LABEL, levelRank, lengthM, lengthUnit, lengthValue, number } from "../../lib/format";
+import type { TypeMedian } from "../../lib/history";
 import { criterion, landingAt } from "../../lib/assessment";
 import { contactLabel, type Landing } from "../../lib/landings";
 import { levelVar } from "../../lib/palette";
 import { centrelineScale, distanceScale, gScale, LIGHT_PITCH, pitchScale, rollScale, sinkScale, speedScale, type Scale } from "../../lib/references";
 import type { Debrief, FlightEvent, Level, TouchdownWind } from "../../types";
 import { GradeTag, LevelBadge } from "../level";
+import { Term } from "../Term";
 import { RunwayDiagram } from "./RunwayDiagram";
 
 /** Which touchdown value each rule name reads, so the card can flag the value that raised an event. */
@@ -28,9 +29,11 @@ interface Props {
   onShow: (t: number) => void;
   /** Opens the landing card of this landing. */
   onShare?: (index: number) => void;
+  /** The pilot's median touchdown in this type on other flights, ticked on the sink and load gauges. */
+  typical?: TypeMedian | null;
 }
 
-export function LandingCard({ index, landing: { touchdown: td, bounces }, events, runwayWidth, debrief, onShow, onShare }: Props) {
+export function LandingCard({ index, landing: { touchdown: td, bounces }, events, runwayWidth, debrief, onShow, onShare, typical }: Props) {
   // A measure is flagged with the most severe event that judged it.
   const flags = new Map<string, Level>();
   for (const event of events) {
@@ -38,12 +41,13 @@ export function LandingCard({ index, landing: { touchdown: td, bounces }, events
     if (key && levelRank(event.level) > levelRank(flags.get(key))) flags.set(key, event.level);
   }
   const { flight } = debrief;
+  const type = aircraftName(flight.aircraft);
   // The rules grade the landing: its events from the start of the approach to the rollout, the worst first.
   const judged = bySeverity(eventsIn(debrief.events, landingWindow(td.t_s, debrief.phases)));
   const worst = judged[0]?.level;
   const fix = td.runway;
   const width = runwayWidth ?? (fix && debrief.airports.find((a) => a.icao === fix.icao)?.runways.find((r) => r.ends.some((e) => e.runway === fix.runway))?.width_m);
-  // The landing-2 assessment of this landing: its score and the bands the gauges shade.
+  // The landing-3 assessment of this landing: its score and the bands the gauges shade.
   const scored = landingAt(debrief, td.t_s);
   const c = (id: string) => criterion(scored, id);
   const sink = sinkScale(flight, td.sink_fpm, c("E2")), g = gScale(flight, td.peak_g, c("E1")), pitch = pitchScale(flight);
@@ -85,11 +89,11 @@ export function LandingCard({ index, landing: { touchdown: td, bounces }, events
       </div>
 
       <dl className="flex flex-col gap-3">
-        <Metric label="Sink rate" value={`${number(td.sink_fpm)} fpm`} sub={td.sim_sink_fpm !== undefined ? `sim reports ${number(td.sim_sink_fpm)}` : undefined} flag={flags.get("sink")}>
-          {sink ? <Gauge scale={sink} value={td.sink_fpm} unit="fpm" flag={flags.get("sink")} /> : null}
+        <Metric label={<Term id="sink">Sink rate</Term>} value={`${number(td.sink_fpm)} fpm`} sub={td.sim_sink_fpm !== undefined ? `sim reports ${number(td.sim_sink_fpm)}` : undefined} flag={flags.get("sink")}>
+          {sink ? <Gauge scale={sink} value={td.sink_fpm} unit="fpm" flag={flags.get("sink")} typical={typical && { at: typical.sink_fpm, of: typical, type }} /> : null}
         </Metric>
-        <Metric label="Peak load" value={`${number(td.peak_g, 2)} g`} sub="1 g = level flight" flag={flags.get("g")}>
-          {g ? <Gauge scale={g} value={td.peak_g} unit="g" digits={2} flag={flags.get("g")} /> : null}
+        <Metric label={<Term id="peak-g">Peak load</Term>} value={`${number(td.peak_g, 2)} g`} sub="1 g = level flight" flag={flags.get("g")}>
+          {g ? <Gauge scale={g} value={td.peak_g} unit="g" digits={2} flag={flags.get("g")} typical={typical && { at: typical.peak_g, of: typical, type }} /> : null}
         </Metric>
         <Metric label="Pitch" value={td.pitch_deg !== undefined ? `${number(td.pitch_deg, 1)}°` : "–"} sub="nose up" flag={flags.get("pitch")}>
           {pitch && td.pitch_deg !== undefined ? <Gauge scale={pitch} value={td.pitch_deg} unit="°" digits={1} flag={flags.get("pitch")} />
@@ -100,14 +104,14 @@ export function LandingCard({ index, landing: { touchdown: td, bounces }, events
         </Metric>
         <Metric label="Speed" value={td.ias_kt !== undefined ? `${number(td.ias_kt)} kt` : "–"} sub="indicated">
           {speed ? <Gauge scale={speed} value={td.ias_kt!} unit="kt" />
-            : <Note text={scored?.status === "scored" ? `No reference speed (Vref) for this type: touchdown speed is not graded.` : "Compare with your reference speed (Vref)."} />}
+            : <p className="text-[11px] text-fg-2">{scored?.status === "scored" ? <>No reference speed (<Term id="vref">Vref</Term>) for this type: touchdown speed is not graded.</> : <>Compare with your reference speed (<Term id="vref">Vref</Term>).</>}</p>}
         </Metric>
         {td.wind ? (
           <Metric label="Wind" value={windValue(td.wind)} sub="at touchdown">
             <Note text={windComponents(td.wind)} />
           </Metric>
         ) : null}
-        <Metric label="Bounce" value={bounces.length ? `Yes, ×${bounces.length}` : "No"} flag={flags.get("bounce")}>
+        <Metric label={<Term id="bounce">Bounce</Term>} value={bounces.length ? `Yes, ×${bounces.length}` : "No"} flag={flags.get("bounce")}>
           <p className="text-[11px] text-fg-2">{bounces.length ? "One landing: the aircraft left the ground again after the first contact. The values above are the first contact's." : "Stayed on the ground after the first contact"}</p>
           {bounces.length ? (
             <ul className="mt-1 flex flex-col gap-0.5">
@@ -124,12 +128,12 @@ export function LandingCard({ index, landing: { touchdown: td, bounces }, events
 
       {fix ? (
         <div className="flex flex-col gap-3 rounded-[var(--radius-control)] border border-line-subtle bg-bg px-3 py-2.5">
-          <Metric label="Touchdown" value={`${number(fix.along_m)} m`} sub={`${number(fix.along_m / M_PER_FT)} ft past the threshold · ${fix.zone}`} flag={flags.get("along")}>
+          <Metric label={<Term id="tdz">Touchdown</Term>} value={lengthM(fix.along_m)} sub={`${lengthM(fix.along_m, 0, true)} past the threshold · ${fix.zone}`} flag={flags.get("along")}>
             <Gauge scale={distanceScale(fix, flight, c("C1"))} value={fix.along_m} unit="m" flag={flags.get("along")} />
           </Metric>
-          <Metric label="Centreline" value={fix.cross_m === 0 ? "0 m" : `${number(Math.abs(fix.cross_m), 1)} m ${fix.cross_m > 0 ? "R" : "L"}`} sub={`${number(Math.abs(fix.cross_m) / M_PER_FT)} ft off`} flag={flags.get("cross")}>
+          <Metric label="Centreline" value={fix.cross_m === 0 ? lengthM(0) : `${lengthM(Math.abs(fix.cross_m), 1)} ${fix.cross_m > 0 ? "R" : "L"}`} sub={`${lengthM(Math.abs(fix.cross_m), 0, true)} off`} flag={flags.get("cross")}>
             {(() => { const s = centrelineScale(fix.cross_m, width, c("D1")); return s ? <Gauge scale={s} value={Math.abs(fix.cross_m)} unit="m" digits={1} flag={flags.get("cross")} /> : null; })()}
-            <Note text={width ? `Target 0 m. The runway edge is ${number(width / 2, 1)} m from the centreline (measured at the aircraft's centre, not its wheels).` : "Target 0 m."} />
+            <Note text={width ? `Target 0. The runway edge is ${lengthM(width / 2, 1)} from the centreline (measured at the aircraft's centre, not its wheels).` : "Target 0."} />
           </Metric>
           <RunwayDiagram fix={fix} widthM={width ?? 45} />
         </div>
@@ -163,7 +167,7 @@ function windComponents({ headwind_kt, crosswind_kt }: TouchdownWind) {
   return `On the runway: ${Math.abs(head)} kt ${head < 0 ? "tailwind" : "headwind"}, ${Math.abs(cross)} kt crosswind${cross > 0 ? " from the right" : cross < 0 ? " from the left" : ""}.`;
 }
 
-function Metric({ label, value, sub, flag, children }: { label: string; value: string; sub?: string; flag?: Level; children?: ReactNode }) {
+function Metric({ label, value, sub, flag, children }: { label: ReactNode; value: string; sub?: string; flag?: Level; children?: ReactNode }) {
   return (
     <div className="grid grid-cols-[6.25rem_minmax(0,1fr)] items-start gap-x-3">
       <div className="min-w-0">
@@ -200,8 +204,14 @@ const pct = (scale: Scale, v: number) => Math.min(100, Math.max(0, ((v - scale.m
  * The value as a needle in its event's colour. The score's bands shade the track in the zone colours (the one holding the
  * value brightest); published references sit on top, ranges as tinted segments and points as dashed ticks.
  */
-function Gauge({ scale, value, unit, digits = 0, flag }: { scale: Scale; value: number; unit: string; digits?: number; flag?: Level }) {
-  const fmt = (v: number) => number(v, digits);
+/** The pilot's own median in the type, as a tick on a gauge. */
+interface Typical { at: number; of: TypeMedian; type: string }
+
+function Gauge({ scale, value, unit, digits = 0, flag, typical }: { scale: Scale; value: number; unit: string; digits?: number; flag?: Level; typical?: Typical | null }) {
+  // Distances arrive in metres; the runway-distance setting picks what is printed.
+  const metric = unit === "m";
+  const fmt = (v: number) => number(metric ? lengthValue(v) : v, digits);
+  unit = metric ? lengthUnit() : unit;
   const beyond = value > scale.max ? "›" : value < scale.min ? "‹" : null;
   const bands = (scale.bands?.bands.map((band, i, all) => ({ ...band, from: Math.max(scale.min, all[i - 1]?.to ?? scale.min) })) ?? []).filter((b) => b.to > scale.min && b.from < scale.max);
   const current = bands.find((b) => value <= b.to);
@@ -219,14 +229,16 @@ function Gauge({ scale, value, unit, digits = 0, flag }: { scale: Scale; value: 
         {scale.marks.map((mark) => mark.to === undefined
           ? <span key={mark.label} className="absolute -top-1.5 h-5 w-0 border-l border-dashed border-fg-2" style={{ left: `${pct(scale, mark.at)}%` }} title={mark.label} aria-hidden="true" />
           : <span key={mark.label} className="absolute inset-y-0" style={{ left: `${pct(scale, mark.at)}%`, width: `${pct(scale, mark.to) - pct(scale, mark.at)}%`, background: "color-mix(in oklab, var(--success) 40%, transparent)" }} title={mark.label} aria-hidden="true" />)}
+        {typical ? <span className="absolute top-full mt-px -translate-x-1/2 border-x-[4px] border-b-[6px] border-x-transparent border-b-accent" style={{ left: `${pct(scale, typical.at)}%` }} aria-hidden="true" /> : null}
         <span className="absolute -top-1.5 h-5 w-[3px] -translate-x-1/2 rounded-full ring-2 ring-surface" style={{ left: `${pct(scale, value)}%`, background: flag ? levelVar(flag) : "var(--foreground)" }} aria-hidden="true" />
         {beyond ? <span className={`readout absolute -top-4 text-[11px] text-fg ${beyond === "›" ? "right-0" : "left-0"}`} aria-hidden="true">{beyond}</span> : null}
       </div>
-      <div className="readout relative h-3 text-[9.5px] text-fg-3" aria-hidden="true">
+      <div className="readout relative h-3 text-[10px] text-fg-3" aria-hidden="true">
         {edges.map((v) => <span key={v} className="absolute -translate-x-1/2" style={{ left: `${pct(scale, v)}%` }}>{fmt(v)}</span>)}
       </div>
       <p className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-[11px] text-fg-3">
         {[...(current ? [`Score band: ${current.label.toLowerCase()}`] : []), ...scale.marks.map((m) => m.label)].join(" · ")}
+        {typical ? <span className="inline-flex items-center gap-1 text-fg-2"><span className="border-x-[4px] border-b-[6px] border-x-transparent border-b-accent" aria-hidden="true" />your median {fmt(typical.at)} {unit} <span className="text-fg-3">({typical.of.landings} landings, {typical.of.flights} other {typical.type} flights)</span></span> : null}
         <Sources>
           {scale.marks.length ? <span className="block font-medium">Reference</span> : null}
           {scale.marks.map((m) => <span key={m.label} className="block"><b>{m.to === undefined ? `┊ ${fmt(m.at)}` : `${fmt(m.at)}–${fmt(m.to)}`} {unit}</b> {m.label}</span>)}

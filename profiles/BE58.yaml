@@ -1,13 +1,24 @@
 # Beechcraft Baron G58 type profile. Schema: docs/rules.md.
 #
-# No vlo: not in the TCDS, POH not reachable. No tail_contact,
+# No tail_contact,
 # hard_landing_g, max_tailwind: not published or reachable.
 type: BE58
 name: Beechcraft Baron G58
 class: light
+airframe: { kind: airplane, engine: piston, engines: 2, gear: retractable }
+mlw: { value: 5400 lb, source: "Beechcraft G58 Baron POH and FAA Approved AFM P/N 58-590000-67A8 (pdfcoffee copy of the G58 POH), https://pdfcoffee.com/g58-poh-pdf-free.html, Weight Limits: maximum landing 5400 lbs" }
+aliases: [Baron G58]
 vmo: { value: 223 kt, source: &tcds "EASA TCDS EASA.IM.A.280 Issue 04 (G58), https://www.easa.europa.eu/en/downloads/7202/en", note: "VNE 223 KCAS; Vno 195, Va 156 KCAS" }
 vle: { value: 152 kt, source: *tcds, note: "landing gear extended 152 KCAS" }
-max_crosswind: { value: 17 kt, source: "Derived from the G36 sister (17 kt); no Baron source found", approximate: true, note: "G36 value used for the Baron" }
+max_crosswind: { value: 22 kt, source: "Beechcraft G58 Baron POH and FAA Approved AFM P/N 58-590000-67A8 (pdfcoffee copy of the G58 POH), https://pdfcoffee.com/g58-poh-pdf-free.html, Section 4 Airspeeds for Safe Operation: maximum demonstrated crosswind component 22 kts", note: "demonstrated, not a limitation" }
+vlo: { value: 152 kt, source: "Beechcraft G58 Baron POH and FAA Approved AFM P/N 58-590000-67A8 (pdfcoffee copy of the G58 POH), https://pdfcoffee.com/g58-poh-pdf-free.html, Section 2 Airspeed Limitations: maximum landing gear operating/extended (VLO/VLE) 152 KIAS (152 KCAS)", note: "one value for extension, retraction and extended" }
+vso: { value: 74 kt, source: "Beechcraft G58 Baron POH and FAA Approved AFM P/N 58-590000-67A8 (pdfcoffee copy of the G58 POH), https://pdfcoffee.com/g58-poh-pdf-free.html, Section 2 airspeed indicator markings: white strip 74-122 KIAS, lower limit is the stall speed with flaps down at maximum weight" }
 flaps:
   - { up_to: 15 deg, vfe: { value: 152 kt, source: *tcds, note: "flaps extended (15 deg) 152 KCAS, approach flaps" } }
   - { vfe: { value: 122 kt, source: *tcds, note: "flaps extended (30 deg) 122 KCAS, full flaps" } }
+vref:
+  source: "Beechcraft G58 Baron POH and FAA Approved AFM P/N 58-590000-67A8 (pdfcoffee copy of the G58 POH), https://pdfcoffee.com/g58-poh-pdf-free.html, Section 4 Airspeeds for Safe Operation: Landing Approach (5400 lbs), flaps down (30 deg) 95 kts"
+  approximate: true
+  note: "published approach speed at the 5400 lb maximum landing weight; lighter weights scaled by sqrt(W/MLW) (Vref is 1.3 Vs and Vs goes with sqrt(W) at constant CL max)"
+  flaps:
+    - { flap: 30 deg, weights_kg: [1590, 1840, 2080, 2449], ias: [76.5 kt, 82.5 kt, 87.5 kt, 95 kt] }

@@ -3,25 +3,24 @@ use std::ops::RangeInclusive;
 use fdm_core::geo::distance_m;
 use fdm_core::{Airport, SimTime};
 
+use crate::flight::SETTLE_US;
 use crate::runway::{RunwayFix, ground_track_deg, locate};
+use crate::track::{ground_edges, hops};
 use crate::{Flight, Track};
 
 /// Airborne hop between two touchdowns up to which the second makes the
 /// landing a bounced one. Longer than track.rs's `BOUNCE_MAX_US`, which only
 /// decides whether a brief ground contact still belongs to the same leg.
 pub(crate) const BOUNCE_AIRBORNE_MAX_US: i64 = 5_000_000;
-/// A flight loaded in the air that is on the ground within this long was
-/// placed there by the sim (spawn, slew), not landed.
-const SETTLE_MAX_US: i64 = 5_000_000;
-/// A hop off the ground shorter than this that rises less than
-/// `HOP_MIN_FT` of radio height is a wheel lifting for a moment (a bump,
-/// gear rebound, a stationary aircraft's flickering state): it stayed on
-/// the ground, so the hop is no liftoff and its end no touchdown.
-const HOP_MIN_US: i64 = 1_000_000;
-const HOP_MIN_FT: f64 = 3.0;
 /// Window for the touchdown load: just before contact to gear compression.
 const PEAK_G_BEFORE_US: i64 = 500_000;
 const PEAK_G_AFTER_US: i64 = 1_500_000;
+/// The touchdown load is read as a 16 samples/s DFDR records it, the rate
+/// the 737 AMM hard-landing indication (2.2 g) assumes; slower recorders
+/// have other values (Flight Safety Digest, Aug 2004, p. 6). A mean over
+/// one sample period, a boxcar with its -3 dB point (0.44 / T, 7 Hz) near
+/// that recorder's Nyquist, keeps a frame-rate spike from setting the peak.
+const FDR_NZ_PERIOD_US: i64 = 62_500;
 /// Radio height rate over this last stretch before contact gives the sink
 /// rate; the touchdown window records RA at frame rate.
 const SINK_WINDOW_US: i64 = 500_000;
@@ -43,7 +42,8 @@ pub struct Touchdown {
     /// Rate of descent at contact (positive down): radio height rate over the
     /// last 0.5 s, or inertial VS where RA is missing.
     pub sink_fpm: f64,
-    /// Highest normal load around contact; full-rate in the touchdown window.
+    /// Highest normal load around contact, at the 16 samples/s of a DFDR
+    /// (the recording holds every frame in the touchdown window).
     pub peak_g: f64,
     pub pitch_deg: Option<f64>,
     pub roll_deg: Option<f64>,
@@ -64,7 +64,7 @@ struct Contact {
 }
 
 /// Touchdowns from the valid air/ground samples only; a failed sample is not
-/// a state change. Each touchdown's peak-g window is cut at the neighbouring
+/// a state change, and none falls in a `Flight::breaks` span. Each touchdown's peak-g window is cut at the neighbouring
 /// liftoffs so a bounce's hard impact does not grade the light one before it.
 pub fn touchdowns(flight: &Flight, track: &Track) -> Vec<Touchdown> {
     let airports = flight.airports();
@@ -76,25 +76,24 @@ pub fn touchdowns(flight: &Flight, track: &Track) -> Vec<Touchdown> {
 
 /// Edge pass: states alternate, so every touchdown's neighbours are liftoffs.
 fn contacts(flight: &Flight, track: &Track) -> Vec<Contact> {
-    let valid: Vec<_> = flight
-        .series("air_ground")
-        .iter()
-        .filter(|s| s.is_valid())
-        .collect();
-    // (time, true for touchdown)
-    let edges: Vec<(SimTime, bool)> = valid
-        .windows(2)
-        .filter(|w| (w[0].value >= 0.5) != (w[1].value >= 0.5))
-        .map(|w| (w[1].t, w[1].value >= 0.5))
-        .collect();
-    let settled = matches!((valid.first(), edges.first()), (Some(s), Some(&(t, true)))
-        if t.us_since(s.t) < SETTLE_MAX_US);
-    let edges = without_hops(track, &edges[usize::from(settled)..]);
+    let mut edges = ground_edges(flight);
+    let first = flight.series("air_ground").iter().find(|s| s.is_valid());
+    let settled = matches!((first, edges.first()), (Some(s), Some(&(t, true)))
+        if t.us_since(s.t) < SETTLE_US);
+    let hops = hops(&track.t, &track.ra_ft, &edges);
+    edges.retain(|&(t, _)| !hops.iter().any(|h| h.start == t || h.end == t));
+    let edges = &edges[usize::from(settled)..];
+    let breaks = flight.breaks();
     let mut out = Vec::new();
     let (mut prev, mut liftoff): (Option<SimTime>, Option<SimTime>) = (None, None);
     for (i, &(t, is_touchdown)) in edges.iter().enumerate() {
         if !is_touchdown {
             liftoff = Some(t);
+            continue;
+        }
+        // Placed by the sim (slew, teleport, reload): no landing.
+        if breaks.iter().any(|b| b.contains(&t)) {
+            prev = None;
             continue;
         }
         // A bounce needs an earlier touchdown and a short hop since it.
@@ -118,38 +117,19 @@ fn contacts(flight: &Flight, track: &Track) -> Vec<Contact> {
     out
 }
 
-/// `edges` less each liftoff and touchdown pair that is no real hop.
-fn without_hops(track: &Track, edges: &[(SimTime, bool)]) -> Vec<(SimTime, bool)> {
-    let flown = |off: SimTime, on: SimTime| {
-        let (from, to) = (
-            track.t.partition_point(|&t| t < off),
-            track.t.partition_point(|&t| t <= on),
-        );
-        on.us_since(off) >= HOP_MIN_US || track.ra_ft[from..to].iter().any(|&h| h >= HOP_MIN_FT)
-    };
-    let mut kept = Vec::with_capacity(edges.len());
-    let mut i = 0;
-    while i < edges.len() {
-        if let ((off, false), Some(&(on, true))) = (edges[i], edges.get(i + 1))
-            && !flown(off, on)
-        {
-            i += 2;
-            continue;
-        }
-        kept.push(edges[i]);
-        i += 1;
-    }
-    kept
-}
-
 /// The values that grade one touchdown.
 fn grade(flight: &Flight, track: &Track, airports: &[Airport], c: Contact) -> Touchdown {
     let t = c.t;
-    let peak_g = flight
+    let nz: Vec<_> = flight
         .series("accel.normal")
         .iter()
         .filter(|s| s.is_valid() && c.window.contains(&s.t))
-        .map(|s| s.value)
+        .collect();
+    let peak_g = (0..nz.len())
+        .map(|i| {
+            let k = nz[..=i].partition_point(|s| nz[i].t.us_since(s.t) >= FDR_NZ_PERIOD_US);
+            nz[k..=i].iter().map(|s| s.value).sum::<f64>() / (i + 1 - k) as f64
+        })
         .fold(f64::NAN, f64::max);
     // Without RA, the inertial VS at the last point before contact.
     let inertial_sink = || {
@@ -297,12 +277,66 @@ mod tests {
     }
 
     #[test]
+    fn a_slew_or_teleport_to_the_ground_is_not_a_landing() {
+        // Slewed down 5-8 s, then a circuit: only the 12 s landing counts.
+        let ground = [(0.0, false), (7.0, true), (9.0, false), (14.0, true)];
+        let mut slewed = rows(&ground, &[]);
+        slewed.extend([ok("sim.slew", 5.0, 1.0), ok("sim.slew", 8.0, 0.0)]);
+        let td = run(&slewed);
+        assert_eq!(td.len(), 1);
+        assert!((td[0].t.as_secs_f64() - 14.0).abs() < 0.11);
+        // Teleported onto the ground at 7 s: flow events only.
+        let mut f = flight(&rows(&ground, &[]));
+        f.events = vec![
+            (
+                SimTime::from_secs_f64(6.5),
+                recorder::SimEvent::Flow(recorder::FlowEvent::TeleportStart),
+            ),
+            (
+                SimTime::from_secs_f64(7.0),
+                recorder::SimEvent::Flow(recorder::FlowEvent::TeleportDone),
+            ),
+        ];
+        assert_eq!(touchdowns(&f, &Track::new(&f).unwrap()).len(), 1);
+        // An old recording: the position jumps 50 km in 1 s at the 7 s touchdown.
+        let mut jumped = rows(&ground, &[]);
+        jumped.extend((0..=15).flat_map(|s| {
+            let lat = if s < 7 { 38.0 } else { 38.45 };
+            [
+                ok("pos.lat", f64::from(s), lat),
+                ok("pos.lon", f64::from(s), 27.0),
+            ]
+        }));
+        assert_eq!(run(&jumped).len(), 1);
+    }
+
+    #[test]
     fn a_wheel_lifting_for_a_moment_is_no_bounce() {
         // 0.4 s off the ground with no radio height: one touchdown.
         let ground = [(0.0, false), (10.0, true), (12.0, false), (12.4, true)];
         let td = run(&rows(&ground, &[]));
         assert_eq!(td.len(), 1);
         assert!((td[0].t.as_secs_f64() - 10.0).abs() < 0.11);
+    }
+
+    #[test]
+    fn peak_g_is_read_at_the_recorder_rate() {
+        // 50 Hz load in the window: 1.2 g with one 2.4 g frame at contact,
+        // then 2.0 g held for 0.2 s. A 16 Hz recorder sees ~(2.4 + 3 x 1.2) / 4
+        // = 1.5 g from the spike, so the held 2.0 g sets the peak.
+        let mut rows = rows(&[(0.0, false), (10.0, true)], &[]);
+        rows.retain(|r| r.0 != "accel.normal");
+        rows.extend((450..=560).map(|k| {
+            let t = f64::from(k) * 0.02;
+            let g = match k {
+                500 => 2.4,
+                520..=530 => 2.0,
+                _ => 1.2,
+            };
+            ok("accel.normal", t, g)
+        }));
+        let td = run(&rows);
+        assert!((td[0].peak_g - 2.0).abs() < 1e-9, "{}", td[0].peak_g);
     }
 
     #[test]

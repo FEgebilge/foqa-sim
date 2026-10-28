@@ -5,6 +5,10 @@
 type: A21N
 name: Airbus A321LR (A321neo family)
 class: transport
+airframe: { kind: airplane, engine: jet, engines: 2, gear: retractable }
+mlw: { value: 174606 lb, source: "EASA TCDS EASA.A.064 Issue 62 (26 Jun 2026), sec. 2 A321 series weights: A321-251N/-252N/-253N and later variants max landing weight 79 200 kg, https://www.easa.europa.eu/en/downloads/16507/en", note: "the weight the Vref table is anchored to (Airbus A321 Aircraft Characteristics 3-5-0)" }
+mmo: { value: 0.82 M, source: "EASA TCDS EASA.A.064 Issue 62 (26 Jun 2026), sec. 2 A321 series para 10 Maximum Operating Mach (MMO) 0.82, https://www.easa.europa.eu/en/downloads/16507/en" }
+aliases: [A321neo]
 tail_contact:
   takeoff: { value: 11.2 deg, source: "Flightglobal, A321 struck tail after pilot falsely perceived bounce https://www.flightglobal.com/a321-struck-tail-after-pilot-falsely-perceived-bounce/122689.article (9.7-11.2 deg range)", note: "struts extended; forum values 11.2-11.4" }
   landing: { value: 9.7 deg, source: "Flightglobal article as above; PPRuNe https://www.pprune.org/tech-log/619760-a320-vs-a321-conf-3-tail-strike.html", note: "struts compressed (older docs 9.5)" }
@@ -14,6 +18,12 @@ vle: { value: 280 kt, source: "EASA TCDS A.064 Issue 62 sec. 2 Landing gear (280
 vlo: { value: 220 kt, source: "EASA TCDS A.064 Issue 62 sec. 2", note: "extend 250, retract 220 (lower given)" }
 max_crosswind: { value: 38 kt, source: "A320-family value, FlyByWire docs https://docs.flybywiresim.com/pilots-corner/a32nx/a32nx-briefing/limitations/", approximate: true, note: "A320-family max demonstrated landing incl. gusts; A321-specific value not found" }
 max_tailwind: { value: 15 kt, source: "A320-family value, FlyByWire docs (same URL)", approximate: true, note: "A320-family value; A321 not separately verified" }
+vref:
+  source: "Airbus A321 Aircraft Characteristics - Airport and Maintenance Planning, Rev Dec 01/23, subject 3-5-0 Final Approach Speed (A321neo: 136 kt at MLW 79 200 kg), https://www.aircraft.airbus.com/sites/g/files/jlcbta126/files/2023-12/ac_a321_1223.pdf"
+  approximate: true
+  note: "published value is the ICAO threshold speed at maximum landing weight and the maximum certificated landing flap; lighter weights scaled by sqrt(W/MLW) (Vref is 1.3 Vs and Vs goes with sqrt(W) at constant CL max); other landing flaps read a few kt higher, not published"
+  flaps:
+    - { flap: 34 deg, weights_kg: [51500, 59400, 67300, 79200], ias: [110 kt, 118 kt, 125 kt, 136 kt] }
 flaps:
   - { up_to: 10 deg, vfe: { value: 225 kt, source: *tcds, note: "CONF 1+F (18/10), table for A321-271N/-272N/-251N/-252N/-253N and NX. CONF 1 slats-only 238 kt (243 kt for the NX variants) skipped" } }
   - { up_to: 14 deg, vfe: { value: 215 kt, source: *tcds, note: "CONF 2 (22/14)" } }

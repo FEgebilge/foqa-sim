@@ -2,6 +2,7 @@ import { useState } from "react";
 import { X } from "lucide-react";
 import { Button } from "@ui/components/button/button";
 import { Markdown } from "../lib/markdown";
+import { DEVLOG_HREF } from "../lib/route";
 import type { Updater } from "../lib/use-updater";
 
 /** A small card in the corner while a newer version waits: its notes, and "Install and restart" (refused while a flight records). */
@@ -29,6 +30,7 @@ export function UpdateNotice({ updater }: { updater: Updater }) {
         <>
           <div className="flex items-center gap-2">
             <Button size="sm" variant="ghost" onClick={() => setNotes((open) => !open)} aria-expanded={notes}>What's new</Button>
+            <a href={DEVLOG_HREF} className="rounded text-xs text-accent underline-offset-2 hover:underline focus-visible:outline-2">All release notes</a>
             <Button size="sm" className="ml-auto" onClick={() => void updater.install()} disabled={recording}>Install and restart</Button>
           </div>
           {recording ? <p className="text-xs text-fg-3">Not while a flight is being recorded: install after it closes.</p> : null}

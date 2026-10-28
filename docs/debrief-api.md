@@ -11,21 +11,27 @@ the recording; units are in the field names.
 
 | Command | Returns | |
 |---|---|---|
-| `list_flights()` | `FlightSummary[]` | Newest first |
+| `list_flights()` | `FlightSummary[]` | Newest first, each with its `meta` when the pilot wrote any |
 | `debrief(id: string)` | `Debrief` | Full analysis of one flight |
 | `trends(filter: TrendFilter)` | `Trends` | The counted flights aggregated ([trends.md](trends.md)), with `recordings: {total, counted, ground_only, too_short, partial}` saying what was left out; `filter` is `{aircraft?, airport?, days?}` |
-| `delete_flight(id: string)` | `void` | Deletes the flight's stored files for good; refused for the flight being recorded |
+| `delete_flights(ids: string[])` | `{ trashed: string[], failed: string[] }` | Moves each flight's files, its meta included, to the [trash](#trash); the flight being recorded is refused, `failed` saying why in plain words. Trash older than 30 days is purged first |
+| `restore_flights(ids: string[])` | `string[]` | Brings trashed flights back, the ids restored; one whose files are in the folder again stays in the trash |
+| `purge_trash()` | `number` | Deletes the trash for good; how many flights went |
+| `flight_meta_get(id: string)` | `FlightMeta` | The pilot's title, notes and tags; `{}` when none |
+| `flight_meta_set(id: string, meta: FlightMeta)` | `FlightMeta` | Replaces them and returns them as kept: trimmed, blank fields dropped, tags without repeats (ignoring case). A title over 120 characters, notes over 4000, a tag over 32 or more than 20 tags are refused in plain words; `{}` removes the sidecar |
 | `place_challenge(definition: string)` | `StartState` | Puts the aircraft at a landing challenge's start (the challenge JSON, [challenges.md](challenges.md)); an error while the sim is not connected or for a `self` start |
 | `recorder_status()` | `RecorderStatus` | Current state, also pushed as an event |
 | `open_flights_folder()` | `void` | Opens the folder in Explorer |
-| `storage_usage()` | `StorageUsage` | Flight count and the folder's total size on disk (raw captures included) |
+| `open_log_folder()` | `void` | Opens the folder holding `foqa-sim.log` (stderr of the app and its crates; rotated at 2 MB) |
+| `update_mark_clear()` | `void` | Removes the mark `update_mark` left; call it when the download or install fails |
+| `storage_usage()` | `StorageUsage` | Flight count, the folder's total size on disk (raw captures included) and the trash's |
 | `setup_status()` | `SetupStatus` | The [installation](#installation) checks |
 | `setup_install(package: string)` | `SetupStatus` | Installs, updates or repairs an in-sim package, then checks again |
 | `setup_remove(package: string)` | `SetupStatus` | Removes an in-sim package from the Community folder |
 | `setup_use_community(path: string \| null)` | `SetupStatus` | Uses that Community folder from now on; `null` goes back to the found install's |
 | `setup_pick_community()` | `SetupStatus` | Asks for the Community folder in a folder dialog; cancelling changes nothing |
 | `export_flight(id, format, identity)` | `string \| null` | Saves the flight as `parquet`, `csv`, `kml` or `gpx` where a save dialog says ([exports.md](exports.md)); the file written, `null` when cancelled. `identity: true` adds the aircraft's title and tail number |
-| `export_logbook(identity)` | `string \| null` | Saves the flight list as a Little Navmap logbook CSV, the same way |
+| `export_logbook(identity, ids?)` | `string \| null` | Saves the flight list, or only flights `ids`, as a Little Navmap logbook CSV, the same way |
 | `save_image(name, png)` | `string \| null` | Saves a PNG the window drew (the landing card, `png` its bytes) under a name the save dialog suggests; anything but a PNG is refused |
 | `challenges_list()` | `ChallengeEntry[]` | The local challenge library, by title |
 | `challenge_import()` | `ChallengeEntry \| null` | Asks for a challenge file, checks it with `Challenge::parse` and keeps it; `null` when cancelled; errors in plain words |
@@ -70,6 +76,12 @@ list. A landing is reported 12 s of sim time after its
 last touchdown (the recorder's ±10 s full-rate window, plus the airport
 snapshot), so a bounce gives one notice; a flight closed sooner reports it
 when it is saved.
+
+<a id="trash"></a>A flight's title, notes and tags are kept beside it in
+`<id>.meta.json` (`FlightMeta`, written by the app only). A deleted flight's
+files, its meta included, move to `.trash\<id>\` in the flights folder with a
+`deleted-at` file (Unix seconds); the app purges flights deleted more than 30
+days ago at start-up and before each delete, and `purge_trash` all of them.
 
 ## Installation
 
@@ -143,8 +155,15 @@ interface SetupCheck {
 
 interface StorageUsage {
   flights: number;        // stored flights
-  bytes: number;          // every file in the folder
+  bytes: number;          // every file in the folder, the trash not included
   folder: string;         // absolute path
+  trash: { flights: number; bytes: number };   // deleted flights waiting in .trash
+}
+
+interface FlightMeta {    // each absent when the pilot wrote none
+  title?: string;
+  notes?: string;
+  tags?: string[];
 }
 
 interface Aircraft {
@@ -167,6 +186,8 @@ interface FlightSummary {
   rule_counts?: Record<string, { level: Level; count: number }>;   // rules fired at low or above, by rule id
   skills?: SkillsSummary;   // the flying-skills figures trends reads (docs/skills.md); absent on older summaries
   flown?: Flown;            // what trends counts a flight by (trends.md); absent on older summaries: not flown
+  kind: "flight" | "ground_only" | "too_short";   // `flown` judged by the trends rule; the list hides the other two by default
+  meta?: FlightMeta;        // list_flights only, when the pilot wrote any
 }
 
 // How much of the recording was real flying, from the airborne legs, `sim.slew` points excluded.
@@ -183,7 +204,7 @@ interface LandingFacts {
   t_s: number;               // first touchdown
   full_stop: boolean;        // false: touch-and-go
   icao?: string; runway?: string;          // matched runway
-  score?: number; grade?: "good" | "fair" | "poor"; confidence?: "full" | "partial";   // landing-2; none when unscored
+  score?: number; grade?: "good" | "fair" | "poor"; confidence?: "full" | "partial";   // landing-3; none when unscored
   domains: Record<"stability" | "energy" | "point" | "lateral" | "contact" | "rollout", number | null>;   // level 0-3, null: n/a; empty when unscored
   sink_fpm: number; peak_g: number;        // first contact
   along_m?: number; cross_m?: number;      // past the threshold; right of the centreline positive
@@ -193,7 +214,7 @@ interface LandingFacts {
   bounces: number;
 }
 
-// The flight graded as a whole, as the flight list shows it: by landing-2
+// The flight graded as a whole, as the flight list shows it: by landing-3
 // (docs/scoring.md) when a landing was scored, else by the points method.
 // `points` and `findings` are the points method's, kept for one release:
 // each rule the flight broke counts once, at its worst level, high 4
@@ -203,7 +224,7 @@ interface Assessment {
   grade: "good" | "fair" | "poor";
   points: number;
   findings: number;       // rules broken at low or above
-  method: "landing-2" | "points";
+  method: "landing-3" | "points";
   score?: number;         // 0-100, to 0.1, with a scored landing
   confidence?: "full" | "partial";
 }
@@ -214,7 +235,7 @@ interface Assessment {
 // findings outside every landing (one: at most Fair, two: Poor). Without a
 // scored landing, `method` is "points" and the parts and bands grade it.
 interface AssessmentDetail {
-  method: "landing-2" | "points";
+  method: "landing-3" | "points";
   score: number | null;
   grade: "good" | "fair" | "poor";
   confidence: "full" | "partial" | null;
@@ -226,7 +247,7 @@ interface AssessmentDetail {
   legacy_findings: number;
   parts: AssessmentPart[];   // points method: most points first, then by rule name; advisories (0 points) last
   bands: GradeBand[];        // points method's scale, low to high: good up to 1, fair up to 5, poor above
-  grades: { good: number; fair: number };   // landing-2's edges: Good from 85, Fair from 60
+  grades: { good: number; fair: number };   // landing-3's edges: Good from 85, Fair from 60
 }
 
 interface CapNote {
@@ -289,7 +310,7 @@ interface DomainAssessment {
 }
 
 interface CriterionAssessment {
-  id: string;                // A1…F2 (scoring/landing-2.yaml)
+  id: string;                // A1…F2 (scoring/landing-3.yaml)
   title: string;
   height: "all" | "above" | "below";   // the half of the approach window (split 500 ft, light 300 ft)
   value: number;             // its worst value, in `unit`; offsets (A1, B1, B2, C1) signed

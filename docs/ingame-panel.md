@@ -151,7 +151,7 @@ values in `monitor.rs`) and the views. JSON, UTF-8. Every message carries
 | Event | Payload | Cadence |
 |---|---|---|
 | `FOQA_SIM_STATUS` | `Status` | 1 Hz while the sim is connected; at once with an `ack` |
-| `FOQA_SIM_LIVE` | `Live` | 4 Hz while recording |
+| `FOQA_SIM_LIVE` | `Live` | 4 Hz while recording and a view watches (`watch`) |
 | `FOQA_SIM_EVENTS` | `Events` | on change, else every 5 s while recording |
 | `FOQA_SIM_LANDING` | `{ v, age_s, notice: LandingNotice }` | at the landing, then every 5 s |
 | `FOQA_SIM_LANDINGS` | `{ v, landings: LandingNotice[] }` | every 5 s while recording; the last 3 landings of this flight, newest first |
@@ -163,9 +163,12 @@ values in `monitor.rs`) and the views. JSON, UTF-8. Every message carries
 | `FOQA_SIM_BRIEFING` | `{ v, req, key, title, lines, preflight, error? }` | reply to `briefing`, every 1 s for ~5 s |
 
 `EVENTS` and `LANDINGS` come from the app's own analysis of the open
-journal, run every 5 s in the background (one at a time), so they trail the
-flight by up to about 5 s plus the analysis time; the first arrives a few
-seconds into the flight.
+journal, run in the background (one at a time) every 5 s while a view
+watches and sim time moves on, and after each landing. An analysis covers
+the whole flight so far, so on a long flight the next one waits at least
+100 times as long as the last took (about every 100 s if it took 1 s).
+They trail the flight by that much plus the analysis time; the first
+arrives a few seconds after a view first watches.
 
 ```ts
 interface Status {
@@ -261,6 +264,7 @@ connection and ignores trailing NULs.
 | | `{ v: 2, cmd: "end_flight" }` | close and save the flight now, as on return to the menu |
 | | `{ v: 2, cmd: "discard_flight" }` | close the flight and delete its files (the view asks to confirm first) |
 | | `{ v: 2, cmd: "mark", note?: string }` | mark this moment in the journal (pilot report) |
+| | `{ v: 2, cmd: "watch" }` | a view is open: sent with a status at most every 10 s; `LIVE`, `EVENTS` and `LANDINGS` go out until none came for 30 s. Never acked |
 | | `{ v: 2, cmd: "list_flights", req: string }` | the saved flights, answered in `FOQA_SIM_FLIGHTS` |
 | | `{ v: 2, cmd: "debrief", req: string, id: string }` | one flight's compact debrief, answered in `FOQA_SIM_DEBRIEF` |
 | | `{ v: 2, cmd: "list_challenges", req }` | the app's challenge library, answered in `FOQA_SIM_CHALLENGES` |
@@ -386,7 +390,7 @@ view's. A view ignores replies whose `req` is not the one it waits for, and
 a new query replaces a waiting one. With nothing complete after about 8 s
 it shows an error and **Try again**, which asks again with a new `req`.
 
-The debrief view opens with the flight's landing-2 score and grade
+The debrief view opens with the flight's landing-3 score and grade
 ([scoring.md](scoring.md)), six domain mini-bars of the grading landing
 (track as long as the weight, the share of it lost in the level's colour,
 labelled with the points lost) and
@@ -425,8 +429,8 @@ interface DebriefPart {
 interface CompactDebrief {
   flight: FlightItem & {     // the assessment (debrief-api.md) and how it came about:
     profile: string;
-    method: "landing-2" | "points";
-    score?: number;          // landing-2, 0-100
+    method: "landing-3" | "points";
+    score?: number;          // landing-3, 0-100
     confidence?: "full" | "partial";
     // The grading landing's six domains in order (stability, energy, point,
     // lateral, contact, rollout) as mini-bars: [weight, points lost or null

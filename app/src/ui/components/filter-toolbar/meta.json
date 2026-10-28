@@ -1,0 +1,17 @@
+{
+  "title": "Filter toolbar",
+  "description": "Keep collection filters close and easy to reset.",
+  "category": "Data",
+  "kind": "component",
+  "dependencies": [
+    "lucide-react",
+    "motion"
+  ],
+  "requires": [],
+  "tags": [
+    "data",
+    "filter"
+  ],
+  "source": "arc",
+  "canvas": []
+}

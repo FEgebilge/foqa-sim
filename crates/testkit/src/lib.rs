@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use analyzer::{Flight, Track, touchdowns};
 use fdm_core::geo::LocalFrame;
 use fdm_core::{AircraftId, Airport, Designator, Lfl, Runway, RunwayEnd};
-use recorder::{Recorder, SimEvent, Telemetry};
+use recorder::{Acquisition, Recorder, SimEvent, Telemetry};
 
 pub const FRAME_HZ: f64 = 60.0;
 /// Sim time of the first frame: the recording is relative to it.
@@ -137,8 +137,22 @@ pub fn journal(
     script: impl Fn(f64) -> Pt,
 ) -> Vec<u8> {
     let mut recorder = Recorder::new(&Lfl::V1, Vec::new()).unwrap();
-    let columns: HashMap<_, _> = recorder
-        .acquisition()
+    telemetry(events, weight_lb, duration_s, script, |item| {
+        recorder.record(&item).unwrap()
+    });
+    recorder.into_inner()
+}
+
+/// What the sim sends for `journal`, in order: the events and the raw
+/// 60 Hz frames.
+pub fn telemetry(
+    events: &[(f64, SimEvent)],
+    weight_lb: f64,
+    duration_s: f64,
+    script: impl Fn(f64) -> Pt,
+    mut out: impl FnMut(Telemetry),
+) {
+    let columns: HashMap<_, _> = Acquisition::new(&Lfl::V1)
         .columns()
         .iter()
         .enumerate()
@@ -150,7 +164,7 @@ pub fn journal(
     for k in 0..=(duration_s * FRAME_HZ) as usize {
         let t = k as f64 / FRAME_HZ;
         while let Some((_, e)) = events.next_if(|(at, _)| *at <= t) {
-            recorder.record(&Telemetry::Event(e.clone())).unwrap();
+            out(Telemetry::Event(e.clone()));
         }
         let p = script(t);
         let (sin, cos) = p.track.to_radians().sin_cos();
@@ -191,9 +205,8 @@ pub fn journal(
         for simvar in p.lost {
             raw[columns[simvar]] = f64::NAN;
         }
-        recorder.record(&Telemetry::Frame(raw)).unwrap();
+        out(Telemetry::Frame(raw));
     }
-    recorder.into_inner()
 }
 
 /// Runway 20 whose threshold lies `along_m` behind where the stable
@@ -242,5 +255,6 @@ pub fn identity(icao: &str) -> SimEvent {
         atc_model: format!("ATCCOM.AC_MODEL {icao}.0.text"),
         atc_type: String::new(),
         atc_id: "N123FQ".into(),
+        facts: Default::default(),
     })
 }

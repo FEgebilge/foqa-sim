@@ -134,7 +134,7 @@ Field reasons:
 
 `Challenge::parse` rejects unknown fields, a gate not closer than the
 start, flaps outside 0 to 1, a runway not written like `06` or `27L` and an
-unknown scoring version. A `landing-2` challenge must list
+unknown scoring version. A `landing-3` (or `landing-2`) challenge must list
 `aircraft.types`, each with a Vref source in its profile (Vref table, POH
 approach speeds or VSO): the pilot's selected speed never counts for a
 ranked attempt ([scoring.md](scoring.md) §5, Decision 1).
@@ -193,7 +193,10 @@ not prevention, which matches the stakes.
 `scoring.version` names the method, and the server re-scores an upload
 with the one its challenge names, so app updates never move a board.
 
-**`landing-2`** is the method for new challenges, specified in
+**`landing-2`** (0.10) is retired: a challenge naming it is graded with
+landing-3, and its attempts say `landing-3` ([scoring.md](scoring.md) §6).
+
+**`landing-3`** is the method for new challenges, specified in
 [scoring.md](scoring.md): the same assessment the debrief shows (six
 domains, ideal and tolerance from the checkride standard, levels from the
 FDM thresholds, safety caps), run as a ranked attempt from the gate.
@@ -245,7 +248,7 @@ Leaderboards are the site's business, not part of the protocol.
 
 1. **Start:** `teleport` by default, `self` as the fallback.
 2. **Scoring:** `landing-1` above; `landing-2` ([scoring.md](scoring.md))
-   for new challenges since 2026-10-27.
+   for new challenges since 2026-10-27, `landing-3` since 0.11.
 
 3. **Server analysis:** the Rust analysis on the home server:
    `fdm challenge <challenge.json> <flight.fqz>` prints the `Attempt`

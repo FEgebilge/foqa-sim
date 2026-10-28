@@ -4,6 +4,10 @@
 type: C700
 name: Cessna Citation Longitude (700)
 class: transport
+airframe: { kind: airplane, engine: jet, engines: 2, gear: retractable }
+mlw: { value: 33500 lb, source: "EASA TCDS EASA.IM.A.620 Model 700 Issue 03 (26 Oct 2021), https://www.easa.europa.eu/en/downloads/129064/en, item 13 Maximum Weights: landing 15,195 kg (33,500 lb)" }
+mmo: { value: 0.84 M, source: "EASA TCDS EASA.IM.A.620 Model 700 Issue 03 (26 Oct 2021), https://www.easa.europa.eu/en/downloads/129064/en, item 10 Airspeed Limits: MMO above 29,375 ft 0.84 (0.838 Mach calibrated)" }
+aliases: [Citation Longitude]
 vmo: { value: 290 kt, source: "EASA TCDS EASA.IM.A.620 Model 700 Issue 03, https://www.easa.europa.eu/en/downloads/129064/en", note: "VMO 290 KIAS at sea level (305 KIAS at 8000 ft); the low-altitude value is the one used" }
 vle: { value: 230 kt, source: "EASA TCDS EASA.IM.A.620 Issue 03 (VLE 230 KIAS)" }
 vlo: { value: 230 kt, source: "EASA TCDS EASA.IM.A.620 Issue 03 (VLO 230 KIAS)" }
@@ -13,3 +17,8 @@ flaps:
   - up_to: 15 deg
     vfe: { value: 230 kt, source: *fpg, note: "Flaps 2" }
   - vfe: { value: 180 kt, source: *fpg, note: "Flaps FULL" }
+vref:
+  source: "Citation Longitude Flight Planning Guide FM00PP002, https://aviav.ru/wp-content/uploads/2020/04/citation-longitude-fpg.pdf, Landing Performance (full-flap landing distance tables, VREF row by landing weight; 125 KIAS at 33,500 lb)"
+  note: "VREF for flaps FULL (35 deg, EASA TCDS EASA.IM.A.620 Issue 03 item 10); the same row in every elevation and temperature table"
+  flaps:
+    - { flap: 35 deg, weights_kg: [10659, 11113, 11567, 12020, 12474, 13381, 14288, 15195], ias: [104 kt, 106 kt, 108 kt, 110 kt, 112 kt, 116 kt, 121 kt, 125 kt] }

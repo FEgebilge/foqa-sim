@@ -1,0 +1,16 @@
+{
+  "title": "Radio group",
+  "description": "Choose one option from a visible set.",
+  "category": "Inputs",
+  "kind": "component",
+  "dependencies": [
+    "motion"
+  ],
+  "requires": [],
+  "tags": [
+    "field",
+    "choice"
+  ],
+  "source": "arc",
+  "canvas": []
+}

@@ -7,6 +7,10 @@
 type: SF50
 name: Cirrus SF50 Vision Jet
 class: transport
+airframe: { kind: airplane, engine: jet, engines: 1, gear: retractable }
+mlw: { value: 5550 lb, source: "Cirrus SF50 FAA Approved AFM P/N 31452-001 Rev 4, https://flightsimcoach.com/wp-content/uploads/2020/12/SF50-POH.pdf, Section 2 Weights: maximum landing weight 5550 lb", note: "the AFM also prints 2517 kg and 2495 kg for it" }
+mmo: { value: 0.53 M, source: "Cirrus SF50 FAA Approved AFM P/N 31452-001 Rev 4, https://flightsimcoach.com/wp-content/uploads/2020/12/SF50-POH.pdf, Section 2 Airspeed Limitations: MMO 0.53 Mach (VMO 250 KIAS)" }
+aliases: [SF50 Vision]
 vmo: { value: 250 kt, source: &tcds "EASA TCDS EASA.IM.A.615 SF50 Issue 6, https://www.easa.europa.eu/en/downloads/24242/en", note: "VMO 250 KIAS, MMO 0.53" }
 vle: { value: 210 kt, source: *tcds, note: "VLE 210 KIAS" }
 vlo: { value: 150 kt, source: *tcds, note: "VLO extend 210 KIAS, retract 150 KIAS; lower given" }
@@ -15,3 +19,10 @@ max_tailwind: { value: 10 kt, source: "SF50 AFM P/N 31452-001 Rev 2, Operational
 flaps:
   - { up_to: 15 deg, vfe: { value: 190 kt, source: *tcds, note: "flaps 50% = 15 deg (PIM, not AFM-verified)" } }
   - { vfe: { value: 150 kt, source: *tcds, note: "flaps 100% = 39 deg (PIM; one guide says 40)" } }
+vref:
+  source: "Cirrus SF50 FAA Approved AFM P/N 31452-001 Rev 4, https://flightsimcoach.com/wp-content/uploads/2020/12/SF50-POH.pdf, Section 5 Landing Distance: VREF Speeds (KIAS) by weight and flaps (85 KIAS at 5550 lb, flaps 100%)"
+  note: "the AFM's weight-indexed VREF table up to the 5550 lb maximum landing weight (the 6000 lb overweight column is left out); normal approach is VREF + 10 (AFM Section 4). Flap angles as in the flap bands (50% = 15 deg, 100% = 39 deg, PIM, not AFM-verified); UP is 0 deg"
+  flaps:
+    - { flap: 0 deg, weights_kg: [1814, 2041, 2268, 2517], ias: [89 kt, 95 kt, 100 kt, 104 kt] }
+    - { flap: 15 deg, weights_kg: [1814, 2041, 2268, 2517], ias: [82 kt, 87 kt, 91 kt, 96 kt] }
+    - { flap: 39 deg, weights_kg: [1814, 2041, 2268, 2517], ias: [71 kt, 76 kt, 81 kt, 85 kt] }

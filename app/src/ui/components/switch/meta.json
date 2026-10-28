@@ -1,0 +1,17 @@
+{
+  "title": "Switch",
+  "description": "A tactile toggle for settings that take effect immediately.",
+  "category": "Inputs",
+  "kind": "component",
+  "dependencies": [
+    "@radix-ui/react-switch",
+    "motion"
+  ],
+  "requires": [],
+  "tags": [
+    "toggle",
+    "settings"
+  ],
+  "source": "arc",
+  "canvas": []
+}

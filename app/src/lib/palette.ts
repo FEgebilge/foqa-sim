@@ -8,6 +8,7 @@ const PHASES: Record<string, [light: string, dark: string]> = {
   Standing: ["#7a8396", "#5d6679"],
   Taxi: ["#8c7b4a", "#9a8b5e"],
   Takeoff: ["#1d8f5c", "#34b87e"],
+  RejectedTakeoff: ["#9b4d2f", "#c97a55"],
   InitialClimb: ["#13827d", "#3cbab2"],
   EnRoute: ["#2f6fc0", "#5294e4"],
   Approach: ["#7650c8", "#9c79e8"],
@@ -16,11 +17,12 @@ const PHASES: Record<string, [light: string, dark: string]> = {
 };
 const UNKNOWN_PHASE: [string, string] = ["#8a93a6", "#7d8799"];
 
+// Level colours are also used as text (event detail, flagged values), so each clears 4.5:1 on every surface of its theme (test/palette.test.ts).
 const LEVELS: Record<Level, [light: string, dark: string]> = {
-  high: ["#c9362c", "#f0605a"],
-  medium: ["#b86a00", "#f2a33a"],
-  low: ["#8a7a00", "#e2cf5c"],
-  advisory: ["#2f6fb3", "#73aee6"],
+  high: ["#bd3128", "#f0605a"],
+  medium: ["#975500", "#f2a33a"],
+  low: ["#706200", "#e2cf5c"],
+  advisory: ["#2a64a6", "#73aee6"],
 };
 
 const pick = ([light, dark]: [string, string], theme: Theme) => (theme === "dark" ? dark : light);

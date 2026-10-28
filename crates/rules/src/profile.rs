@@ -3,12 +3,14 @@
 //! unit-checked at load and names the document it comes from. A flight whose
 //! type has no profile is graded by its class alone: type-specific values
 //! are unknown and the rules using them stay silent. A profile may also
-//! move its class's phase boundaries (`phases:`).
+//! move its class's phase boundaries (`phases:`). A flight is matched to a
+//! profile by its type designator, then by a profile's aliases; without one,
+//! the sim's own airframe facts and weights give its class (`Identified`).
 
 use std::fmt;
 
 use analyzer::{Flight, PhaseConfig};
-use fdm_core::{AircraftId, Unit};
+use fdm_core::{AircraftId, Lfl, SignalId, SimFacts, Unit};
 use serde::{Deserialize, Serialize};
 
 use crate::engine::aircraft;
@@ -57,10 +59,17 @@ pub enum ProfileField {
     /// The approach speed the profile gives at that point (light types),
     /// kt; read as `Vref`.
     Vapp,
+    /// Maximum landing weight (MLW), lb.
+    Mlw,
+    /// Maximum operating Mach number (MMO).
+    Mmo,
+    /// Height of the pilot's eye (or the glideslope antenna) above the main
+    /// wheels on the approach, ft.
+    EyeToWheel,
 }
 
 impl ProfileField {
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 16] = [
         Self::Vfe,
         Self::TailTakeoffPitch,
         Self::TailLandingPitch,
@@ -74,6 +83,9 @@ impl ProfileField {
         Self::MainGearTrack,
         Self::Vref,
         Self::Vapp,
+        Self::Mlw,
+        Self::Mmo,
+        Self::EyeToWheel,
     ];
 
     /// The field named `name` in `profile.<name>`.
@@ -97,6 +109,9 @@ impl ProfileField {
             Self::MainGearTrack => "main_gear_track",
             Self::Vref => "vref",
             Self::Vapp => "vapp",
+            Self::Mlw => "mlw",
+            Self::Mmo => "mmo",
+            Self::EyeToWheel => "eye_to_wheel",
         }
     }
 
@@ -112,8 +127,10 @@ impl ProfileField {
             | Self::Vref
             | Self::Vapp => Unit::Knots,
             Self::TailTakeoffPitch | Self::TailLandingPitch => Unit::Degrees,
-            Self::MainGearTrack => Unit::Feet,
+            Self::MainGearTrack | Self::EyeToWheel => Unit::Feet,
             Self::HardLandingG => Unit::G,
+            Self::Mlw => Unit::Pounds,
+            Self::Mmo => Unit::Mach,
         }
     }
 }
@@ -122,6 +139,7 @@ impl ProfileField {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PhaseField {
     RollKt,
+    RtoKt,
     ClimbEndFt,
     ApproachFt,
     FlareFt,
@@ -130,8 +148,9 @@ pub enum PhaseField {
 }
 
 impl PhaseField {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::RollKt,
+        Self::RtoKt,
         Self::ClimbEndFt,
         Self::ApproachFt,
         Self::FlareFt,
@@ -143,6 +162,7 @@ impl PhaseField {
     pub fn name(self) -> &'static str {
         match self {
             Self::RollKt => "roll_kt",
+            Self::RtoKt => "rto_kt",
             Self::ClimbEndFt => "climb_end_ft",
             Self::ApproachFt => "approach_ft",
             Self::FlareFt => "flare_ft",
@@ -153,7 +173,7 @@ impl PhaseField {
 
     pub fn unit(self) -> Unit {
         match self {
-            Self::RollKt => Unit::Knots,
+            Self::RollKt | Self::RtoKt => Unit::Knots,
             _ => Unit::Feet,
         }
     }
@@ -161,6 +181,7 @@ impl PhaseField {
     fn of(self, c: &mut PhaseConfig) -> &mut f64 {
         match self {
             Self::RollKt => &mut c.roll_kt,
+            Self::RtoKt => &mut c.rto_kt,
             Self::ClimbEndFt => &mut c.climb_end_ft,
             Self::ApproachFt => &mut c.approach_ft,
             Self::FlareFt => &mut c.flare_ft,
@@ -240,6 +261,105 @@ impl ScoringClass {
             Aircraft::Light => Self::Light,
             Aircraft::Transport => Self::Jet,
         }
+    }
+}
+
+/// What flies: the landing score and the runway rules are for airplanes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Kind {
+    Airplane,
+    Helicopter,
+    Glider,
+    SeaplaneAmphibian,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Engine {
+    Piston,
+    Turboprop,
+    Jet,
+    Electric,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Gear {
+    Fixed,
+    Retractable,
+    Floats,
+    Skids,
+}
+
+/// Facts about the airframe (not limits, so unsourced), each `None` where
+/// unknown.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Airframe {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<Kind>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub engine: Option<Engine>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub engines: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gear: Option<Gear>,
+}
+
+impl Airframe {
+    /// More engines than any aircraft has (An-225: six).
+    const MAX_ENGINES: u8 = 8;
+
+    /// Field by field, `self` where known, else `other`.
+    fn or(self, other: Self) -> Self {
+        Self {
+            kind: self.kind.or(other.kind),
+            engine: self.engine.or(other.engine),
+            engines: self.engines.or(other.engines),
+            gear: self.gear.or(other.gear),
+        }
+    }
+
+    /// From the sim's SimVars: `CATEGORY` and the gear say helicopter and
+    /// seaplane; an airplane with no engine (`ENGINE TYPE` none, no
+    /// engines) is a glider. A helicopter turbine, "unsupported" and
+    /// unknown values leave the engine unknown.
+    pub fn from_sim(f: &SimFacts) -> Self {
+        let kind = match f.category.as_deref() {
+            Some("Helicopter") => Some(Kind::Helicopter),
+            _ if f.floats == Some(true) => Some(Kind::SeaplaneAmphibian),
+            Some("Airplane") if f.engine_type == Some(2) && f.engines == Some(0) => {
+                Some(Kind::Glider)
+            }
+            Some("Airplane") => Some(Kind::Airplane),
+            _ => None,
+        };
+        let gear = if f.floats == Some(true) {
+            Some(Gear::Floats)
+        } else if f.skids == Some(true) {
+            Some(Gear::Skids)
+        } else {
+            f.retractable
+                .map(|r| if r { Gear::Retractable } else { Gear::Fixed })
+        };
+        Self {
+            kind,
+            engine: match f.engine_type {
+                Some(0) => Some(Engine::Piston),
+                Some(1) => Some(Engine::Jet),
+                Some(5) => Some(Engine::Turboprop),
+                _ => None,
+            },
+            engines: f.engines,
+            gear,
+        }
+    }
+
+    /// Lands on a runway the way the landing score and the runway rules
+    /// grade it; an unknown kind is taken for an airplane.
+    pub fn runway_landing(&self) -> bool {
+        !matches!(self.kind, Some(Kind::Helicopter | Kind::Glider))
     }
 }
 
@@ -340,6 +460,15 @@ pub struct Profile {
     pub flaps: Vec<FlapBand>,
     /// The class's phase boundaries this type moves.
     pub phases: Vec<(PhaseField, Sourced)>,
+    pub mlw: Option<Sourced>,
+    pub mmo: Option<Sourced>,
+    pub eye_to_wheel: Option<Sourced>,
+    pub airframe: Airframe,
+    /// `ATC MODEL` values and `TITLE` substrings that mean this type.
+    pub aliases: Vec<String>,
+    /// Signals known to be wrong on this type (an add-on that does not
+    /// drive the standard SimVar), read as no data (`Selection::mask`).
+    pub unreliable: Vec<SignalId>,
 }
 
 impl Profile {
@@ -382,7 +511,22 @@ impl Profile {
             ProfileField::MaxTailwind => self.max_tailwind.as_ref(),
             ProfileField::Vso => self.vso.as_ref(),
             ProfileField::MainGearTrack => self.main_gear_track.as_ref(),
+            ProfileField::Mlw => self.mlw.as_ref(),
+            ProfileField::Mmo => self.mmo.as_ref(),
+            ProfileField::EyeToWheel => self.eye_to_wheel.as_ref(),
             ProfileField::Vref | ProfileField::Vapp => None,
+        }
+    }
+
+    /// Whether the profile gives `field` at all (some flap band, some
+    /// reference speed source).
+    pub fn has(&self, field: ProfileField) -> bool {
+        match field {
+            ProfileField::Vfe => !self.flaps.is_empty(),
+            ProfileField::Vref | ProfileField::Vapp => {
+                self.vref.is_some() || self.approach_speed.is_some() || self.vso.is_some()
+            }
+            f => self.sourced(f, || None).is_some(),
         }
     }
 
@@ -473,12 +617,22 @@ struct Doc {
     flaps: Vec<FlapDoc>,
     #[serde(default)]
     phases: PhasesDoc,
+    mlw: Option<SourcedDoc>,
+    mmo: Option<SourcedDoc>,
+    eye_to_wheel: Option<SourcedDoc>,
+    #[serde(default)]
+    airframe: Airframe,
+    #[serde(default)]
+    aliases: Vec<String>,
+    #[serde(default)]
+    unreliable: Vec<String>,
 }
 
 #[derive(Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 struct PhasesDoc {
     roll_kt: Option<SourcedDoc>,
+    rto_kt: Option<SourcedDoc>,
     climb_end_ft: Option<SourcedDoc>,
     approach_ft: Option<SourcedDoc>,
     flare_ft: Option<SourcedDoc>,
@@ -490,6 +644,7 @@ impl PhasesDoc {
     fn take(&mut self, f: PhaseField) -> Option<SourcedDoc> {
         match f {
             PhaseField::RollKt => self.roll_kt.take(),
+            PhaseField::RtoKt => self.rto_kt.take(),
             PhaseField::ClimbEndFt => self.climb_end_ft.take(),
             PhaseField::ApproachFt => self.approach_ft.take(),
             PhaseField::FlareFt => self.flare_ft.take(),
@@ -725,7 +880,9 @@ impl Compiler<'_> {
                 set.push((f, s));
             }
         }
-        let wrong = if c.climb_end_ft > CLIMB_END_MAX_FT {
+        let wrong = if c.rto_kt < c.roll_kt {
+            "`rto_kt` below `roll_kt`"
+        } else if c.climb_end_ft > CLIMB_END_MAX_FT {
             "`climb_end_ft` above 1000 ft, where CICTT ends the initial climb"
         } else if c.approach_ft < c.climb_end_ft {
             "`approach_ft` below `climb_end_ft`"
@@ -747,7 +904,41 @@ impl Compiler<'_> {
         let (takeoff, landing) = doc
             .tail_contact
             .map_or((None, None), |t| (t.takeoff, t.landing));
+        let a = doc.airframe;
+        if a.engines.is_some_and(|n| n > Airframe::MAX_ENGINES)
+            || (a.engines == Some(0) && a.engine.is_some())
+        {
+            return Err(self.err(format!(
+                "`airframe.engines`: 1 to {} with an `engine`, 0 only without one",
+                Airframe::MAX_ENGINES
+            )));
+        }
+        if let Some(bad) = doc.aliases.iter().find(|a| key(a).len() < MIN_ALIAS_LEN) {
+            return Err(self.err(format!(
+                "`aliases`: `{bad}` needs at least {MIN_ALIAS_LEN} letters or digits"
+            )));
+        }
+        let unreliable = doc
+            .unreliable
+            .iter()
+            .map(|name| {
+                Lfl::V1
+                    .by_name(name)
+                    .map(|d| d.id)
+                    .ok_or_else(|| self.err(format!("`unreliable`: unknown signal `{name}`")))
+            })
+            .collect::<Result<_, _>>()?;
         Ok(Profile {
+            mlw: self.optional("mlw", ProfileField::Mlw, doc.mlw)?,
+            mmo: self.optional("mmo", ProfileField::Mmo, doc.mmo)?,
+            eye_to_wheel: self.optional(
+                "eye_to_wheel",
+                ProfileField::EyeToWheel,
+                doc.eye_to_wheel,
+            )?,
+            airframe: a,
+            aliases: doc.aliases,
+            unreliable,
             tail_takeoff_pitch: self.optional(
                 "tail_contact.takeoff",
                 ProfileField::TailTakeoffPitch,
@@ -797,20 +988,121 @@ impl Compiler<'_> {
     }
 }
 
+/// Shorter aliases would match inside unrelated titles.
+const MIN_ALIAS_LEN: usize = 3;
+
+/// A name as aliases are compared: letters and digits only, upper case, so
+/// `B737-800`, `b737 800` and `B737800` are one.
+fn key(name: &str) -> String {
+    name.chars()
+        .filter(char::is_ascii_alphanumeric)
+        .map(|c| c.to_ascii_uppercase())
+        .collect()
+}
+
+/// How a flight's profile was found, or what its class comes from without
+/// one: the first step of the chain that gave an answer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Identified {
+    /// The `ATC MODEL` designator has a profile.
+    Type,
+    /// A profile alias is the `ATC MODEL`.
+    Model,
+    /// A profile alias is part of the `TITLE`.
+    Title,
+    /// No profile: the class and airframe from the sim's own facts (`MAX
+    /// GROSS WEIGHT`, `ENGINE TYPE`, `CATEGORY`, gear).
+    Sim,
+    /// No profile, no sim facts: the class by the recorded gross weight.
+    Weight,
+    /// Nothing known: the transport defaults.
+    Unknown,
+}
+
+/// The checks that need a profile value, in words, with the values they
+/// read; `Selection::unchecked` lists those that cannot run.
+const CHECKS: [(&str, &[ProfileField]); 9] = [
+    ("flap speeds (Vfe)", &[ProfileField::Vfe]),
+    ("maximum operating speed (Vmo)", &[ProfileField::Vmo]),
+    (MMO_CHECK, &[ProfileField::Mmo]),
+    (GEAR_CHECK, &[ProfileField::Vle, ProfileField::Vlo]),
+    (
+        "tail strike",
+        &[
+            ProfileField::TailTakeoffPitch,
+            ProfileField::TailLandingPitch,
+        ],
+    ),
+    ("hard-landing inspection", &[ProfileField::HardLandingG]),
+    ("overweight landing", &[ProfileField::Mlw]),
+    ("approach speed against Vref", &[ProfileField::Vref]),
+    (
+        "crosswind and tailwind limits",
+        &[ProfileField::MaxCrosswind, ProfileField::MaxTailwind],
+    ),
+];
+const MMO_CHECK: &str = "maximum Mach (Mmo)";
+const GEAR_CHECK: &str = "gear speeds (Vle, Vlo)";
+
 /// The aircraft a flight is graded as.
 #[derive(Debug, Clone)]
 pub struct Selection<'a> {
-    /// The recorded ICAO type designator; `None` without an identity.
+    /// The ICAO type designator: the profile's, else the recorded one;
+    /// `None` without either.
     pub icao: Option<String>,
     /// `None` when the type has no profile.
     pub profile: Option<&'a Profile>,
-    /// The profile's class, else the class by weight (`aircraft`).
+    /// The profile's class, else the class by the sim's maximum gross
+    /// weight or by the recorded weight (`aircraft`).
     pub class: Option<Aircraft>,
     /// The class's phase boundaries with the profile's overrides.
     pub phases: PhaseConfig,
+    pub identified: Identified,
+    /// The profile's airframe, the sim's facts where it says nothing.
+    pub airframe: Airframe,
 }
 
 impl Selection<'_> {
+    /// The profile's scoring class; without one the class's default, a
+    /// transport turboprop scored as one (transport where unknown, as the
+    /// rules grade it).
+    pub fn scoring_class(&self) -> ScoringClass {
+        match (self.profile, self.class.unwrap_or(Aircraft::Transport)) {
+            (Some(p), _) => p.scoring_class,
+            (None, Aircraft::Transport) if self.airframe.engine == Some(Engine::Turboprop) => {
+                ScoringClass::Turboprop
+            }
+            (None, class) => ScoringClass::of(class),
+        }
+    }
+
+    /// The checks of `CHECKS` that cannot run for want of a profile value;
+    /// the gear speeds only for retractable or unknown gear, Mmo only for a
+    /// jet or an unknown engine.
+    pub fn unchecked(&self) -> Vec<&'static str> {
+        let a = self.airframe;
+        let moot = |what: &str| match what {
+            GEAR_CHECK => a.gear.is_some_and(|g| g != Gear::Retractable),
+            MMO_CHECK => a.engine.is_some_and(|e| e != Engine::Jet),
+            _ => false,
+        };
+        let given = |f: &ProfileField| self.profile.is_some_and(|p| p.has(*f));
+        CHECKS
+            .iter()
+            .filter(|(what, fields)| !moot(what) && !fields.iter().any(given))
+            .map(|(what, _)| *what)
+            .collect()
+    }
+
+    /// Marks the profile's unreliable signals failed in `flight`, so the
+    /// rules, the assessment and the charts read them as no data.
+    pub fn mask(&self, flight: &mut Flight) {
+        for &id in self.profile.iter().flat_map(|p| &p.unreliable) {
+            flight.invalidate(id);
+        }
+    }
+
     /// The phase boundary `f` in effect and where it comes from: the
     /// profile and its document (`PC12 profile, FAA AIM 4-3-3`) or the
     /// class default (`light class default`).
@@ -837,7 +1129,8 @@ impl Selection<'_> {
 }
 
 impl fmt::Display for Selection<'_> {
-    /// `C172 profile`, `transport class default (no B744 profile)`,
+    /// `C172 profile`, `B738 profile (by its ATC model)`,
+    /// `transport class default (no B744 profile)`,
     /// `no aircraft identity, unknown class`.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let missing = self
@@ -847,6 +1140,12 @@ impl fmt::Display for Selection<'_> {
                 format!("no {t} profile")
             });
         match (self.profile, self.class) {
+            (Some(p), _) if self.identified == Identified::Model => {
+                write!(f, "{} profile (by its ATC model)", p.icao)
+            }
+            (Some(p), _) if self.identified == Identified::Title => {
+                write!(f, "{} profile (by its title)", p.icao)
+            }
             (Some(p), _) => write!(f, "{} profile", p.icao),
             (None, Some(class)) => write!(f, "{class} class default ({missing})"),
             (None, None) => write!(f, "{missing}, unknown class"),
@@ -859,19 +1158,33 @@ impl fmt::Display for Selection<'_> {
 pub struct ProfileSet(Vec<Profile>);
 
 impl ProfileSet {
-    /// Loads (type designator, YAML) pairs, one per `<ICAO>.yaml` file.
+    /// Loads (type designator, YAML) pairs, one per `<ICAO>.yaml` file. An
+    /// alias may name one type only, and not another profile's designator.
     pub fn load<'a>(
         files: impl IntoIterator<Item = (&'a str, &'a str)>,
     ) -> Result<Self, ProfileError> {
-        files
+        let set: Vec<Profile> = files
             .into_iter()
             .map(|(icao, yaml)| {
                 let c = Compiler { profile: icao };
                 let doc = serde_yaml_ng::from_str(yaml).map_err(|e| c.err(e.to_string()))?;
                 c.compile(doc)
             })
-            .collect::<Result<_, _>>()
-            .map(Self)
+            .collect::<Result<_, _>>()?;
+        let mut names: Vec<(String, &str)> = set.iter().map(|p| (key(&p.icao), &*p.icao)).collect();
+        for p in &set {
+            for alias in &p.aliases {
+                let k = key(alias);
+                if let Some((_, other)) = names.iter().find(|(n, _)| *n == k) {
+                    return Err(ProfileError {
+                        profile: p.icao.clone(),
+                        message: format!("`aliases`: `{alias}` already names {other}"),
+                    });
+                }
+                names.push((k, &p.icao));
+            }
+        }
+        Ok(Self(set))
     }
 
     /// The profiles shipped in `profiles/`.
@@ -879,10 +1192,62 @@ impl ProfileSet {
         Self::load(SHIPPED.iter().copied())
     }
 
-    /// The profile of the flight's recorded type, with the class fallback.
+    /// The profile of the flight's recorded aircraft, with the fallbacks
+    /// of `identify`.
     pub fn select(&self, flight: &Flight) -> Selection<'_> {
-        let icao = flight.aircraft().and_then(AircraftId::icao_type);
-        self.select_type(icao, || aircraft(flight))
+        self.identify(flight.aircraft(), || aircraft(flight))
+    }
+
+    /// The profile of `id`, tried in the order of `Identified`: its type
+    /// designator, an alias equal to its `ATC MODEL`, the longest alias in
+    /// its `TITLE`. Without one the class comes from the sim's maximum gross
+    /// weight, else from `by_weight` (the recorded weight).
+    pub fn identify(
+        &self,
+        id: Option<&AircraftId>,
+        by_weight: impl FnOnce() -> Option<Aircraft>,
+    ) -> Selection<'_> {
+        let icao = id.and_then(AircraftId::icao_type);
+        let aliased = |matches: &dyn Fn(&str) -> bool| {
+            let found = self.0.iter().flat_map(|p| {
+                p.aliases
+                    .iter()
+                    .map(|a| key(a))
+                    .filter(|k| matches(k))
+                    .map(move |k| (k.len(), p))
+            });
+            found.max_by_key(|(len, _)| *len).map(|(_, p)| p)
+        };
+        let found = icao
+            .as_deref()
+            .and_then(|t| self.by_type(t))
+            .map(|p| (p, Identified::Type))
+            .or_else(|| {
+                let model = key(id?.model());
+                Some((aliased(&|k| k == model)?, Identified::Model))
+            })
+            .or_else(|| {
+                let title = key(&id?.title);
+                Some((aliased(&|k| title.contains(k))?, Identified::Title))
+            });
+        let facts = id.map(|i| &i.facts);
+        let sim = facts.map(Airframe::from_sim).unwrap_or_default();
+        if let Some((p, identified)) = found {
+            return self.selection(Some(p), Some(p.class), identified, sim);
+        }
+        let mtow = facts.and_then(|f| f.max_gross_lb).map(f64::from);
+        let class = mtow.map(Aircraft::by_weight).or_else(by_weight);
+        let identified = if mtow.is_some() || sim != Airframe::default() {
+            Identified::Sim
+        } else if class.is_some() {
+            Identified::Weight
+        } else {
+            Identified::Unknown
+        };
+        Selection {
+            icao,
+            ..self.selection(None, class, identified, sim)
+        }
     }
 
     /// The profile of type `icao`; without one, the class from `class`.
@@ -891,19 +1256,51 @@ impl ProfileSet {
         icao: Option<String>,
         class: impl FnOnce() -> Option<Aircraft>,
     ) -> Selection<'_> {
-        let profile = icao
-            .as_deref()
-            .and_then(|t| self.0.iter().find(|p| p.icao == t));
+        let profile = icao.as_deref().and_then(|t| self.by_type(t));
         let class = profile.map_or_else(class, |p| Some(p.class));
+        let identified = match (profile, class) {
+            (Some(_), _) => Identified::Type,
+            (None, Some(_)) => Identified::Weight,
+            (None, None) => Identified::Unknown,
+        };
+        Selection {
+            icao,
+            ..self.selection(profile, class, identified, Airframe::default())
+        }
+    }
+
+    fn by_type(&self, icao: &str) -> Option<&Profile> {
+        self.0.iter().find(|p| p.icao == icao)
+    }
+
+    /// The selection of `profile` (in its class) or of `class`, the
+    /// profile's airframe completed by the `sim`'s; a profile's turboprop
+    /// scoring class says its engine.
+    fn selection<'a>(
+        &self,
+        profile: Option<&'a Profile>,
+        class: Option<Aircraft>,
+        identified: Identified,
+        sim: Airframe,
+    ) -> Selection<'a> {
         let mut phases = class_phases(class);
         for (f, s) in profile.iter().flat_map(|p| &p.phases) {
             *f.of(&mut phases) = s.value;
         }
+        let stated = profile.map_or_else(Airframe::default, |p| {
+            let turboprop = p.scoring_class == ScoringClass::Turboprop;
+            p.airframe.or(Airframe {
+                engine: turboprop.then_some(Engine::Turboprop),
+                ..Airframe::default()
+            })
+        });
         Selection {
-            class,
-            icao,
+            icao: profile.map(|p| p.icao.clone()),
             profile,
+            class,
             phases,
+            identified,
+            airframe: stated.or(sim),
         }
     }
 }
@@ -1068,6 +1465,9 @@ flaps:
         assert!(
             err("  roll_kt: { value: 30 ft, source: x }\n").contains("is ft, but the field is kt")
         );
+        assert!(
+            err("  rto_kt: { value: 20 kt, source: x }\n").contains("`rto_kt` below `roll_kt`")
+        );
         assert!(err("  flare: { value: 30 ft, source: x }\n").contains("unknown field `flare`"));
     }
 
@@ -1178,6 +1578,257 @@ flaps:
         assert!(err.contains("unknown variant `piston`"), "{err}");
     }
 
+    const AIRFRAME: &str =
+        "airframe: { kind: airplane, engine: jet, engines: 2, gear: retractable }
+mlw: { value: 146300 lb, source: \"TCDS\" }
+mmo: { value: 0.82 M, source: \"AFM\" }
+eye_to_wheel: { value: 18 ft, source: \"FCTM\" }
+aliases: [\"B737-800\", \"Boeing 737-800\"]
+unreliable: [ap.engaged, sel.speed]
+";
+
+    #[test]
+    fn airframe_weights_aliases_and_unreliable_signals_load() {
+        let p = load(&format!("{PROFILE}{AIRFRAME}")).unwrap();
+        assert_eq!(
+            p.airframe,
+            Airframe {
+                kind: Some(Kind::Airplane),
+                engine: Some(Engine::Jet),
+                engines: Some(2),
+                gear: Some(Gear::Retractable),
+            }
+        );
+        let value = |f| p.value(f, || None);
+        assert_eq!(value(ProfileField::Mlw), Some(146_300.0));
+        assert_eq!(value(ProfileField::Mmo), Some(0.82));
+        assert_eq!(value(ProfileField::EyeToWheel), Some(18.0));
+        let names: Vec<_> = p
+            .unreliable
+            .iter()
+            .map(|&id| Lfl::V1.get(id).unwrap().name)
+            .collect();
+        assert_eq!(names, ["ap.engaged", "sel.speed"]);
+        // Every block is optional: an airframe says only what is known.
+        assert_eq!(load(PROFILE).unwrap().airframe, Airframe::default());
+        let gear = load(&format!("{PROFILE}airframe: {{ gear: floats }}\n")).unwrap();
+        assert_eq!(gear.airframe.gear, Some(Gear::Floats));
+    }
+
+    #[test]
+    fn airframe_weights_aliases_and_unreliable_signals_are_checked() {
+        let err = |from: &str, to: &str| {
+            load(&format!("{PROFILE}{}", AIRFRAME.replace(from, to))).unwrap_err()
+        };
+        assert!(err("airplane", "blimp").contains("unknown variant `blimp`"));
+        assert!(err("engines: 2", "engines: 9").contains("`airframe.engines`: 1 to 8"));
+        assert!(err("engines: 2", "engines: 0").contains("0 only without one"));
+        assert!(err("gear: retractable", "wheels: 3").contains("unknown field `wheels`"));
+        assert!(err("146300 lb", "146300 kg").contains("`mlw`"));
+        assert!(err("0.82 M", "0.82").contains("is a plain number, but the field is M"));
+        assert!(err("18 ft", "18 kt").contains("`eye_to_wheel`"));
+        assert!(err("ap.engaged", "ap.on").contains("`unreliable`: unknown signal `ap.on`"));
+        assert!(err("\"B737-800\"", "\"7-8\"").contains("`7-8` needs at least 3"));
+        let err = err(", source: \"AFM\"", "");
+        assert!(err.contains("missing field `source`"), "{err}");
+    }
+
+    #[test]
+    fn an_alias_names_one_type() {
+        let other = PROFILE.replace("type: TEST", "type: B738");
+        let with = |aliases: &str| {
+            let yaml = format!("{PROFILE}aliases: [{aliases}]\n");
+            ProfileSet::load([("TEST", yaml.as_str()), ("B738", other.as_str())])
+                .map_err(|e| e.to_string())
+        };
+        assert!(with("\"B737-800\"").is_ok());
+        assert_eq!(
+            with("\"b-738\"").unwrap_err(),
+            "profile `TEST`: `aliases`: `b-738` already names B738"
+        );
+        let twice = format!("{other}aliases: [B737-800]\n");
+        let both = format!("{PROFILE}aliases: [\"B737 800\"]\n");
+        let err =
+            ProfileSet::load([("TEST", both.as_str()), ("B738", twice.as_str())]).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "profile `B738`: `aliases`: `B737-800` already names TEST"
+        );
+    }
+
+    fn id(title: &str, model: &str, facts: SimFacts) -> AircraftId {
+        AircraftId {
+            title: title.into(),
+            atc_model: model.into(),
+            facts,
+            ..AircraftId::default()
+        }
+    }
+
+    #[test]
+    fn identification_tries_the_type_the_model_the_title_then_the_sim() {
+        let b738 = format!("{}{AIRFRAME}", PROFILE.replace("type: TEST", "type: B738"));
+        let a20n = format!(
+            "{}aliases: [A320, A320neo]\n",
+            PROFILE.replace("type: TEST", "type: A20N")
+        );
+        let set = ProfileSet::load([("B738", b738.as_str()), ("A20N", a20n.as_str())]).unwrap();
+        let none = SimFacts::default;
+        let pick = |id: &AircraftId| {
+            let s = set.identify(Some(id), || Some(Aircraft::Light));
+            (s.icao.clone(), s.identified, s.to_string())
+        };
+        let t = |icao: &str| Some(icao.to_owned());
+        assert_eq!(
+            pick(&id("", "ATCCOM.AC_MODEL B738.0.text", none())),
+            (t("B738"), Identified::Type, "B738 profile".into())
+        );
+        assert_eq!(
+            pick(&id("", "b737 800", none())),
+            (
+                t("B738"),
+                Identified::Model,
+                "B738 profile (by its ATC model)".into()
+            )
+        );
+        // The longest alias in the title wins.
+        assert_eq!(
+            pick(&id("Airbus A320neo Lufthansa", "", none())),
+            (
+                t("A20N"),
+                Identified::Title,
+                "A20N profile (by its title)".into()
+            )
+        );
+        // No profile: the sim's maximum weight outranks the recorded one.
+        let heavy = SimFacts {
+            max_gross_lb: Some(15_000),
+            engine_type: Some(5),
+            ..none()
+        };
+        let s = set.identify(Some(&id("King Air 350", "BE35", heavy)), || {
+            Some(Aircraft::Light)
+        });
+        assert_eq!(
+            (s.identified, s.class),
+            (Identified::Sim, Some(Aircraft::Transport))
+        );
+        assert_eq!(s.to_string(), "transport class default (no BE35 profile)");
+        assert_eq!(s.scoring_class(), ScoringClass::Turboprop);
+        let s = set.identify(Some(&id("", "", none())), || Some(Aircraft::Light));
+        assert_eq!(
+            (s.identified, s.class),
+            (Identified::Weight, Some(Aircraft::Light))
+        );
+        let s = set.identify(None, || None);
+        assert_eq!(
+            (s.identified, s.class, &s.icao),
+            (Identified::Unknown, None, &None)
+        );
+        assert_eq!(s.scoring_class(), ScoringClass::Jet);
+    }
+
+    #[test]
+    fn the_profile_airframe_comes_before_the_sim_facts() {
+        let p = format!("{PROFILE}airframe: {{ gear: fixed }}\nscoring_class: turboprop\n");
+        let set = ProfileSet::load([("TEST", p.as_str())]).unwrap();
+        let facts = SimFacts {
+            category: Some("Airplane".into()),
+            engine_type: Some(0),
+            retractable: Some(true),
+            engines: Some(1),
+            ..SimFacts::default()
+        };
+        let s = set.identify(Some(&id("", "TEST", facts)), || None);
+        // The scoring class says turboprop; the sim fills only the unknowns.
+        assert_eq!(
+            s.airframe,
+            Airframe {
+                kind: Some(Kind::Airplane),
+                engine: Some(Engine::Turboprop),
+                engines: Some(1),
+                gear: Some(Gear::Fixed),
+            }
+        );
+    }
+
+    #[test]
+    fn sim_facts_give_the_kind_engine_and_gear() {
+        let f = |category: &str, engine_type, engines, floats, skids| {
+            Airframe::from_sim(&SimFacts {
+                category: Some(category.into()),
+                engine_type: Some(engine_type),
+                engines: Some(engines),
+                retractable: Some(false),
+                floats: Some(floats),
+                skids: Some(skids),
+                max_gross_lb: None,
+            })
+        };
+        let heli = f("Helicopter", 3, 1, false, true);
+        assert_eq!(
+            (heli.kind, heli.engine, heli.gear),
+            (Some(Kind::Helicopter), None, Some(Gear::Skids))
+        );
+        assert!(!heli.runway_landing());
+        let glider = f("Airplane", 2, 0, false, false);
+        assert_eq!(
+            (glider.kind, glider.gear),
+            (Some(Kind::Glider), Some(Gear::Fixed))
+        );
+        assert!(!glider.runway_landing());
+        let float = f("Airplane", 0, 1, true, false);
+        assert_eq!(
+            (float.kind, float.engine, float.gear),
+            (
+                Some(Kind::SeaplaneAmphibian),
+                Some(Engine::Piston),
+                Some(Gear::Floats)
+            )
+        );
+        assert!(float.runway_landing());
+        assert_eq!(f("Airplane", 1, 2, false, false).engine, Some(Engine::Jet));
+        assert_eq!(f("Airplane", 4, 1, false, false).engine, None);
+        assert_eq!(
+            Airframe::from_sim(&SimFacts::default()),
+            Airframe::default()
+        );
+        assert!(Airframe::default().runway_landing());
+    }
+
+    #[test]
+    fn unchecked_lists_what_a_missing_profile_turns_off() {
+        let set = ProfileSet::load([("TEST", PROFILE)]).unwrap();
+        let s = set.select_type(Some("NONE".into()), || None);
+        assert_eq!(s.unchecked().len(), CHECKS.len());
+        let s = set.select_type(Some("TEST".into()), || None);
+        assert_eq!(
+            s.unchecked(),
+            [
+                "maximum operating speed (Vmo)",
+                MMO_CHECK,
+                GEAR_CHECK,
+                "overweight landing",
+                "approach speed against Vref",
+                "crosswind and tailwind limits",
+            ]
+        );
+        // Fixed gear has no gear speeds, a piston no Mmo.
+        let s = Selection {
+            airframe: Airframe {
+                engine: Some(Engine::Piston),
+                gear: Some(Gear::Fixed),
+                ..Airframe::default()
+            },
+            ..s
+        };
+        assert!(
+            !s.unchecked()
+                .iter()
+                .any(|c| [MMO_CHECK, GEAR_CHECK].contains(c))
+        );
+    }
+
     #[test]
     fn interpolation_holds_at_the_ends() {
         let (xs, ys) = ([1.0, 3.0], [10.0, 30.0]);
@@ -1198,19 +1849,25 @@ flaps:
                 ("A20N", Aircraft::Transport),
                 ("A21N", Aircraft::Transport),
                 ("A310", Aircraft::Transport),
+                ("A320", Aircraft::Transport),
                 ("A333", Aircraft::Transport),
                 ("AT76", Aircraft::Transport),
+                ("B350", Aircraft::Transport),
                 ("B38M", Aircraft::Transport),
                 ("B738", Aircraft::Transport),
                 ("B748", Aircraft::Transport),
+                ("B772", Aircraft::Transport),
+                ("B77W", Aircraft::Transport),
                 ("B78X", Aircraft::Transport),
                 ("BE36", Aircraft::Light),
                 ("BE58", Aircraft::Light),
+                ("C152", Aircraft::Light),
                 ("C172", Aircraft::Light),
                 ("C208", Aircraft::Light),
                 ("C25C", Aircraft::Transport),
                 ("C700", Aircraft::Transport),
                 ("DA62", Aircraft::Light),
+                ("P28A", Aircraft::Light),
                 ("PC12", Aircraft::Light),
                 ("PC24", Aircraft::Transport),
                 ("SF34", Aircraft::Transport),

@@ -1,0 +1,16 @@
+{
+  "title": "Stepper",
+  "description": "Show where a person is in a multi-step flow and what is done.",
+  "category": "Feedback",
+  "kind": "component",
+  "dependencies": [
+    "motion"
+  ],
+  "requires": [],
+  "tags": [
+    "motion",
+    "product"
+  ],
+  "source": "arc",
+  "canvas": []
+}

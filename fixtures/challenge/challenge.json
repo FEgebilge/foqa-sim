@@ -4,5 +4,5 @@
   "aircraft": { "types": ["C172"] },
   "start": { "distance_nm": 4, "height_ft": 1300, "ias_kt": 140, "gear_down": true, "flaps": 1, "mode": "self" },
   "gate": { "distance_nm": 3 },
-  "scoring": { "version": "landing-2" }
+  "scoring": { "version": "landing-3" }
 }

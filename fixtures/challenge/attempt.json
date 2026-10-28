@@ -61,8 +61,8 @@
   "gate_s": 41.25,
   "touchdown_s": 124.0,
   "score": {
-    "version": "landing-2",
-    "total": 59.0,
+    "version": "landing-3",
+    "total": 55.9,
     "parts": [
       {
         "name": "stability",
@@ -81,7 +81,7 @@
       {
         "name": "point",
         "weight": 20.0,
-        "score": 1.0,
+        "score": 0.6464499769477428,
         "value": null,
         "unit": ""
       },
@@ -109,8 +109,8 @@
     ]
   },
   "assessment": {
-    "method": "landing-2",
-    "score": 59.0,
+    "method": "landing-3",
+    "score": 55.9,
     "grade": "poor",
     "confidence": "full",
     "caps": [

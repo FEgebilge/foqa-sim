@@ -8,6 +8,9 @@ pub type Handle = *mut c_void;
 pub type HResult = i32;
 pub type Dword = u32;
 
+/// `E_FAIL`: what `SimConnect_GetNextDispatch` returns for an empty queue.
+pub const E_FAIL: HResult = 0x8000_4005_u32 as HResult;
+
 pub const OBJECT_ID_USER_AIRCRAFT: Dword = 0;
 /// `SIMCONNECT_OPEN_CONFIGINDEX_LOCAL`: ignore SimConnect.cfg, connect locally.
 pub const OPEN_CONFIGINDEX_LOCAL: Dword = Dword::MAX;
@@ -56,6 +59,7 @@ pub mod recv_id {
     pub const EVENT: u32 = 4;
     pub const EVENT_FILENAME: u32 = 6;
     pub const SIMOBJECT_DATA: u32 = 8;
+    pub const SYSTEM_STATE: u32 = 15;
     pub const AIRPORT_LIST: u32 = 18;
     pub const FACILITY_DATA: u32 = 28;
     pub const FACILITY_DATA_END: u32 = 29;
@@ -96,6 +100,15 @@ pub struct RecvEvent {
     pub group_id: Dword,
     pub event_id: Dword,
     pub data: Dword,
+}
+
+/// Head of `SIMCONNECT_RECV_SYSTEM_STATE`: the float and the string that
+/// follow are not read.
+#[repr(C, packed)]
+pub struct RecvSystemState {
+    pub base: Recv,
+    pub request_id: Dword,
+    pub integer: Dword,
 }
 
 #[repr(C, packed)]
@@ -285,6 +298,10 @@ unsafe extern "C" {
     ) -> HResult;
     #[link_name = "SimConnect_GetNextDispatch"]
     pub fn get_next_dispatch(handle: Handle, data: *mut *mut Recv, len: *mut Dword) -> HResult;
+    /// H:1077.
+    #[link_name = "SimConnect_RequestSystemState"]
+    pub fn request_system_state(handle: Handle, request_id: Dword, state: *const c_char)
+    -> HResult;
     #[link_name = "SimConnect_SubscribeToFlowEvent"]
     pub fn subscribe_to_flow_event(handle: Handle) -> HResult;
     #[link_name = "SimConnect_AddToFacilityDefinition"]
@@ -325,6 +342,25 @@ unsafe extern "C" {
     ) -> HResult;
     #[link_name = "SimConnect_GetLastSentPacketID"]
     pub fn get_last_sent_packet_id(handle: Handle, send_id: *mut Dword) -> HResult;
+}
+
+/// `WAIT_FAILED`: `WaitForSingleObject` could not wait (an invalid handle).
+pub const WAIT_FAILED: Dword = Dword::MAX;
+
+// Win32 (kernel32, which every Windows program links): the event SimConnect
+// signals when it queues a message (`SimConnect_Open`'s `hEventHandle`).
+unsafe extern "system" {
+    #[link_name = "CreateEventW"]
+    pub fn create_event(
+        attributes: *mut c_void,
+        manual_reset: i32,
+        initial_state: i32,
+        name: *const u16,
+    ) -> Handle;
+    #[link_name = "WaitForSingleObject"]
+    pub fn wait_for_single_object(handle: Handle, milliseconds: Dword) -> Dword;
+    #[link_name = "CloseHandle"]
+    pub fn close_handle(handle: Handle) -> i32;
 }
 
 #[cfg(test)]

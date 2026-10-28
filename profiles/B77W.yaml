@@ -1,0 +1,18 @@
+# Boeing 777-300ER type profile (ICAO B77W, Doc 8643). Schema: docs/rules.md.
+#
+# Reference speeds only. EASA TCDS IM.A.003 Issue 20 (13 May 2026, sec. 9/10 Air
+# Speeds, https://www.easa.europa.eu/en/downloads/7521/en) says "See Airplane
+# Flight Manual", and no primary VMO/VFE table was reachable, so those fields
+# are left out rather than taken from conflicting flashcard decks.
+type: B77W
+name: Boeing 777-300ER
+class: transport
+airframe: { kind: airplane, engine: jet, engines: 2, gear: retractable }
+mlw: { value: 554000 lb, source: "Boeing, Aerodrome Reference Code and Approach Speeds, Rev A, table row 777-300ER: MLW 554,000 lb (251290 kg), https://www.boeing.com/content/dam/boeing/v2/airports/faq/arcandapproachspeeds.pdf" }
+aliases: [777-300ER]
+vref:
+  source: "Boeing, Aerodrome Reference Code and Approach Speeds, Rev A, table row 777-300ER: approach speed 150 kt, MLW 251,290 kg, https://www.boeing.com/content/dam/boeing/v2/airports/faq/arcandapproachspeeds.pdf"
+  approximate: true
+  note: "published value is the ICAO threshold speed at maximum landing weight and the maximum certificated landing flap; lighter weights scaled by sqrt(W/MLW) (Vref is 1.3 Vs and Vs goes with sqrt(W) at constant CL max); other landing flaps read a few kt higher, not published"
+  flaps:
+    - { flap: 30 deg, weights_kg: [163300, 188500, 213600, 251290], ias: [121 kt, 130 kt, 138 kt, 150 kt] }

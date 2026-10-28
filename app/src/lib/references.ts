@@ -1,9 +1,9 @@
 // Sourced context for the landing card and charts, display only (events come from the rules, type limits from the profile).
-// A "reference" is published (manufacturer, regulator, ICAO/FAA). The shaded bands under a gauge are the landing-2 bands of
+// A "reference" is published (manufacturer, regulator, ICAO/FAA). The shaded bands under a gauge are the landing-3 bands of
 // the criterion that grades that value (lib/assessment.ts), so the gauge and the score cannot disagree.
 import type { CriterionAssessment, Debrief, RunwayFix, Sourced } from "../types";
 import { ZONE_COLOR, ZONES, zones } from "./assessment";
-import { M_PER_FT, number } from "./format";
+import { lengthM, M_PER_FT, number } from "./format";
 
 type Flight = Debrief["flight"];
 /** A sourced reference on a scale: a point, or a range when `to` is set. */
@@ -89,7 +89,7 @@ export function speedScale(ias: number, reference: number, b2?: CriterionAssessm
 export function centrelineScale(cross: number, widthM: number | undefined, d1?: CriterionAssessment): Scale | null {
   const bands = scoreBands(d1, (ft) => ft * M_PER_FT);
   if (!bands) return null;
-  const marks: Mark[] = widthM ? [{ at: widthM / 2, label: `Runway edge ${number(widthM / 2, 1)} m from the centreline` }] : [];
+  const marks: Mark[] = widthM ? [{ at: widthM / 2, label: `Runway edge ${lengthM(widthM / 2, 1)} from the centreline` }] : [];
   return sized(0, Math.abs(cross), bands, marks, 5);
 }
 
@@ -106,8 +106,8 @@ export const LIGHT_PITCH = { text: "Target: main wheels first, nosewheel held of
 export function distanceScale(fix: RunwayFix, flight: Flight, c1?: CriterionAssessment): Scale {
   const ap = fix.aiming_point_m, max = Math.min(fix.lda_m, Math.max(fix.tdz_m * 1.25, fix.along_m * 1.1));
   const marks: Mark[] = [
-    { at: 0, to: fix.tdz_m, label: `Touchdown zone, first ${number(fix.tdz_m)} m`, source: SRC.faaTdz },
-    { at: ap, label: `Aiming point ${ap} m`, source: SRC.annex14 },
+    { at: 0, to: fix.tdz_m, label: `Touchdown zone, first ${lengthM(fix.tdz_m)}`, source: SRC.faaTdz },
+    { at: ap, label: `Aiming point ${lengthM(ap)}`, source: SRC.annex14 },
   ];
   if (flight.class === "transport") {
     marks.push({ at: ap - 250 * M_PER_FT, to: ap + 500 * M_PER_FT, label: "Aiming-point window, -250 / +500 ft", source: SRC.atp },

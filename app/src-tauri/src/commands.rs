@@ -1,18 +1,18 @@
 //! The commands of `docs/debrief-api.md` and the state they share with the
 //! recorder.
 
-use std::fs::File;
+use std::fs::{self, File};
 use std::io::{self, BufReader};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use ::debrief::{
-    Debrief, FlightSummary, Index, LandingNotice, RecorderStatus, Station, StorageUsage,
+    Analysis, Debrief, FlightSummary, Index, LandingNotice, RecorderStatus, Station, StorageUsage,
     TrendFilter, Trends,
 };
 use capture::{
@@ -26,8 +26,10 @@ use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
 
 use crate::attempts::{Attempts, Cut, Record, State as AttemptState, Uncut, View};
+use crate::diag;
 use crate::library::{Briefing, Entry, Library};
 use crate::setup::{Setup, SetupStatus};
+use crate::store::{FlightMeta, Listed, Store, TRASH_KEEP, TrashUsage};
 
 /// What the commands, the tray and the recorder thread share.
 pub struct Shared {
@@ -52,6 +54,41 @@ pub struct Shared {
     pub(crate) views: Views,
     /// A pass over the slices still to cut is running.
     reslicing: AtomicBool,
+    /// What the last analysis of the live journal found, so the gate watch
+    /// and the pre-flight card don't re-read a journal that did not grow.
+    gate_memo: Memo<Option<f64>>,
+    preflight_memo: Memo<(Line, Option<f64>)>,
+}
+
+/// The size and modification time of a file: it changed if they did.
+type Stamp = (u64, SystemTime);
+
+/// A result computed from one file, kept while the file is unchanged.
+struct Memo<T>(Mutex<Option<(String, Stamp, T)>>);
+
+impl<T: Clone> Memo<T> {
+    fn new() -> Self {
+        Self(Mutex::new(None))
+    }
+
+    /// The result for `key` and the file `path`, from `compute` unless it
+    /// ran for this key on this very file.
+    fn get(&self, key: &str, path: &Path, compute: impl FnOnce() -> T) -> T {
+        let stamp = fs::metadata(path)
+            .ok()
+            .and_then(|m| Some((m.len(), m.modified().ok()?)));
+        let mut slot = lock(&self.0);
+        if let (Some(now), Some((k, then, v))) = (stamp, &*slot)
+            && k == key
+            && *then == now
+        {
+            return v.clone();
+        }
+        let value = compute();
+        // The stamp is from before `compute`: a file that grew meanwhile misses.
+        *slot = stamp.map(|s| (key.to_owned(), s, value.clone()));
+        value
+    }
 }
 
 /// Where an optional module joins the attempt lifecycle; the core knows
@@ -99,6 +136,8 @@ impl Shared {
             setup,
             hooks: None,
             reslicing: AtomicBool::new(false),
+            gate_memo: Memo::new(),
+            preflight_memo: Memo::new(),
         }
     }
 
@@ -107,21 +146,50 @@ impl Shared {
         Command::new("explorer").arg(&self.dir).spawn().map(drop)
     }
 
-    /// Every stored flight in the folder, the most recently written first.
+    /// Every stored flight in the folder, the most recently written first,
+    /// the one being recorded too.
     pub fn summaries(&self) -> Vec<FlightSummary> {
         self.index.summaries(&self.station)
     }
 
-    /// Deletes a stored flight's files for good, unless it is the one being
-    /// recorded.
+    /// `summaries`, each analysing thread first running `start`.
+    pub fn summaries_with(&self, start: &(dyn Fn() + Sync)) -> Vec<FlightSummary> {
+        self.index.summaries_with(&self.station, start)
+    }
+
+    /// The compact flights only: what trends and exports are about, and
+    /// without analysing the journal that changes on every flush.
+    pub fn saved(&self) -> Vec<FlightSummary> {
+        self.index.saved(&self.station)
+    }
+
+    pub(crate) fn store(&self) -> Store<'_> {
+        Store::new(&self.dir)
+    }
+
+    /// The flight list with each flight's meta.
+    fn listed(&self) -> Vec<Listed> {
+        let mut meta = self.store().all_meta();
+        let summaries = self.summaries().into_iter();
+        summaries
+            .map(|summary| Listed {
+                meta: meta.remove(&summary.id).unwrap_or_default(),
+                summary,
+            })
+            .collect()
+    }
+
+    /// Moves a stored flight's files to the trash, unless it is the one
+    /// being recorded.
     fn delete(&self, id: &str) -> Result<(), String> {
         self.flight(id)?;
         if matches!(&*lock(&self.status), RecorderStatus::Recording { flight_id, .. } if flight_id == id)
         {
             return Err(format!("{id} is being recorded"));
         }
-        ::debrief::delete_flight(&self.dir, id).map_err(|e| format!("{id}: {e}"))?;
-        Ok(())
+        self.store()
+            .trash(id, SystemTime::now())
+            .map_err(|e| format!("{id}: {e}"))
     }
 
     fn setup_status(&self) -> SetupStatus {
@@ -131,15 +199,19 @@ impl Shared {
     /// The stored file of a flight id. Ids are file stems from `list_flights`;
     /// anything else could name a file outside the folder.
     pub(crate) fn flight(&self, id: &str) -> Result<PathBuf, String> {
-        let stem = !id.is_empty()
-            && id
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || "-_".contains(c));
-        if !stem {
-            return Err(format!("no flight {id:?}"));
-        }
+        checked(id)?;
         ::debrief::flight_path(&self.dir, id).ok_or_else(|| format!("no flight {id:?}"))
     }
+}
+
+/// `id` when it can only be a file stem from `list_flights`.
+fn checked(id: &str) -> Result<&str, String> {
+    let stem = !id.is_empty()
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "-_".contains(c));
+    stem.then_some(id)
+        .ok_or_else(|| format!("no flight {id:?}"))
 }
 
 /// What optional modules use.
@@ -175,23 +247,16 @@ pub(crate) async fn blocking<T: Send + 'static>(
 }
 
 #[tauri::command]
-pub async fn list_flights(shared: State<'_, Arc<Shared>>) -> Result<Vec<FlightSummary>, String> {
+pub async fn list_flights(shared: State<'_, Arc<Shared>>) -> Result<Vec<Listed>, String> {
     let shared = Arc::clone(&shared);
-    blocking(move || Ok(shared.summaries())).await
+    blocking(move || Ok(shared.listed())).await
 }
 
-/// The flights' trends (docs/trends.md) from the cached summaries.
+/// The saved flights' trends (docs/trends.md) from the cached summaries.
 #[tauri::command]
 pub async fn trends(filter: TrendFilter, shared: State<'_, Arc<Shared>>) -> Result<Trends, String> {
     let shared = Arc::clone(&shared);
-    blocking(move || {
-        Ok(::debrief::trends(
-            &shared.summaries(),
-            &filter,
-            &shared.station,
-        ))
-    })
-    .await
+    blocking(move || Ok(::debrief::trends(&shared.saved(), &filter, &shared.station))).await
 }
 
 #[tauri::command]
@@ -204,10 +269,83 @@ pub async fn debrief(id: String, shared: State<'_, Arc<Shared>>) -> Result<Debri
     .await
 }
 
+/// What `delete_flights` did: the flights now in the trash and, in plain
+/// words, why the others are not.
+#[derive(Debug, Serialize)]
+pub struct Deleted {
+    pub trashed: Vec<String>,
+    pub failed: Vec<String>,
+}
+
+/// Moves flights to the trash, from where `restore_flights` brings them
+/// back; the one being recorded is refused. Trash older than `TRASH_KEEP`
+/// is purged on the way.
 #[tauri::command]
-pub async fn delete_flight(id: String, shared: State<'_, Arc<Shared>>) -> Result<(), String> {
+pub async fn delete_flights(
+    ids: Vec<String>,
+    shared: State<'_, Arc<Shared>>,
+) -> Result<Deleted, String> {
     let shared = Arc::clone(&shared);
-    blocking(move || shared.delete(&id)).await
+    blocking(move || {
+        shared.store().purge(TRASH_KEEP, SystemTime::now());
+        let (mut trashed, mut failed) = (Vec::new(), Vec::new());
+        for id in ids {
+            match shared.delete(&id) {
+                Ok(()) => trashed.push(id),
+                Err(e) => failed.push(e),
+            }
+        }
+        Ok(Deleted { trashed, failed })
+    })
+    .await
+}
+
+/// Brings trashed flights back; the ids restored.
+#[tauri::command]
+pub async fn restore_flights(
+    ids: Vec<String>,
+    shared: State<'_, Arc<Shared>>,
+) -> Result<Vec<String>, String> {
+    let shared = Arc::clone(&shared);
+    blocking(move || {
+        let store = shared.store();
+        let restored =
+            ids.into_iter()
+                .filter(|id| match checked(id).and_then(|id| store.restore(id)) {
+                    Ok(()) => true,
+                    Err(e) => {
+                        eprintln!("restore: {e}");
+                        false
+                    }
+                });
+        Ok(restored.collect())
+    })
+    .await
+}
+
+/// Deletes the trash for good; how many flights went.
+#[tauri::command]
+pub async fn purge_trash(shared: State<'_, Arc<Shared>>) -> Result<usize, String> {
+    let shared = Arc::clone(&shared);
+    blocking(move || Ok(shared.store().purge(Duration::ZERO, SystemTime::now()))).await
+}
+
+#[tauri::command]
+pub fn flight_meta_get(id: String, shared: State<'_, Arc<Shared>>) -> Result<FlightMeta, String> {
+    shared.flight(&id)?;
+    Ok(shared.store().meta(&id))
+}
+
+/// Replaces the flight's title, notes and tags; the meta as kept (trimmed,
+/// tags without repeats). Too long a value is refused in plain words.
+#[tauri::command]
+pub fn flight_meta_set(
+    id: String,
+    meta: FlightMeta,
+    shared: State<'_, Arc<Shared>>,
+) -> Result<FlightMeta, String> {
+    shared.flight(&id)?;
+    shared.store().set_meta(&id, meta)
 }
 
 /// Places the aircraft at a landing challenge's start (docs/challenges.md):
@@ -283,41 +421,14 @@ impl Shared {
                 None,
             ),
         };
-        let analysis = flight.as_ref().map(|id| {
-            self.flight(id)
-                .and_then(|p| self.station.open(&p).map_err(|e| e.to_string()))
-        });
-        let rule = &c.aircraft;
-        let aircraft = match &analysis {
-            _ if rule.classes.is_empty() && rule.types.is_empty() => {
-                Line::ok("aircraft", "Any aircraft.")
-            }
-            None => Line::unknown("aircraft", "Checked once a flight is loaded."),
-            Some(Err(_)) => Line::unknown(
-                "aircraft",
-                "Checked once the flight has data; give it a few seconds.",
-            ),
-            Some(Ok(a)) => {
-                let check = challenge::aircraft_check(c, a);
-                let needs = if rule.types.is_empty() {
-                    let classes: Vec<_> = rule.classes.iter().map(|k| k.to_string()).collect();
-                    format!("a {} aircraft", classes.join(" or "))
-                } else {
-                    format!("a {}", rule.types.join(" or "))
-                };
-                if check.ok {
-                    Line::ok("aircraft", format!("{} is loaded.", check.detail))
-                } else {
-                    Line::fail(
-                        "aircraft",
-                        format!(
-                            "A {} is loaded; this challenge needs {needs}.",
-                            check.detail
-                        ),
-                        "Load one; flown as it is, the attempt won't count.",
-                    )
-                }
-            }
+        let (aircraft, begin) = match flight.as_ref().map(|id| self.flight(id)) {
+            Some(Ok(path)) => self.preflight_memo.get(key, &path, || {
+                let a = self.station.open(&path).map_err(|e| e.to_string());
+                let begin = a.as_ref().ok().and_then(|a| a.track.t.last());
+                (aircraft_line(c, Some(&a)), begin.map(|t| t.as_secs_f64()))
+            }),
+            Some(Err(e)) => (aircraft_line(c, Some(&Err(e))), None),
+            None => (aircraft_line(c, None), None),
         };
         let conditions = &c.conditions;
         let weather = if conditions.wind.is_none()
@@ -336,7 +447,6 @@ impl Shared {
             Some((state, text, fix)) => Line::new("ranking", state, text, fix.as_deref()),
             None => Line::ok("ranking", "Local challenge file: graded here only."),
         };
-        let begin = analysis.and_then(|a| a.ok()?.track.t.last().map(|t| t.as_secs_f64()));
         (
             vec![sim, aircraft, weather, ranking],
             flight.map(|id| (id, begin)),
@@ -463,11 +573,14 @@ impl Shared {
         if r.state != AttemptState::Flying || !recording {
             return;
         }
-        let graded = self
-            .attempts
-            .definition(&r.id)
-            .and_then(|d| self.grade(r, &d));
-        if let Ok(Some(gate_s)) = graded.map(|a| a.gate_s)
+        let Some(path) = r.flight_id.as_deref().and_then(|f| self.flight(f).ok()) else {
+            return;
+        };
+        let gate_s = self.gate_memo.get(&r.id, &path, || {
+            let graded = self.attempts.definition(&r.id);
+            graded.and_then(|d| self.grade(r, &d)).ok()?.gate_s
+        });
+        if let Some(gate_s) = gate_s
             && let Err(e) = self.attempts.gate(&r.id, gate_s)
         {
             eprintln!("attempt {}: {e}", r.id);
@@ -641,6 +754,43 @@ fn marker(
     }
 }
 
+/// The pre-flight card's aircraft line for the flight's `analysis`, if
+/// there is a flight.
+fn aircraft_line(c: &Challenge, analysis: Option<&Result<Analysis<'_>, String>>) -> Line {
+    let rule = &c.aircraft;
+    match analysis {
+        _ if rule.classes.is_empty() && rule.types.is_empty() => {
+            Line::ok("aircraft", "Any aircraft.")
+        }
+        None => Line::unknown("aircraft", "Checked once a flight is loaded."),
+        Some(Err(_)) => Line::unknown(
+            "aircraft",
+            "Checked once the flight has data; give it a few seconds.",
+        ),
+        Some(Ok(a)) => {
+            let check = challenge::aircraft_check(c, a);
+            let needs = if rule.types.is_empty() {
+                let classes: Vec<_> = rule.classes.iter().map(|k| k.to_string()).collect();
+                format!("a {} aircraft", classes.join(" or "))
+            } else {
+                format!("a {}", rule.types.join(" or "))
+            };
+            if check.ok {
+                Line::ok("aircraft", format!("{} is loaded.", check.detail))
+            } else {
+                Line::fail(
+                    "aircraft",
+                    format!(
+                        "A {} is loaded; this challenge needs {needs}.",
+                        check.detail
+                    ),
+                    "Load one; flown as it is, the attempt won't count.",
+                )
+            }
+        }
+    }
+}
+
 /// A line of the pre-flight card.
 #[derive(Debug, Clone, Serialize)]
 pub struct Line {
@@ -678,8 +828,9 @@ impl Line {
 }
 
 #[tauri::command]
-pub fn challenges_list(shared: State<'_, Arc<Shared>>) -> Vec<Entry> {
-    shared.library.list()
+pub async fn challenges_list(shared: State<'_, Arc<Shared>>) -> Result<Vec<Entry>, String> {
+    let shared = Arc::clone(&shared);
+    blocking(move || Ok(shared.library.list())).await
 }
 
 /// Asks for a challenge file and keeps it; `None` when cancelled.
@@ -709,8 +860,12 @@ pub fn challenge_remove(key: String, shared: State<'_, Arc<Shared>>) -> Result<(
 }
 
 #[tauri::command]
-pub fn challenge_briefing(key: String, shared: State<'_, Arc<Shared>>) -> Result<Briefing, String> {
-    shared.library.briefing(&key)
+pub async fn challenge_briefing(
+    key: String,
+    shared: State<'_, Arc<Shared>>,
+) -> Result<Briefing, String> {
+    let shared = Arc::clone(&shared);
+    blocking(move || shared.library.briefing(&key)).await
 }
 
 #[tauri::command]
@@ -755,9 +910,13 @@ pub fn attempt_abandon(id: String, shared: State<'_, Arc<Shared>>) -> Result<Rec
 /// Every attempt; the Challenges screen listing them also cuts again the
 /// slices still to cut.
 #[tauri::command]
-pub fn attempts_list(shared: State<'_, Arc<Shared>>) -> Vec<View> {
-    shared.reslice();
-    shared.attempts.list()
+pub async fn attempts_list(shared: State<'_, Arc<Shared>>) -> Result<Vec<View>, String> {
+    let shared = Arc::clone(&shared);
+    blocking(move || {
+        shared.reslice();
+        Ok(shared.attempts.list())
+    })
+    .await
 }
 
 /// The sim's answer to a request; an error without one in `ASK_TIMEOUT`,
@@ -777,9 +936,37 @@ pub fn open_flights_folder(shared: State<'_, Arc<Shared>>) -> Result<(), String>
     shared.open_folder().map_err(|e| e.to_string())
 }
 
+/// Opens the folder holding the log file (docs/debrief-api.md).
 #[tauri::command]
-pub fn storage_usage(shared: State<'_, Arc<Shared>>) -> StorageUsage {
-    ::debrief::storage_usage(&shared.dir)
+pub fn open_log_folder() -> Result<(), String> {
+    let dir = diag::path()
+        .and_then(|p| p.parent())
+        .ok_or("There is no log file.")?;
+    Command::new("explorer")
+        .arg(dir)
+        .spawn()
+        .map(drop)
+        .map_err(|e| e.to_string())
+}
+
+/// `StorageUsage` and the trash's share of it.
+#[derive(Debug, Serialize)]
+pub struct Usage {
+    #[serde(flatten)]
+    pub folder: StorageUsage,
+    pub trash: TrashUsage,
+}
+
+#[tauri::command]
+pub async fn storage_usage(shared: State<'_, Arc<Shared>>) -> Result<Usage, String> {
+    let shared = Arc::clone(&shared);
+    blocking(move || {
+        Ok(Usage {
+            folder: ::debrief::storage_usage(&shared.dir),
+            trash: shared.store().trash_usage(),
+        })
+    })
+    .await
 }
 
 /// Runs a fix off the IPC thread, then checks again.
@@ -847,6 +1034,24 @@ pub async fn setup_pick_community(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_memo_recomputes_only_for_another_key_or_a_changed_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("flight.fqj");
+        fs::write(&path, "a").unwrap();
+        let (memo, mut runs) = (Memo::new(), 0);
+        let mut get = |key: &str| {
+            memo.get(key, &path, || {
+                runs += 1;
+                runs
+            })
+        };
+        assert_eq!((get("x"), get("x")), (1, 1));
+        assert_eq!(get("y"), 2);
+        fs::write(&path, "ab").unwrap();
+        assert_eq!(get("y"), 3);
+    }
 
     #[test]
     fn a_failed_read_is_tried_again_with_backoff() {

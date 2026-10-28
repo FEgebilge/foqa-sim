@@ -1,0 +1,31 @@
+# Airbus A320ceo type profile (ICAO A320, Doc 8643). Schema: docs/rules.md.
+#
+# Limits are the A320 series ones in EASA TCDS EASA.A.064, shared with the
+# A320neo profile; the ceo FULL flap is 35 deg (the neo's 40 deg LEAP-1A
+# setting does not apply).
+type: A320
+name: Airbus A320-200 (ceo)
+class: transport
+airframe: { kind: airplane, engine: jet, engines: 2, gear: retractable }
+mlw: { value: 145505 lb, source: "EASA TCDS EASA.A.064 Issue 62 (26 Jun 2026), sec. 1 weights: A320-211/-212/-231/-214/-215/-216 max landing weight 66 000 kg, https://www.easa.europa.eu/en/downloads/16507/en", note: "the weight the Vref table is anchored to (Airbus A320 Aircraft Characteristics 3-5-0); later weight variants are heavier" }
+mmo: { value: 0.82 M, source: "EASA TCDS EASA.A.064 Issue 62 (26 Jun 2026), sec. 1 A320 series para 10 Maximum Operating Mach (MMO) 0.82, https://www.easa.europa.eu/en/downloads/16507/en" }
+tail_contact:
+  takeoff: { value: 13.5 deg, source: "Airbus Safety First Dec 2007, A320 tail strike at take-off (search snippet; PDF not fetchable), https://safetyfirst.airbus.com/app/themes/mh_newsdesk/documents/archives/a320-tail-strike-at-take-off.pdf", approximate: true, note: "struts fully extended; forum sources 13.5-13.7; snippet only, PDF not read" }
+  landing: { value: 11.7 deg, source: "Airline FCOM flashcards (Spirit A320 limits, brainscape); Aerosoft forum https://forum.aerosoft.com/index.php?%2Ftopic%2F104076-tailstrikes%2F=", approximate: true, note: "struts compressed; secondary sources, PPRuNe quotes 11.5" }
+hard_landing_g: { value: 2.6 g, source: "AMM 05-51-11 as quoted in AAIB Bulletin 1/2013 G-EZFV and 6/2009 G-MARA (LOAD 15 report above 2.6 g; hard landing 2.6-2.86 g, severe 2.86 g or more at CG, at or below MLW)", note: "overweight landing threshold is lower (1.7 g)" }
+vmo: { value: 350 kt, source: &tcds "EASA TCDS EASA.A.064 Issue 62 (26 Jun 2026), sec. 1 A320 series para 10, https://www.easa.europa.eu/en/downloads/16507/en", note: "MMO 0.82" }
+vle: { value: 280 kt, source: "EASA TCDS A.064 Issue 62 sec. 1 para 10 Landing gear (280 kt/M0.67); FlyByWire docs https://docs.flybywiresim.com/pilots-corner/a32nx/a32nx-briefing/limitations/", note: "the pdftotext layout of the TCDS gear block is garbled; read as VLE 280, VLO ext 250, VLO ret 220, tyre 195.5 kt GS; the FlyByWire page confirms" }
+vlo: { value: 220 kt, source: "EASA TCDS A.064 Issue 62 sec. 1 para 10; FlyByWire docs (VLO ext 250 kt/M0.60, ret 220 kt/M0.54)", note: "extend 250, retract 220 (lower given)" }
+max_crosswind: { value: 38 kt, source: "FlyByWire A32NX docs https://docs.flybywiresim.com/pilots-corner/a32nx/a32nx-briefing/limitations/ (mirrors Airbus FCOM)", note: "landing max demonstrated incl. gusts 38 kt; takeoff max 35 kt incl. gusts. Demonstrated, not an AFM limit" }
+max_tailwind: { value: 15 kt, source: "FlyByWire A32NX docs (same URL); IVAO wiki https://wiki.ivao.aero/en/home/training/mediawiki/pending/Airbus_320_Limitations", note: "takeoff 15 kt; no separate landing number on those pages (FLAPS FULL advised above 10 kt). Some CEO variants 10 kt" }
+vref:
+  source: "Airbus A320 Aircraft Characteristics - Airport and Maintenance Planning, Rev Jul 15/25, subject 3-5-0 Final Approach Speed (A320-200: 136 kt at MLW 66 000 kg), https://www.aircraft.airbus.com/sites/g/files/jlcbta126/files/2025-07/AC_A320_20250715.pdf"
+  approximate: true
+  note: "published value is the ICAO threshold speed at maximum landing weight and the maximum certificated landing flap; lighter weights scaled by sqrt(W/MLW) (Vref is 1.3 Vs and Vs goes with sqrt(W) at constant CL max); other landing flaps read a few kt higher, not published"
+  flaps:
+    - { flap: 35 deg, weights_kg: [42900, 49500, 56100, 66000], ias: [110 kt, 118 kt, 125 kt, 136 kt] }
+flaps:
+  - { up_to: 10 deg, vfe: { value: 215 kt, source: *tcds, note: "CONF 1+F (slats 18/flaps 10); auto retract 210 kt in takeoff config. CONF 1 slats-only 230 kt skipped" } }
+  - { up_to: 15 deg, vfe: { value: 200 kt, source: *tcds, note: "CONF 2 (22/15)" } }
+  - { up_to: 20 deg, vfe: { value: 185 kt, source: *tcds, note: "CONF 3 (22/20)" } }
+  - { vfe: { value: 177 kt, source: *tcds, note: "CONF FULL (27/35)" } }

@@ -16,7 +16,7 @@ export interface Aircraft {
 export type Grade = "good" | "fair" | "poor";
 
 /**
- * The flight graded as a whole: by landing-2 (docs/scoring.md) when a landing was scored (`score` 0-100), else by the
+ * The flight graded as a whole: by landing-3 (docs/scoring.md) when a landing was scored (`score` 0-100), else by the
  * points method. `points` and `findings` are the points method's (each rule broken counts once at its worst level: high 4,
  * medium 2, low 1, advisory 0), kept for one release; older summaries have no `method`.
  */
@@ -25,7 +25,7 @@ export interface Assessment {
   points: number;
   /** Rules broken at low or above. */
   findings: number;
-  method?: "landing-2" | "points";
+  method?: "landing-3" | "points";
   score?: number;
   confidence?: Confidence;
 }
@@ -175,7 +175,7 @@ export interface ApproachProfile {
  * `method: "points"` (no scored landing, or an older backend without `landings`) grades by the parts and bands.
  */
 export interface AssessmentDetail {
-  method?: "landing-2" | "points";
+  method?: "landing-3" | "points";
   score?: number | null;
   grade?: Grade;
   confidence?: Confidence | null;
@@ -213,6 +213,26 @@ export interface FlightSummary {
   skills?: SkillsSummary;
   /** What Trends counts a flight by (docs/trends.md); absent on older summaries: not flown. */
   flown?: Flown;
+  /** `flown` judged by the Trends rule; absent on mocks made before 0.11, read as a flight. */
+  kind?: RecordingKind;
+  /** The pilot's title, notes and tags (`list_flights` only); absent when none were given. */
+  meta?: FlightMeta;
+}
+
+/** A flight Trends counts, or a recording that is not one: never airborne, or airborne under the rule. */
+export type RecordingKind = "flight" | "ground_only" | "too_short";
+
+/** What the pilot wrote about a flight, kept beside it in `<id>.meta.json`. */
+export interface FlightMeta {
+  title?: string;
+  notes?: string;
+  tags?: string[];
+}
+
+/** What `delete_flights` did: the flights now in the trash, and why the others are not. */
+export interface Deleted {
+  trashed: string[];
+  failed: string[];
 }
 
 /** How much of a recording was real flying: airborne legs, slewed points left out. */
@@ -281,7 +301,7 @@ export interface LandingFacts {
   full_stop: boolean;
   icao?: string;
   runway?: string;
-  /** landing-2, 0-100. */
+  /** landing-3, 0-100. */
   score?: number;
   grade?: Grade;
   confidence?: Confidence;
@@ -352,7 +372,7 @@ export interface Trends {
   score: { mean: number | null; median: number | null; recent: number | null; earlier: number | null };
   /** Oldest first: the chart and the footprint. */
   landings: TrendLanding[];
-  /** In landing-2 order. */
+  /** In landing-3 order. */
   domains: TrendDomain[];
   /** Most frequent first, then by level. */
   events: TrendEvent[];
@@ -473,6 +493,17 @@ export interface Airport {
   runways: { width_m: number; ends: RunwayEnd[] }[];
 }
 
+/** How the aircraft was identified (docs/rules.md, "Identification") and what that left unchecked. */
+export interface Identification {
+  /** The step that matched: a type profile by designator, ATC model alias or title alias; else the class from the sim's facts, the weight, or nothing. */
+  matched: "type" | "model" | "title" | "sim" | "weight" | "unknown";
+  airframe: { kind?: "airplane" | "helicopter" | "glider" | "seaplane-amphibian"; engine?: "piston" | "turboprop" | "jet" | "electric"; engines?: number; gear?: "fixed" | "retractable" | "floats" | "skids" };
+  /** The type-limit checks that could not run for want of a profile value, in words. */
+  unchecked: string[];
+  /** False for a helicopter or a glider: no landing score and no runway rules. */
+  runway_landing: boolean;
+}
+
 /** A type-profile value with the document it comes from. */
 export interface Sourced {
   value: number;
@@ -487,6 +518,8 @@ export interface Debrief {
     lfl_version: number;
     profile: string;
     class?: "light" | "transport";
+    /** Absent from a backend before 0.11. */
+    identification?: Identification;
     /** The profile's values by rule name, e.g. `hard_landing_g`, `tail_landing_pitch`. */
     profile_limits?: Record<string, Sourced>;
     /**
@@ -525,8 +558,11 @@ export interface AppUpdate {
 
 export interface StorageUsage {
   flights: number;
+  /** The folder's files, the trash not included. */
   bytes: number;
   folder: string;
+  /** Deleted flights waiting to be restored or purged. */
+  trash: { flights: number; bytes: number };
 }
 
 export type CheckState = "pass" | "warn" | "fail";
@@ -640,6 +676,8 @@ export interface AttemptResult {
   gate_s: number | null;
   touchdown_s: number | null;
   score: { version: string; total: number; parts: { name: string; weight: number; score: number; value: number | null; unit: string }[] } | null;
+  /** A landing-3 attempt's grade, confidence and caps (the debrief's); absent for landing-1. */
+  assessment?: { method: string; score: number; grade: Grade; confidence: Confidence; caps: CapNote[] };
 }
 
 /** One line of `log.jsonl`. */

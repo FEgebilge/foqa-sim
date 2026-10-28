@@ -1,0 +1,16 @@
+{
+  "title": "Input",
+  "description": "A single line field with clear labels and useful states.",
+  "category": "Inputs",
+  "kind": "component",
+  "dependencies": [
+    "motion"
+  ],
+  "requires": [],
+  "tags": [
+    "field",
+    "form"
+  ],
+  "source": "arc",
+  "canvas": []
+}

@@ -868,6 +868,11 @@ Each slice keeps the app fully usable with no site configured.
   and `caps[].score` is the limit the cap sets. Absent for `landing-1`
   and for an attempt without a score. A site no longer derives grade,
   confidence or caps from `score.parts`.
+- **`landing-3` (0.11):** the assessment's measures changed, so it is a
+  new `scoring.version`. `landing-2` cannot be reproduced and is retired:
+  a definition naming it still parses and is graded with landing-3, the
+  `Attempt` naming `landing-3` in `score.version` and `assessment.method`.
+  Attempts graded before keep the method and score they recorded.
 - **Decode cap:** `fdm challenge` and `fdm slice` refuse a compact
   flight whose body decompresses past 32 MiB
   (`recorder::CHALLENGE_MAX_BODY`); the app's own flights keep 256 MiB.

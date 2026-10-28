@@ -8,8 +8,10 @@ use analyzer::Phase;
 use fdm_core::{Lfl, SignalId, Unit};
 use serde::{Deserialize, Serialize};
 
+use std::cell::Cell;
+
 use crate::expr::{self, Expr, Scope, Ty};
-use crate::profile::ProfileField;
+use crate::profile::{Engine, ProfileField};
 
 /// Event severity, lowest first: the most severe of several is their `max`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
@@ -89,6 +91,7 @@ pub enum Var {
     /// Calibrated radio height, ft.
     Ra,
     Td(TdField),
+    Takeoff(TakeoffField),
     /// A value of the flight's type profile; unknown without one.
     Profile(ProfileField),
 }
@@ -114,6 +117,26 @@ pub enum TdField {
     InTdz,
     LongLanding,
     ShortLanding,
+}
+
+impl TdField {
+    /// Read off the landing runway.
+    fn runway(self) -> bool {
+        !matches!(
+            self,
+            Self::Sink | Self::PeakG | Self::Pitch | Self::Roll | Self::Ias | Self::Bounce
+        )
+    }
+}
+
+/// Values of the takeoff a point belongs to (its takeoff roll to 35 ft and
+/// the initial climb after it), as `takeoff.*`; unknown elsewhere.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TakeoffField {
+    /// Peak pitch rate of the rotation (`analyzer::rotation_rate`), deg/s.
+    RotationRate,
+    /// Trailing-edge flap angle at liftoff, deg.
+    Flap,
 }
 
 /// When a rule is evaluated.
@@ -231,6 +254,12 @@ pub struct Rule {
     /// Empty for touchdown rules.
     pub phases: Vec<Phase>,
     pub aircraft: Option<Aircraft>,
+    /// The engines the rule's source is for; empty for any. A flight of
+    /// unknown engine gets every rule.
+    pub engine: Vec<Engine>,
+    /// Reads a runway touchdown value: a runway landing rule, which does
+    /// not apply to helicopters and gliders.
+    pub runway: bool,
     pub when: Option<Expr<Var>>,
     pub trigger: Trigger,
     pub measure: Expr<Var>,
@@ -292,6 +321,7 @@ fn show(x: f64, unit: Option<Unit>, extra: usize) -> String {
     let x = round(x, digits);
     match unit.map(Unit::symbol) {
         Some("deg") => format!("{x:.digits$}°"),
+        Some("deg/s") => format!("{x:.digits$}°/s"),
         Some("") | None => format!("{x:.digits$}"),
         Some(symbol) => format!("{x:.digits$} {symbol}"),
     }
@@ -302,6 +332,7 @@ fn show(x: f64, unit: Option<Unit>, extra: usize) -> String {
 fn digits(x: f64, unit: Option<Unit>) -> usize {
     let x = round(x, 1);
     match unit {
+        Some(Unit::Mach) => 3,
         Some(Unit::G | Unit::Dots) => 2,
         _ if x.abs() < 10.0 && x.fract() != 0.0 => 1,
         _ => 0,
@@ -345,6 +376,8 @@ struct Doc {
     domain: Domain,
     phase: Option<OneOrMany>,
     aircraft: Option<Aircraft>,
+    #[serde(default)]
+    engine: Vec<Engine>,
     when: Option<String>,
     gate: Option<String>,
     at: Option<String>,
@@ -424,12 +457,24 @@ pub fn load(yaml: &str) -> Result<Vec<Rule>, LoadError> {
 
 struct RuleScope {
     touchdown: bool,
+    /// A runway touchdown value was resolved.
+    runway: Cell<bool>,
 }
 
 impl Scope for RuleScope {
     type Var = Var;
 
     fn resolve(&self, name: &str) -> Option<(Var, Ty)> {
+        let found = self.lookup(name)?;
+        if let Var::Td(f) = found.0 {
+            self.runway.set(self.runway.get() || f.runway());
+        }
+        Some(found)
+    }
+}
+
+impl RuleScope {
+    fn lookup(&self, name: &str) -> Option<(Var, Ty)> {
         let num = |unit| Ty::Num(Some(unit));
         if let Some(field) = name.strip_prefix("profile.") {
             let field = ProfileField::named(field)?;
@@ -439,6 +484,11 @@ impl Scope for RuleScope {
             "vs" => (Var::Vs, num(Unit::FeetPerMinute)),
             "height" => (Var::Height, num(Unit::Feet)),
             "ra" => (Var::Ra, num(Unit::Feet)),
+            "takeoff.rotation_rate" => (
+                Var::Takeoff(TakeoffField::RotationRate),
+                num(Unit::DegreesPerSecond),
+            ),
+            "takeoff.flap" => (Var::Takeoff(TakeoffField::Flap), num(Unit::Degrees)),
             "td.sink" if self.touchdown => (Var::Td(TdField::Sink), num(Unit::FeetPerMinute)),
             "td.peak_g" if self.touchdown => (Var::Td(TdField::PeakG), num(Unit::G)),
             "td.pitch" if self.touchdown => (Var::Td(TdField::Pitch), num(Unit::Degrees)),
@@ -473,7 +523,10 @@ impl<'a> Compiler<'a> {
     fn new(doc: &'a Doc) -> Result<Self, LoadError> {
         let mut compiler = Self {
             id: &doc.rule,
-            scope: RuleScope { touchdown: false },
+            scope: RuleScope {
+                touchdown: false,
+                runway: Cell::new(false),
+            },
         };
         match doc.at.as_deref() {
             None => {}
@@ -625,6 +678,7 @@ fn compile(doc: Doc) -> Result<Rule, LoadError> {
         .or(numeric.then_some(DEFAULT_DETAIL))
         .map(|d| c.detail(d, numeric))
         .transpose()?;
+    let runway = c.scope.runway.get();
     Ok(Rule {
         id: doc.rule,
         version: doc.version,
@@ -635,6 +689,8 @@ fn compile(doc: Doc) -> Result<Rule, LoadError> {
         domain: doc.domain,
         phases,
         aircraft: doc.aircraft,
+        engine: doc.engine,
+        runway,
         when,
         trigger,
         measure,
@@ -792,7 +848,25 @@ needs at least one level (advisory, low, medium or high)"
     }
 
     #[test]
+    fn engines_and_runway_reads_are_known_at_load() {
+        let td = "rule: x\nversion: 1\ntitle: x\ndomain: other\nat: touchdown\n";
+        let rule = |rest: &str| load(&format!("{td}{rest}")).unwrap().remove(0);
+        let runway = rule("measure: td.crosswind - 10 kt\nabove: { low: 0 kt }");
+        assert!(runway.runway && runway.engine.is_empty());
+        // A runway value in the condition counts as much as in the measure.
+        assert!(rule("when: td.in_tdz\nmeasure: td.peak_g\nabove: { low: 2 g }").runway);
+        let jet = rule("engine: [jet, turboprop]\nmeasure: td.peak_g\nabove: { low: 2 g }");
+        assert!(!jet.runway);
+        assert_eq!(jet.engine, [Engine::Jet, Engine::Turboprop]);
+        let err = error(&format!(
+            "{td}engine: [diesel]\nmeasure: td.peak_g\nabove: {{ low: 2 g }}"
+        ));
+        assert!(err.contains("unknown variant `diesel`"), "{err}");
+    }
+
+    #[test]
     fn decimals_follow_the_rounded_number() {
+        assert_eq!(show(0.8361, Some(Unit::Mach), 0), "0.836 M");
         let deg = Some(Unit::Degrees);
         assert_eq!(show(9.96, deg, 0), "10°");
         assert_eq!(show(10.04, deg, 0), "10°");

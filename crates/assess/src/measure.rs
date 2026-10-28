@@ -5,18 +5,27 @@
 
 use analyzer::{Approach, Flight, Phase, Touchdown, Track, held, phases, wind_components};
 use fdm_core::SimTime;
-use rules::{Aircraft, Domain, Event, RefSpeeds, Rule, ScoringClass, Selection};
+use rules::{Domain, Event, ProfileField, RefSpeeds, Rule, ScoringClass, Selection};
 use serde::Serialize;
 
 use crate::method::{Context, Height, Method};
 use crate::score::{Finding, LandingScore, Measures, Outcome, Value};
+use crate::text::NOT_RUNWAY_KIND;
 
 const FT_PER_M: f64 = 1.0 / 0.3048;
 /// Descent rate on a 3 deg path per knot of ground speed: tan 3 deg x
 /// 6076 ft / 60 min.
 const ROD3_FPM_PER_KT: f64 = 5.31;
-/// Threshold crossing height the AFM landing distances assume (S8).
+/// Threshold crossing height of the glidepath (S8; ICAO Annex 10 ILS
+/// reference datum height 15 m), at the eye or the antenna.
 const TCH_FT: f64 = 50.0;
+/// The glidepath to the touchdown target: 3 deg (ICAO PANS-OPS, S8).
+const GLIDEPATH_DEG: f64 = 3.0;
+/// A light aircraft aims at the Annex 14 aiming point of runways under
+/// 800 m (Vol I Table 5-1, 150 m), the code 1 runways its field length is
+/// laid out for, on any runway: the airline aiming point (up to 400 m) of a
+/// long runway is no touchdown target for it.
+const LIGHT_AIM_M: f64 = 150.0;
 /// A longer stretch without data in the window makes the score partial.
 const MAX_GAP_US: i64 = 1_500_000;
 /// Gear counts as down from here, %.
@@ -132,7 +141,7 @@ impl Method {
     /// The top and bottom of the landing's approach window, ft above the
     /// runway: its class's, the top lowered to a challenge gate.
     pub fn window_ft(&self, l: &Landing) -> (f64, f64) {
-        let window = self.windows[&scoring_class(l.selection)];
+        let window = self.windows[&l.selection.scoring_class()];
         let top = l.gate_ft.map_or(window.top_ft, |g| g.min(window.top_ft));
         (top, window.bottom_ft.unwrap_or(l.selection.phases.flare_ft))
     }
@@ -144,9 +153,12 @@ impl Method {
         &self,
         l: &Landing,
     ) -> Result<(Measures, Option<Speeds>, bool), Vec<&'static str>> {
+        if !l.selection.airframe.runway_landing() {
+            return Err(vec![NOT_RUNWAY_KIND]);
+        }
         let (flight, track) = (l.flight, l.track);
         let td = &l.touchdowns[l.index];
-        let class = scoring_class(l.selection);
+        let class = l.selection.scoring_class();
         let (top, bottom) = self.window_ft(l);
         let a = Approach::of(flight, track, td, top, bottom);
         // Slowed to taxi speed on the ground, or still rolling where the
@@ -203,9 +215,18 @@ impl Method {
             .as_ref()
             .map(|s| if light { s.vapp_kt } else { s.vref_kt });
         let profile_value = |f| l.selection.profile.and_then(|p| p.value(f, || None));
-        let track_ft = profile_value(rules::ProfileField::MainGearTrack)
-            .unwrap_or(self.fallback_track_ft[&class]);
-        let target_m = l.target_m.unwrap_or(fix.aiming_point_m);
+        let track_ft =
+            profile_value(ProfileField::MainGearTrack).unwrap_or(self.fallback_track_ft[&class]);
+        let aim_m = if light {
+            LIGHT_AIM_M
+        } else {
+            fix.aiming_point_m
+        };
+        let target_m = l.target_m.unwrap_or(aim_m);
+        // The glidepath to the target at the threshold, at the wheels.
+        let path_ft = target_m * FT_PER_M * GLIDEPATH_DEG.to_radians().tan();
+        let eye_ft = profile_value(ProfileField::EyeToWheel).unwrap_or(eye_to_wheel_ft(class));
+        let tch_ft = path_ft.min(TCH_FT) - eye_ft;
         let context = Context {
             add_kt: speeds.as_ref().map(|s| s.vapp_kt - s.vref_kt),
             gust_kt: Some(0.0),
@@ -216,7 +237,7 @@ impl Method {
             lda_ft: Some(fix.lda_m * FT_PER_M),
             width_ft: Some(fix.width_m * FT_PER_M),
             track_ft: Some(track_ft),
-            hard_g: profile_value(rules::ProfileField::HardLandingG),
+            hard_g: profile_value(ProfileField::HardLandingG),
         };
 
         let mut values: Vec<(String, Value)> = Vec::new();
@@ -262,7 +283,6 @@ impl Method {
             false,
         );
 
-        let retractable = l.selection.profile.is_some_and(|p| p.vle.is_some());
         let mut crossing = a.threshold.as_ref();
         if crossing.is_some_and(|c| track.ra_ft[track.index_at(c.t)].is_nan()) {
             partial.push(
@@ -271,13 +291,13 @@ impl Method {
             );
             crossing = None;
         }
-        let tail = profile_value(rules::ProfileField::TailLandingPitch);
+        let tail = profile_value(ProfileField::TailLandingPitch);
         let scalars = [
             (
                 "A6",
-                configuration(&a, light, self.windows[&class].split_ft, retractable),
+                configuration(&a, light, self.windows[&class].split_ft),
             ),
-            ("B1", crossing.map(|c| c.height_ft - TCH_FT)),
+            ("B1", crossing.map(|c| c.height_ft - tch_ft)),
             ("B2", td.ias_kt.zip(reference).map(|(ias, r)| ias - r)),
             ("B3", a.float_s),
             ("C1", Some((fix.along_m - target_m) * FT_PER_M)),
@@ -301,11 +321,16 @@ impl Method {
         ];
         values.extend(scalars.map(|(id, x)| (id.to_owned(), Value::Scalar(Height::All, x))));
 
+        let (from, to) = landing_span(l, &a, full_stop);
+        let crashed = flight.crashes().any(|t| (from..=to).contains(&t));
         let outcome = Outcome {
             undershoot: fix.short_landing,
-            excursion: full_stop.then(|| excursion(&a, fix)).flatten(),
+            excursion: if crashed {
+                Some("The sim reported a crash".into())
+            } else {
+                full_stop.then(|| excursion(&a, fix)).flatten()
+            },
         };
-        let (from, to) = landing_span(l, &a, full_stop);
         let findings = l
             .events
             .iter()
@@ -337,13 +362,17 @@ impl Method {
     }
 }
 
-/// The profile's scoring class, else the default of the rule class
-/// (transport where unknown, as the rules grade it).
-pub fn scoring_class(s: &Selection) -> ScoringClass {
-    s.profile.map_or_else(
-        || ScoringClass::of(s.class.unwrap_or(Aircraft::Transport)),
-        |p| p.scoring_class,
-    )
+/// Eye to main-wheel height on the glidepath, from the FAA Order 8260.3
+/// height groups: HG1 up to 10 ft (general aviation, commuters), HG2 10-15
+/// ft (737, A320); the class value is an estimate within them, for types
+/// whose profile gives none (`eye_to_wheel`). The radio height B1 reads is
+/// the wheels' (`Track::ra_ft`).
+fn eye_to_wheel_ft(class: ScoringClass) -> f64 {
+    match class {
+        ScoringClass::Light => 6.0,
+        ScoringClass::Turboprop => 10.0,
+        ScoringClass::Jet => 15.0,
+    }
 }
 
 fn mean(xs: impl Iterator<Item = f64>) -> Option<f64> {
@@ -368,9 +397,9 @@ fn gap(t: &[SimTime], x: &[f64]) -> bool {
 /// A6 as a level: a jet's flap or gear change at or above the split L2,
 /// below it L3, gear not down at the bottom of the window L3 (Data4Safety
 /// late flap and gear, SL2A / SL3); a light
-/// aircraft's flap change under 200 ft L1, retractable gear not down below
-/// its split L3 (est). `None` without flap or gear data.
-fn configuration(a: &Approach, light: bool, split: f64, retractable: bool) -> Option<f64> {
+/// aircraft's flap change under 200 ft L1, gear not down below its split L3
+/// (est; fixed gear reads 100 %). `None` without flap or gear data.
+fn configuration(a: &Approach, light: bool, split: f64) -> Option<f64> {
     let w = &a.window;
     let known = |v: &[f64]| v.iter().any(|x| x.is_finite());
     if !known(&w.flap_deg) && !known(&w.gear_pct) {
@@ -386,8 +415,7 @@ fn configuration(a: &Approach, light: bool, split: f64, retractable: bool) -> Op
         let late = changes(analyzer::Config::Flaps)
             .filter(|c| c.height_ft < LIGHT_LATE_FLAP_FT)
             .map(|_| 1.0);
-        late.chain((retractable && gear_up).then_some(3.0))
-            .fold(0.0, f64::max)
+        late.chain(gear_up.then_some(3.0)).fold(0.0, f64::max)
     } else {
         let not_down = w
             .gear_pct
@@ -424,7 +452,7 @@ fn bounce(track: &Track, tds: &[Touchdown], index: usize) -> f64 {
 /// Leaving the runway on the rollout, in words.
 fn excursion(a: &Approach, fix: &analyzer::RunwayFix) -> Option<String> {
     if a.rollout_cross_m.is_some_and(|c| c > fix.width_m / 2.0) {
-        return Some("Left the side of the runway before slowing to 30 kt".into());
+        return Some("Left the side of the runway on the landing roll".into());
     }
     a.slowed
         .as_ref()

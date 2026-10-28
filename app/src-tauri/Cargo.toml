@@ -25,7 +25,7 @@ capture = { path = "../../crates/capture" }
 challenge = { path = "../../crates/challenge" }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 connect = { path = "../../crates/connect", optional = true }
-debrief = { path = "../../crates/debrief" }
+debrief = { path = "../../crates/debrief", features = ["parquet"] }
 open = { version = "5", optional = true }
 recorder = { path = "../../crates/recorder" }
 serde = { version = "1.0.229", features = ["derive"] }
@@ -39,6 +39,11 @@ tauri-plugin-deep-link = { version = "2", optional = true }
 tauri-plugin-single-instance = "2"
 tauri-plugin-updater = "2"
 uuid = { version = "1", features = ["v4"] }
+
+[target.'cfg(windows)'.dependencies]
+# SetStdHandle, to send stderr to the log file (diag.rs), and SetThreadPriority
+# for the warm-up (main.rs); already in the tree.
+windows-sys = { version = "0.61", features = ["Win32_System_Console", "Win32_System_Threading"] }
 
 [dev-dependencies]
 tempfile = "3"

@@ -1,0 +1,27 @@
+# Beechcraft Super King Air 350 (Model B300) type profile. Schema: docs/rules.md.
+#
+# Class transport by weight (15,000 lb, above 12,500 lb; `rules::aircraft`),
+# scored as a turboprop. No tail_contact, hard_landing_g, max_tailwind: not
+# published or reachable.
+# Speeds are the POH KIAS values (the TCDS gives them in knots, KIAS).
+type: B350
+name: Beechcraft Super King Air 350 (B300)
+class: transport
+scoring_class: turboprop
+airframe: { kind: airplane, engine: turboprop, engines: 2, gear: retractable }
+mlw: { value: 15000 lb, source: &tcds "EASA TCDS EASA.IM.A.277 Issue 22 (04.12.2024), B300/B300C item 13 Maximum Certified Weights: landing 6803.9 kg (15,000 lb), https://www.easa.europa.eu/nl/downloads/7208/en" }
+mmo: { value: 0.58 M, source: &poh "Beechcraft Super King Air 350 & 350C Fusion POH and FAA Approved AFM P/N 434-590169-0003 (April 2016), Section 2 Airspeed Limitations, https://pdfcoffee.com/super-king-air-350-amp-350c-fusion-poh-p-n-434-590169-0003-pdf-free.html", note: "MMO 0.58 Mach above the 21,000 ft crossover; EASA TCDS EASA.IM.A.277 agrees" }
+aliases: [King Air 350]
+vmo: { value: 263 kt, source: *poh, note: "VMO 263 KIAS (260 KCAS) from sea level to 21,000 ft, decreasing to 194 KIAS at 35,000 ft" }
+vle: { value: 184 kt, source: *poh, note: "VLE 184 KIAS (182 KCAS)" }
+vlo: { value: 166 kt, source: *poh, note: "VLO extension 184 KIAS, retraction 166 KIAS (182 / 164 KCAS); lower given" }
+max_crosswind: { value: 20 kt, source: "Beechcraft Super King Air 350 & 350C Fusion POH P/N 434-590169-0003, Section 4 Airspeeds for Safe Operation (15,000 lbs): maximum demonstrated crosswind component 20 knots, https://pdfcoffee.com/super-king-air-350-amp-350c-fusion-poh-p-n-434-590169-0003-pdf-free.html", note: "demonstrated, not a limitation" }
+vso: { value: 81 kt, source: *poh, note: "Section 2 airspeed indicator markings: VSO at maximum weight, flaps down, idle power, 81 KIAS" }
+flaps:
+  - { up_to: 14 deg, vfe: { value: 202 kt, source: *poh, note: "VFE APPROACH 202 KIAS (200 KCAS); approach position is 14 deg (EASA TCDS EASA.IM.A.277 Issue 22 item 10)" } }
+  - { vfe: { value: 158 kt, source: *poh, note: "VFE flaps down (100%) 158 KIAS (155 KCAS); 100% is 35 deg (EASA TCDS EASA.IM.A.277 Issue 22 item 10)" } }
+vref:
+  source: "Beechcraft Super King Air 350 & 350C Fusion POH P/N 434-590169-0003, Section 5 Performance, steep approach landing distance (flaps down): VREF row by weight, https://pdfcoffee.com/super-king-air-350-amp-350c-fusion-poh-p-n-434-590169-0003-pdf-free.html"
+  note: "VREF 109 KIAS at 15,000 lb (maximum landing weight), flat at 100 KIAS from 12,000 lb down; flaps down is 35 deg (EASA TCDS EASA.IM.A.277 Issue 22)"
+  flaps:
+    - { flap: 35 deg, weights_kg: [4536, 4990, 5443, 5897, 6350, 6804], ias: [100 kt, 100 kt, 100 kt, 102 kt, 105 kt, 109 kt] }

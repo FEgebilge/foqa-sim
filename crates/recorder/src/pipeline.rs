@@ -29,8 +29,8 @@ impl<W: Write> Recorder<W> {
         &self.acquisition
     }
 
-    /// Records one item and flushes, so a killed process loses at most the
-    /// item in flight. Events are stamped with the last frame's time.
+    /// Records one item into the journal's writer; `flush` passes it on.
+    /// Events are stamped with the last frame's time.
     pub fn record(&mut self, item: &Telemetry) -> io::Result<()> {
         match item {
             Telemetry::Frame(raw) => {
@@ -46,6 +46,11 @@ impl<W: Write> Recorder<W> {
         for sample in self.batch.drain(..) {
             self.journal.sample(&sample)?;
         }
+        Ok(())
+    }
+
+    /// Flushes the journal's writer: what a killed process keeps.
+    pub fn flush(&mut self) -> io::Result<()> {
         self.journal.flush()
     }
 
@@ -54,7 +59,7 @@ impl<W: Write> Recorder<W> {
         while let Some(item) = source.recv()? {
             self.record(&item)?;
         }
-        Ok(())
+        self.flush()
     }
 
     pub fn into_inner(self) -> W {

@@ -628,8 +628,9 @@ pub fn site_settings_set(settings: SiteSettings, c: Connected<'_>) -> Result<Sit
 }
 
 #[tauri::command]
-pub fn sites_list(c: Connected<'_>) -> Vec<SiteView> {
-    c.sites.list().iter().map(|r| c.view(r)).collect()
+pub async fn sites_list(c: Connected<'_>) -> Result<Vec<SiteView>, String> {
+    let c = Arc::clone(&c);
+    blocking(move || Ok(c.sites.list().iter().map(|r| c.view(r)).collect())).await
 }
 
 /// Adds a site by the address the user typed.

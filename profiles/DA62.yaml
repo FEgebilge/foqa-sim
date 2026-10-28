@@ -4,10 +4,19 @@
 type: DA62
 name: Diamond DA62
 class: light
-vmo: { value: 201 kt, source: &tcds "EASA TCDS EASA.IM.A.629 Issue 8 (16 Aug 2023), https://www.easa.europa.eu/en/downloads/44256/en", note: "VNE 201 KEAS (about KCAS); Vno 160 KEAS" }
-vle: { value: 201 kt, source: *tcds, note: "VLE 201 KEAS" }
-vlo: { value: 160 kt, source: *tcds, note: "VLO 160 KEAS, single value for extend/retract" }
-max_crosswind: { value: 25 kt, source: "Diamond DA62 tech specs, max demonstrated crosswind 25 kts, https://www.diamondaircraft.com/en/private-owners/aircraft/da62/tech-specs/" }
+airframe: { kind: airplane, engine: piston, engines: 2, gear: retractable }
+mlw: { value: 4850 lb, source: "Diamond DA62 AFM Doc. 7.01.25-E Rev 4 (14 Nov 2017), https://manuals.plus/m/d055fa0269eeb5d80ed5c7f31ad5ad30e431c874649aa5cb0267d82c1533e3d2.pdf, Section 2 Mass: maximum landing mass 2200 kg (4850 lb); EASA TCDS EASA.IM.A.629 Issue 8 item 13 lists 2200 kg and a higher value for a later modification (the TCDS table text is garbled)", note: "the base value; a heavier-mass modification variant exists" }
+aliases: [Diamond DA62]
+vmo: { value: 205 kt, source: &afm "Diamond DA62 AFM Doc. 7.01.25-E Rev 4 (14 Nov 2017), https://manuals.plus/m/d055fa0269eeb5d80ed5c7f31ad5ad30e431c874649aa5cb0267d82c1533e3d2.pdf, Section 2.3 Airspeed Indicator Markings: caution range 162-205 KIAS", note: "VNE 205 KIAS; the EASA TCDS EASA.IM.A.629 Issue 8 gives 201 KEAS; VNO 162 KIAS" }
+vle: { value: 205 kt, source: &lim "Diamond DA62 AFM Doc. 7.01.25-E Rev 4 (14 Nov 2017), https://manuals.plus/m/d055fa0269eeb5d80ed5c7f31ad5ad30e431c874649aa5cb0267d82c1533e3d2.pdf, Section 2.2 Airspeed: VLE 205 KIAS", note: "VLE 205 KIAS" }
+vlo: { value: 162 kt, source: *lim, note: "VLO extension 205 KIAS, retraction 162 KIAS; lower given" }
+max_crosswind: { value: 25 kt, source: "Diamond DA62 AFM Doc. 7.01.25-E Rev 4 (14 Nov 2017), https://manuals.plus/m/d055fa0269eeb5d80ed5c7f31ad5ad30e431c874649aa5cb0267d82c1533e3d2.pdf, Section 5 Wind Components: crosswind component 25 kts", note: "demonstrated, not a limitation; Diamond tech specs also give 25 kts" }
 flaps:
-  - { up_to: 20 deg, vfe: { value: 135 kt, source: *tcds, note: "VFE approach 135 KEAS; cruise 0, approach 20 deg" } }
-  - { vfe: { value: 118 kt, source: *tcds, note: "VFE landing 118 KEAS, landing flap 42 deg; the TCDS two-column text extraction is garbled, read as 135 approach / 118 landing" } }
+  - { up_to: 20 deg, vfe: { value: 136 kt, source: *lim, note: "VFE T/O 136 KIAS; T/O flap is the 20 deg approach setting (EASA TCDS EASA.IM.A.629 Issue 8: cruise 0, approach 20, landing 42 deg)" } }
+  - { vfe: { value: 119 kt, source: *lim, note: "VFE LDG 119 KIAS, landing flap 42 deg (EASA TCDS EASA.IM.A.629 Issue 8)" } }
+vso: { value: 64 kt, source: "Diamond DA62 AFM Doc. 7.01.25-E Rev 4 (14 Nov 2017), https://manuals.plus/m/d055fa0269eeb5d80ed5c7f31ad5ad30e431c874649aa5cb0267d82c1533e3d2.pdf, Section 2.3 Airspeed Indicator Markings: white arc 64-119 KIAS", note: "lower limit of the white arc; 69 KIAS if MAeM 62-001 is carried out" }
+vref:
+  source: "Diamond DA62 AFM Doc. 7.01.25-E Rev 4 (14 Nov 2017), https://manuals.plus/m/d055fa0269eeb5d80ed5c7f31ad5ad30e431c874649aa5cb0267d82c1533e3d2.pdf, Section 4A Normal Procedures, Before Landing: final approach speed up to 1999 kg (4407 lb) 84 KIAS (vREF, flaps LDG), above 1999 kg 89 KIAS"
+  note: "published as a step at 1999 kg, held to the maximum landing mass"
+  flaps:
+    - { flap: 42 deg, weights_kg: [1500, 1999, 2000, 2200], ias: [84 kt, 84 kt, 89 kt, 89 kt] }

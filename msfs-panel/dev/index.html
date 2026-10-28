@@ -157,6 +157,7 @@ fetch("../../app/public/mock/debrief-flight-1793037932.json").then(function (r) 
 
     // The app's answer to a command, in the next status.
     window.command = function (msg) {
+        if (msg.cmd === "watch") return;
         setTimeout(function () {
             var fail = document.getElementById("fail").checked;
             ack = { cmd: msg.cmd, ok: !fail };

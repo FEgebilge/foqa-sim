@@ -3,7 +3,7 @@
 // title or tail number, never a file path.
 import type { Debrief, Grade } from "../types";
 import { landingAt } from "./assessment.ts";
-import { flightDate, GRADE_LABEL, number } from "./format.ts";
+import { flightDate, GRADE_LABEL, lengthM, number } from "./format.ts";
 import { groupLandings } from "./landings.ts";
 
 /** The card in CSS pixels, the common link-preview size; drawn at twice that for sharp text. */
@@ -58,9 +58,9 @@ export function cardData(debrief: Debrief, index: number): CardData | null {
     { label: "Peak load", value: `${number(td.peak_g, 2)} g` },
   ];
   if (fix) {
-    stats.push({ label: "Touchdown", value: `${number(fix.along_m)} m`, sub: `past the threshold · ${fix.zone}` });
+    stats.push({ label: "Touchdown", value: lengthM(fix.along_m), sub: `past the threshold · ${fix.zone}` });
     const off = Math.abs(fix.cross_m);
-    stats.push({ label: "Centreline", value: `${number(off, 1)} m ${side(fix.cross_m, "L", "R")}`.trim(), sub: off < 0.05 ? "on the line" : `${side(fix.cross_m, "left", "right")} of the line` });
+    stats.push({ label: "Centreline", value: `${lengthM(off, 1)} ${side(fix.cross_m, "L", "R")}`.trim(), sub: off < 0.05 ? "on the line" : `${side(fix.cross_m, "left", "right")} of the line` });
   }
   if (td.wind) {
     const w = td.wind;
