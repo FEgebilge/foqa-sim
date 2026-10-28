@@ -231,7 +231,7 @@ Fallbacks, all est: light 2.5 m, turboprop 4 m, jet 6 m.
 
 | Id | Measured | How | Class | ideal \| tol \| L1 \| L2 \| L3 | Standard |
 |---|---|---|---|---|---|
-| E1 | Peak normal load | `td.peak_g` | T/J | 1.3 \| 1.5 \| 1.6 \| 1.8 \| profile `hard_landing_g`, else 2.1 g | S6 RE.6 (monitor below the manufacturer's limit) ✔; S12 ⚠; levels = `hard-landing` rule est |
+| E1 | Peak normal load | `td.peak_g`, read at 16 samples/s (a 62.5 ms mean of the frame-rate touchdown window): the 737 AMM 2.2 g assumes a 16 samples/s DFDR (FSD Aug 2004 p. 6) | T/J | 1.3 \| 1.5 \| 1.6 \| 1.8 \| profile `hard_landing_g`, else 2.1 g | S6 RE.6 (monitor below the manufacturer's limit) ✔; S12 ⚠; levels = `hard-landing` rule est |
 | | | | light | 1.3 \| 1.6 \| 1.8 \| 2.2 \| 2.6 g | `hard-landing-light` est |
 | E2 | Sink at touchdown | `td.sink_fpm` (no lower bound: soft is not rewarded, S9 ✔) | T/J | 240 \| 360 \| 360+ \| 480 \| 600 fpm | S10 6 / 10 ft/s ✔; 240 ⚠ Boeing service experience; L2 est |
 | | | | light | 240 \| 300 \| 400 \| 500 \| 700 fpm | est (CS-23 not checked) |
@@ -427,7 +427,7 @@ by app updates.
 - Speed bands follow each pilot's own Vref from their recorded weight, so a
   heavy aircraft is not penalised for flying faster.
 - Wind is measured; the challenge bands already gate it.
-- Sim-detected values with sampling limits (g at 8 Hz versus a 16 Hz DFDR;
+- Sim-detected values with sampling limits (g read as a 16 samples/s DFDR would from frame-rate sim data;
   1 Hz heading, reverser and brake) are the same for every entrant. They
   are documented as proxies.
 - Ties: the continuous ℓ in the ideal-to-tolerance band separates good

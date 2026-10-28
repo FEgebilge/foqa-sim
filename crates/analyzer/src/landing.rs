@@ -17,6 +17,12 @@ const SETTLE_MAX_US: i64 = 5_000_000;
 /// Window for the touchdown load: just before contact to gear compression.
 const PEAK_G_BEFORE_US: i64 = 500_000;
 const PEAK_G_AFTER_US: i64 = 1_500_000;
+/// The touchdown load is read as a 16 samples/s DFDR records it, the rate
+/// the 737 AMM hard-landing indication (2.2 g) assumes; slower recorders
+/// have other values (Flight Safety Digest, Aug 2004, p. 6). A mean over
+/// one sample period, a boxcar with its -3 dB point (0.44 / T, 7 Hz) near
+/// that recorder's Nyquist, keeps a frame-rate spike from setting the peak.
+const FDR_NZ_PERIOD_US: i64 = 62_500;
 /// Radio height rate over this last stretch before contact gives the sink
 /// rate; the touchdown window records RA at frame rate.
 const SINK_WINDOW_US: i64 = 500_000;
@@ -38,7 +44,8 @@ pub struct Touchdown {
     /// Rate of descent at contact (positive down): radio height rate over the
     /// last 0.5 s, or inertial VS where RA is missing.
     pub sink_fpm: f64,
-    /// Highest normal load around contact; full-rate in the touchdown window.
+    /// Highest normal load around contact, at the 16 samples/s of a DFDR
+    /// (the recording holds every frame in the touchdown window).
     pub peak_g: f64,
     pub pitch_deg: Option<f64>,
     pub roll_deg: Option<f64>,
@@ -109,11 +116,16 @@ fn contacts(flight: &Flight, track: &Track) -> Vec<Contact> {
 /// The values that grade one touchdown.
 fn grade(flight: &Flight, track: &Track, airports: &[Airport], c: Contact) -> Touchdown {
     let t = c.t;
-    let peak_g = flight
+    let nz: Vec<_> = flight
         .series("accel.normal")
         .iter()
         .filter(|s| s.is_valid() && c.window.contains(&s.t))
-        .map(|s| s.value)
+        .collect();
+    let peak_g = (0..nz.len())
+        .map(|i| {
+            let k = nz[..=i].partition_point(|s| nz[i].t.us_since(s.t) >= FDR_NZ_PERIOD_US);
+            nz[k..=i].iter().map(|s| s.value).sum::<f64>() / (i + 1 - k) as f64
+        })
         .fold(f64::NAN, f64::max);
     // Without RA, the inertial VS at the last point before contact.
     let inertial_sink = || {
@@ -267,6 +279,26 @@ mod tests {
         let td = run(&rows(&ground, &[]));
         assert_eq!(td.len(), 1);
         assert!((td[0].t.as_secs_f64() - 10.0).abs() < 0.11);
+    }
+
+    #[test]
+    fn peak_g_is_read_at_the_recorder_rate() {
+        // 50 Hz load in the window: 1.2 g with one 2.4 g frame at contact,
+        // then 2.0 g held for 0.2 s. A 16 Hz recorder sees ~(2.4 + 3 x 1.2) / 4
+        // = 1.5 g from the spike, so the held 2.0 g sets the peak.
+        let mut rows = rows(&[(0.0, false), (10.0, true)], &[]);
+        rows.retain(|r| r.0 != "accel.normal");
+        rows.extend((450..=560).map(|k| {
+            let t = f64::from(k) * 0.02;
+            let g = match k {
+                500 => 2.4,
+                520..=530 => 2.0,
+                _ => 1.2,
+            };
+            ok("accel.normal", t, g)
+        }));
+        let td = run(&rows);
+        assert!((td[0].peak_g - 2.0).abs() < 1e-9, "{}", td[0].peak_g);
     }
 
     #[test]

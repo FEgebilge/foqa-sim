@@ -81,7 +81,7 @@ false).
 | `height` | ft | Above the departure aerodrome up to the highest point, above the arrival aerodrome after |
 | `ra` | ft | Radio height, on-ground bias removed, valid below 2500 ft |
 | `td.sink` | fpm | Touchdown rules: rate of descent at contact |
-| `td.peak_g` | g | Highest normal load around contact |
+| `td.peak_g` | g | Highest normal load around contact, read at 16 samples/s (a 62.5 ms mean of the frame-rate window), the rate of the 737 AMM hard-landing indication |
 | `td.pitch`, `td.roll` | deg | Attitude at contact |
 | `td.ias` | kt | Airspeed at contact |
 | `td.bounce` | condition | A touchdown after a short hop |
