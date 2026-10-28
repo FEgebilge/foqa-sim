@@ -6,6 +6,7 @@ import { api, type ExportFormat } from "../../api";
 import { verdict } from "../../lib/explain";
 import { clock, number, phaseName } from "../../lib/format";
 import { levelVar } from "../../lib/palette";
+import { shortcutAllowed } from "../../lib/keys";
 import { openFlights } from "../../lib/route";
 import { useNotify, useTheme } from "../../lib/context";
 import { landingAt } from "../../lib/assessment";
@@ -14,6 +15,7 @@ import { adjacentEvent, valueAt } from "../../lib/series";
 import { TimeBus, useHover, type TimeRange } from "../../lib/time";
 import { useDebrief } from "../../lib/use-backend";
 import type { Debrief, Series } from "../../types";
+import { ErrorBoundary } from "../ErrorBoundary";
 import { ExportMenu, type ExportItem } from "../ExportMenu";
 import { useOpenFolder } from "../use-open-folder";
 import { AssessmentPanel } from "./AssessmentPanel";
@@ -117,7 +119,7 @@ function DebriefView({ debrief, refreshing, onRefresh, onOpenFolder }: { debrief
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.target instanceof Element && event.target.closest("input, textarea, select, [contenteditable='true']")) return;
+      if (!shortcutAllowed(event.target, event.key)) return;
       if (event.key === "Escape") resetZoom();
       else if (event.key === "ArrowLeft" || event.key === "ArrowRight") { event.preventDefault(); step((event.key === "ArrowLeft" ? -1 : 1) * (event.shiftKey ? 10 : 1)); }
       else if (event.key === " ") { event.preventDefault(); setPlaying((p) => !p); }
@@ -191,9 +193,11 @@ function DebriefView({ debrief, refreshing, onRefresh, onOpenFolder }: { debrief
                 <h2 id="map-title" className="eyebrow border-b border-line-subtle px-3 py-2">Track and runways</h2>
                 {/* Landscape on a narrow screen; beside the display it takes the row's height and the width that is left. */}
                 <div className="aspect-[16/10] max-h-[55dvh] w-full lg:aspect-auto lg:max-h-none lg:min-h-0 lg:flex-1">
-                  <Suspense fallback={<div className="h-full animate-pulse bg-muted" />}>
-                    <FlightMap debrief={debrief} theme={theme} focus={focus} selected={selectedEvent} bus={bus} onFocus={place} />
-                  </Suspense>
+                  <ErrorBoundary what="The map" size="sm">
+                    <Suspense fallback={<div className="h-full animate-pulse bg-muted" />}>
+                      <FlightMap debrief={debrief} theme={theme} focus={focus} selected={selectedEvent} bus={bus} onFocus={place} />
+                    </Suspense>
+                  </ErrorBoundary>
                 </div>
               </section>
               <div className="mx-auto aspect-[1.12] w-full max-w-[560px] lg:aspect-auto lg:h-full lg:max-w-none">
@@ -208,9 +212,11 @@ function DebriefView({ debrief, refreshing, onRefresh, onOpenFolder }: { debrief
                   <h2 id="charts-title" className="eyebrow">Parameters</h2>
                   <span className="text-xs text-fg-3">Drag across a chart to zoom · click to place the cursor</span>
                 </div>
-                <Suspense fallback={<ChartSkeleton />}>
-                  <Charts debrief={debrief} theme={theme} view={view} focus={focus} selected={selectedEvent} bus={bus} onView={setView} onFocus={place} />
-                </Suspense>
+                <ErrorBoundary what="The charts" size="sm">
+                  <Suspense fallback={<ChartSkeleton />}>
+                    <Charts debrief={debrief} theme={theme} view={view} focus={focus} selected={selectedEvent} bus={bus} onView={setView} onFocus={place} />
+                  </Suspense>
+                </ErrorBoundary>
               </section>
               <section aria-labelledby="landings-title">
                 <h2 id="landings-title" className="eyebrow mb-2">Landings <span className="readout">{landings.length}</span></h2>

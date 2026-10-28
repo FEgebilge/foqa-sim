@@ -188,7 +188,7 @@ async function drawCard(canvas: HTMLCanvasElement, d: CardData, theme: Theme) {
   g.stroke(new Path2D(LOGO.symbol));
   g.restore();
   const name = text("FOQA-Sim", mx + size + 12, my + 22, `600 22px ${mono}`, c.fg);
-  text("Flight data monitoring for MSFS 2024", mx + size + 12 + name + 14, my + 22, `400 17px ${sans}`, c.fg3);
+  text("Flight data monitoring for MSFS", mx + size + 12 + name + 14, my + 22, `400 17px ${sans}`, c.fg3);
 }
 
 const LEVEL = ["low", "medium", "high"] as const;

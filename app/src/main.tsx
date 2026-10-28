@@ -9,6 +9,7 @@ import "@fontsource/ibm-plex-mono/latin-600.css";
 import "./index.css";
 import "./styles/app.css";
 import App from "./App";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { NoticeProvider } from "./components/notices";
 import { ThemeProvider } from "./lib/theme";
 
@@ -16,7 +17,9 @@ createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <ThemeProvider>
       <NoticeProvider>
-        <App />
+        <ErrorBoundary>
+          <App />
+        </ErrorBoundary>
       </NoticeProvider>
     </ThemeProvider>
   </StrictMode>,

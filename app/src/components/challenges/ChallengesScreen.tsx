@@ -10,7 +10,7 @@ import { useNotify } from "../../lib/context";
 import { flightDate, number } from "../../lib/format";
 import { challengeHref } from "../../lib/route";
 import type { RecorderState } from "../../lib/use-backend";
-import { useAttempts, useChallenges } from "../../lib/use-backend";
+import { useAttempts, useChallenges, useLoad } from "../../lib/use-backend";
 import type { AttemptView, Briefing, ChallengeDefinition, ChallengeEntry, PreflightLine } from "../../types";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { OPEN_STATES } from "../../lib/attempts";
@@ -139,14 +139,13 @@ function Library({ entries, selected, attempts, onRemove }: { entries: Challenge
 }
 
 function ChallengeDetail({ challengeKey, attempts, sites, recorder, onChanged }: { challengeKey: string; attempts: AttemptView[]; sites: Map<string, SiteAttempt>; recorder: RecorderState | null; onChanged: () => void }) {
-  const [briefing, setBriefing] = useState<Briefing | { error: string } | null>(null);
   const { lines, checking, check } = usePreflight(challengeKey, recorder?.value.state);
-  useEffect(() => {
-    api.challengeBriefing(challengeKey).then(setBriefing, (error: unknown) => setBriefing({ error: message(error) }));
-  }, [challengeKey]);
+  const load = useCallback(() => api.challengeBriefing(challengeKey), [challengeKey]);
+  const { state } = useLoad<Briefing>(load);
 
-  if (!briefing) return <div className="panel h-64 animate-pulse" aria-label="Loading the briefing" />;
-  if ("error" in briefing) return <div className="panel"><EmptyState icon={<ServerCrash size={20} />} title="Could not read this challenge" description={briefing.error} /></div>;
+  if (state.status === "loading") return <div className="panel h-64 animate-pulse" aria-label="Loading the briefing" />;
+  if (state.status === "error") return <div className="panel"><EmptyState icon={<ServerCrash size={20} />} title="Could not read this challenge" description={state.message} /></div>;
+  const briefing = state.data;
   return (
     <div className="flex min-w-0 flex-col gap-5">
       <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,3fr)_minmax(20rem,2fr)]">
@@ -163,20 +162,15 @@ function ChallengeDetail({ challengeKey, attempts, sites, recorder, onChanged }:
 
 /** The pre-flight card, measured on open, when the recorder's state changes and every `PREFLIGHT_EVERY_MS`. */
 function usePreflight(key: string, recorder: string | undefined) {
-  const [lines, setLines] = useState<PreflightLine[] | null>(null);
-  const [checking, setChecking] = useState(false);
-  const measure = useCallback(() => api.challengePreflight(key)
-    .then(setLines, (error: unknown) => setLines([{ name: "sim", state: "unknown", text: `Could not check: ${message(error)}` }])), [key]);
+  // The recorder's state is part of the load, so a change measures again.
+  const measure = useCallback((): Promise<PreflightLine[]> => api.challengePreflight(key)
+    .catch((error: unknown) => [{ name: "sim", state: "unknown", text: `Could not check: ${message(error)}` }]), [key, recorder]); // eslint-disable-line react-hooks/exhaustive-deps
+  const { state, reload, refresh, refreshing } = useLoad(measure);
   useEffect(() => {
-    measure();
-    const timer = window.setInterval(measure, PREFLIGHT_EVERY_MS);
+    const timer = window.setInterval(reload, PREFLIGHT_EVERY_MS);
     return () => window.clearInterval(timer);
-  }, [measure, recorder]);
-  const check = useCallback(() => {
-    setChecking(true);
-    measure().finally(() => setChecking(false));
-  }, [measure]);
-  return { lines, checking, check };
+  }, [reload]);
+  return { lines: state.status === "ready" ? state.data : null, checking: refreshing, check: refresh };
 }
 
 const pad3 = (deg: number) => String(Math.round(deg)).padStart(3, "0");
