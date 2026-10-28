@@ -7,6 +7,7 @@
 #![forbid(unsafe_code)]
 
 mod assessment;
+pub mod export;
 mod index;
 mod wire;
 
@@ -589,10 +590,25 @@ fn text(s: Option<&str>) -> Option<String> {
         .map(str::to_owned)
 }
 
-/// ISO 8601 UTC from a `flight-<unix seconds>` id, as `foqa-rec` names them.
+/// Unix seconds of the recording start, from a `flight-<unix seconds>` id,
+/// as `foqa-rec` names them.
+fn start_unix(id: &str) -> Option<i64> {
+    id.strip_prefix("flight-")?.parse().ok()
+}
+
+/// ISO 8601 UTC from a `flight-<unix seconds>` id.
 fn started_utc(id: &str) -> Option<String> {
-    let unix: i64 = id.strip_prefix("flight-")?.parse().ok()?;
-    let (days, s) = (unix.div_euclid(86_400), unix.rem_euclid(86_400));
+    Some(iso_utc(start_unix(id)? * 1_000_000, false))
+}
+
+/// `2026-10-28T09:41:05Z` for µs since the Unix epoch, with milliseconds
+/// (`09:41:05.250Z`) when `millis`.
+fn iso_utc(unix_us: i64, millis: bool) -> String {
+    let (days, us) = (
+        unix_us.div_euclid(86_400_000_000),
+        unix_us.rem_euclid(86_400_000_000),
+    );
+    let s = us / 1_000_000;
     // Days to civil date (H. Hinnant, "chrono-Compatible Low-Level Date
     // Algorithms"), proleptic Gregorian.
     let z = days + 719_468;
@@ -604,12 +620,16 @@ fn started_utc(id: &str) -> Option<String> {
     let day = doy - (153 * mp + 2) / 5 + 1;
     let month = if mp < 10 { mp + 3 } else { mp - 9 };
     let year = yoe + era * 400 + i64::from(month <= 2);
-    Some(format!(
-        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z",
+    let fraction = match millis {
+        true => format!(".{:03}", us / 1000 % 1000),
+        false => String::new(),
+    };
+    format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}{fraction}Z",
         s / 3600,
         s / 60 % 60,
         s % 60
-    ))
+    )
 }
 
 #[cfg(test)]

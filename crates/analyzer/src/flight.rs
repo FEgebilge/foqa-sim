@@ -14,9 +14,10 @@ const WRAPPING: [(&str, f64, f64); 4] = [
 ];
 
 /// Recordings made before the wiring scaled `GEAR TOTAL PCT EXTENDED` (a
-/// 0-1 fraction in MSFS 2024, docs/format.md) hold `gear.extended` as 0-1.
-/// A series that never passes 1 is one of those: a true % series reaches
-/// 100 with the gear down, and an always-retracted one is 0 on both scales.
+/// 0-1 fraction in MSFS 2024, docs/format.md) hold `gear.extended` as 0-1
+/// and lack the `GearScaledV1` marker. Of those, a series that never passes
+/// 1 is a fraction: a true % series reaches 100 with the gear down, and an
+/// always-retracted one is 0 on both scales. Marked recordings are left as is.
 fn gear_fraction_to_pct(samples: &mut [Sample]) {
     const MAX_FRACTION: f64 = 1.0 + 1e-6;
     if samples.iter().all(|s| s.value <= MAX_FRACTION) {
@@ -62,7 +63,8 @@ impl Flight {
         // The journal is not time-ordered (touchdown pre-trigger buffer).
         series.iter_mut().for_each(|s| s.sort_by_key(|s| s.t));
         events.sort_by_key(|(t, _)| *t);
-        if let Some(gear) = lfl.by_name("gear.extended") {
+        let marked = events.iter().any(|(_, e)| *e == SimEvent::GearScaledV1);
+        if let Some(gear) = lfl.by_name("gear.extended").filter(|_| !marked) {
             gear_fraction_to_pct(&mut series[usize::from(gear.id.0)]);
         }
         Ok(Self {
@@ -215,11 +217,17 @@ pub(crate) mod tests {
         flight.at(name, SimTime::from_secs_f64(0.5 * f)).unwrap()
     }
 
-    /// `gear.extended` as read back from a journal holding `values`.
-    fn gear_read(values: &[f64]) -> Vec<f64> {
+    /// `gear.extended` as read back from a journal holding `values`,
+    /// with or without the `GearScaledV1` marker.
+    fn gear_read(values: &[f64], marked: bool) -> Vec<f64> {
         let lfl = &Lfl::V1;
         let id = lfl.by_name("gear.extended").unwrap().id;
         let mut journal = recorder::JournalWriter::new(Vec::new(), lfl).unwrap();
+        if marked {
+            journal
+                .event(SimTime::ZERO, &SimEvent::GearScaledV1)
+                .unwrap();
+        }
         for (i, &v) in values.iter().enumerate() {
             let t = SimTime::from_secs_f64(i as f64);
             journal.sample(&Sample::new(t, id, v)).unwrap();
@@ -234,9 +242,15 @@ pub(crate) mod tests {
 
     #[test]
     fn old_fraction_gear_reads_as_percent() {
-        assert_eq!(gear_read(&[0.0, 0.5, 1.0]), [0.0, 50.0, 100.0]);
-        assert_eq!(gear_read(&[0.0, 50.0, 100.0]), [0.0, 50.0, 100.0]);
-        assert_eq!(gear_read(&[0.0, 0.0]), [0.0, 0.0]);
+        assert_eq!(gear_read(&[0.0, 0.5, 1.0], false), [0.0, 50.0, 100.0]);
+        assert_eq!(gear_read(&[0.0, 50.0, 100.0], false), [0.0, 50.0, 100.0]);
+        assert_eq!(gear_read(&[0.0, 0.0], false), [0.0, 0.0]);
+    }
+
+    #[test]
+    fn marked_gear_is_never_rescaled() {
+        // A new recording cut mid-retraction: under 1 %, but already percent.
+        assert_eq!(gear_read(&[0.0, 0.5], true), [0.0, 0.5]);
     }
 
     #[test]

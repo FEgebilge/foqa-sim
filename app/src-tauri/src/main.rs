@@ -10,6 +10,7 @@ mod attempts;
 mod commands;
 #[cfg(feature = "connect")]
 mod connect;
+mod exports;
 mod insim;
 mod library;
 mod links;
@@ -64,7 +65,10 @@ macro_rules! handler {
             commands::setup_install,
             commands::setup_remove,
             commands::setup_use_community,
-            commands::setup_pick_community
+            commands::setup_pick_community,
+            exports::export_flight,
+            exports::export_logbook,
+            exports::save_image
             $(, $extra)*
         ]
     };

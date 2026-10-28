@@ -383,6 +383,7 @@ mod tests {
         let mut w = JournalWriter::new(Vec::new(), &Lfl::V1).unwrap();
         let t = SimTime::from_micros(5);
         for e in [
+            SimEvent::GearScaledV1,
             SimEvent::FlightLoaded("flights/c172.FLT".into()),
             SimEvent::Flow(FlowEvent::FlightStart),
             SimEvent::Airport(crate::airport_json::tests::ltbj()),
@@ -437,6 +438,11 @@ mod tests {
         assert_eq!(back, original);
         let report = SimEvent::PilotReport("unstable at 500 ft".into());
         assert!(back.events.iter().any(|(_, e)| *e == report));
+        assert!(
+            back.events
+                .iter()
+                .any(|(_, e)| *e == SimEvent::GearScaledV1)
+        );
         // And through the journal reader, grouped by parameter.
         let from_journal = read_records(&journal[..]).unwrap();
         assert_eq!(Recording::from_records(1, from_journal).unwrap(), original);

@@ -23,6 +23,9 @@ the recording; units are in the field names.
 | `setup_remove(package: string)` | `SetupStatus` | Removes an in-sim package from the Community folder |
 | `setup_use_community(path: string \| null)` | `SetupStatus` | Uses that Community folder from now on; `null` goes back to the found install's |
 | `setup_pick_community()` | `SetupStatus` | Asks for the Community folder in a folder dialog; cancelling changes nothing |
+| `export_flight(id, format, identity)` | `string \| null` | Saves the flight as `parquet`, `csv`, `kml` or `gpx` where a save dialog says ([exports.md](exports.md)); the file written, `null` when cancelled. `identity: true` adds the aircraft's title and tail number |
+| `export_logbook(identity)` | `string \| null` | Saves the flight list as a Little Navmap logbook CSV, the same way |
+| `save_image(name, png)` | `string \| null` | Saves a PNG the window drew (the landing card, `png` its bytes) under a name the save dialog suggests; anything but a PNG is refused |
 | `challenges_list()` | `ChallengeEntry[]` | The local challenge library, by title |
 | `challenge_import()` | `ChallengeEntry \| null` | Asks for a challenge file, checks it with `Challenge::parse` and keeps it; `null` when cancelled; errors in plain words |
 | `challenge_remove(key)` | `void` | Forgets a challenge; its attempts stay |

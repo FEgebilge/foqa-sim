@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { FolderOpen, PlaneLanding, RefreshCw, SearchX, ServerCrash } from "lucide-react";
+import { BookOpen, FolderOpen, PlaneLanding, RefreshCw, SearchX, ServerCrash } from "lucide-react";
 import { api } from "../../api";
 import { Button } from "@ui/components/button/button";
 import { EmptyState } from "@ui/components/empty-state/empty-state";
@@ -12,6 +12,7 @@ import type { RecorderState } from "../../lib/use-backend";
 import { useFlights } from "../../lib/use-backend";
 import type { FlightSummary, Grade } from "../../types";
 import { ConfirmDialog } from "../ConfirmDialog";
+import { ExportMenu } from "../ExportMenu";
 import { useOpenFolder } from "../use-open-folder";
 import { toRow } from "./flight-row";
 import { FlightsTable } from "./FlightsTable";
@@ -65,8 +66,12 @@ export function FlightsScreen({ recorder }: { recorder: RecorderState | null }) 
       .finally(() => { setDeleting(false); setDoomed(null); });
   };
 
+  const logbook = (identity: boolean) => api.exportLogbook(identity).then(
+    (file) => { if (file) notify({ title: "Logbook exported", body: <>{file}. In Little Navmap: Logbook → Import from CSV.</> }); },
+    (error: unknown) => notify({ title: "Could not export the logbook", body: String(error), tone: "error" }));
   const actions = (
     <div className="flex items-center gap-2">
+      {flights.length ? <ExportMenu label="Export" items={[{ label: "Little Navmap logbook", hint: "Every flight with an airport, as a CSV its logbook imports", icon: <BookOpen size={16} />, run: logbook }]} /> : null}
       <Button variant="secondary" size="sm" onClick={refresh} loading={refreshing}><RefreshCw size={15} aria-hidden="true" />Refresh</Button>
       <Button variant="secondary" size="sm" onClick={openFolder}><FolderOpen size={15} aria-hidden="true" />Open flights folder</Button>
     </div>
