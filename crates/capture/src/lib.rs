@@ -16,6 +16,7 @@ mod service;
 mod session;
 mod views;
 
+use std::collections::VecDeque;
 use std::fs::File;
 use std::io::{self, BufWriter};
 use std::ops::ControlFlow;
@@ -94,8 +95,8 @@ impl Command {
     }
 }
 
-/// `Break` stops recording; a command is carried out before the next item.
-/// One command per report: a second one before it is carried out is lost.
+/// `Break` stops recording; a command is carried out before the next item,
+/// in the order they came when several did.
 pub type Reply = ControlFlow<(), Option<Command>>;
 
 /// What one poll of the simulator gives.
@@ -180,7 +181,7 @@ fn run(
             r.session.placing(false);
         }
         // A command goes through the session like the sim's own items.
-        let item = match r.replies.command.take() {
+        let item = match r.replies.commands.pop_front() {
             Some(Command::Close) => None,
             Some(Command::Start) => {
                 r.session.start();
@@ -345,18 +346,20 @@ impl<F: FnMut(Progress) -> Reply> Run<'_, F> {
     }
 }
 
-/// What the replies to `record`'s reports ask for.
+/// What the replies to `record`'s reports ask for. One item can take
+/// several reports (a flight opening is `Opened` then `Recorded`), each
+/// with a command.
 #[derive(Default)]
 struct Replies {
     stop: bool,
-    command: Option<Command>,
+    commands: VecDeque<Command>,
 }
 
 impl Replies {
     fn take(&mut self, reply: Reply) {
         match reply {
             ControlFlow::Break(()) => self.stop = true,
-            ControlFlow::Continue(c) => self.command = self.command.take().or(c),
+            ControlFlow::Continue(c) => self.commands.extend(c),
         }
     }
 }
@@ -519,8 +522,6 @@ fn new_journal(dir: &Path, started: u64) -> io::Result<(String, PathBuf, File)> 
 
 #[cfg(test)]
 mod tests {
-    use std::collections::VecDeque;
-
     use recorder::{JournalReader, Record};
 
     use super::*;
@@ -707,6 +708,29 @@ mod tests {
                 .collect();
             assert_eq!(titles, [format!("{icao} test")]);
         }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn commands_answering_two_reports_of_one_item_are_both_carried_out() {
+        let dir = temp("two-commands");
+        let mut opened = None;
+        let mut marks = ["opened", "recorded"].into_iter();
+        script(&dir, frames(0, 30, IZMIR), |p| {
+            if let Progress::Opened(journal) = p {
+                opened = Some(journal.to_path_buf());
+            }
+            ControlFlow::Continue(marks.next().map(|m| Command::Mark(m.into())))
+        });
+        let file = File::open(opened.unwrap()).unwrap();
+        let notes: Vec<_> = JournalReader::new(file)
+            .unwrap()
+            .filter_map(|r| match r.unwrap() {
+                Record::Event(_, SimEvent::PilotReport(note)) => Some(note),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(notes, ["opened", "recorded"]);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
