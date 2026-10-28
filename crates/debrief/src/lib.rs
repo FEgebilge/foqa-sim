@@ -119,17 +119,12 @@ pub fn journals(dir: &Path) -> Vec<PathBuf> {
 }
 
 /// Compacts each journal (see `recorder::compact_file`), reporting on stderr.
-/// A journal that fails or is cut off stays as it is. Returns how many did
-/// not compact.
+/// A journal that fails stays as it is. Returns how many did not compact.
 pub fn compact_all(journals: impl IntoIterator<Item = PathBuf>) -> usize {
     let mut left = 0;
     for journal in journals {
         match recorder::compact_file(&journal) {
-            Ok(Some(dest)) => eprintln!("compacted: {}", dest.display()),
-            Ok(None) => {
-                left += 1;
-                eprintln!("{}: cut off, left as is", journal.display());
-            }
+            Ok(dest) => eprintln!("compacted: {}", dest.display()),
             Err(e) => {
                 left += 1;
                 eprintln!("{}: compaction failed: {e}", journal.display());
