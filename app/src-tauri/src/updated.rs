@@ -35,6 +35,17 @@ pub fn update_mark() {
     }
 }
 
+/// The update failed: the mark must not raise the window at a later start.
+#[tauri::command]
+pub fn update_mark_clear() {
+    clear_at(&mark_path());
+}
+
+/// Absent is fine: the mark may never have been written.
+fn clear_at(path: &Path) {
+    let _ = std::fs::remove_file(path);
+}
+
 /// Whether this start follows an update (and forgets that it does).
 pub fn take() -> bool {
     take_at(&mark_path(), SystemTime::now())
@@ -49,6 +60,15 @@ mod tests {
         let path = std::env::temp_dir().join(format!("foqa-sim-mark-{}", std::process::id()));
         leave_at(&path).unwrap();
         assert!(take_at(&path, SystemTime::now()));
+        assert!(!take_at(&path, SystemTime::now()));
+    }
+
+    #[test]
+    fn a_cleared_mark_is_not_taken() {
+        let path = std::env::temp_dir().join(format!("foqa-sim-clear-{}", std::process::id()));
+        leave_at(&path).unwrap();
+        clear_at(&path);
+        clear_at(&path);
         assert!(!take_at(&path, SystemTime::now()));
     }
 

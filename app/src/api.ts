@@ -106,11 +106,17 @@ const tauriApi: Api = {
     let total: number | undefined;
     // The installer restarts the app hidden in the tray; the mark makes that start show its window.
     await invoke<void>("update_mark");
-    await found.downloadAndInstall((event) => {
-      if (event.event === "Started") total = event.data.contentLength;
-      else if (event.event === "Progress") done += event.data.chunkLength;
-      onProgress(done, total, event.event === "Finished");
-    });
+    try {
+      await found.downloadAndInstall((event) => {
+        if (event.event === "Started") total = event.data.contentLength;
+        else if (event.event === "Progress") done += event.data.chunkLength;
+        onProgress(done, total, event.event === "Finished");
+      });
+    } catch (e) {
+      // A failed update must not leave the mark to raise the window at a later start.
+      await invoke<void>("update_mark_clear").catch(() => {});
+      throw e;
+    }
   },
   challengesList: () => invoke<ChallengeEntry[]>("challenges_list"),
   challengeImport: () => invoke<ChallengeEntry | null>("challenge_import"),
