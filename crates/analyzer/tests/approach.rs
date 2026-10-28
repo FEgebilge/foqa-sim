@@ -96,6 +96,30 @@ fn a_flap_change_in_the_window_is_found_once() {
 }
 
 #[test]
+fn a_fast_turn_off_past_the_tdz_ends_the_centreline_tracking() {
+    // 140 kt slowing 3 kt/s: 40 kt at 33.3 s, ~1940 m past the threshold
+    // (TDZ 914 m); then a 35 deg turn that goes 30 m right by 30 kt.
+    let exit = |turn_kt: f64| {
+        let at = TD_S + (140.0 - turn_kt) / 3.0;
+        approach(move |t| {
+            let track = if t > at { 235.0 } else { TRACK_DEG };
+            Pt {
+                heading: track,
+                track,
+                ..landing(t, TD_S, 1.2)
+            }
+        })
+    };
+    // The 1 s chord of the 1 Hz positions passes 15 deg within a second
+    // of the turn: 20.6 m/s x sin 35 deg x < 1 s, under 12 m.
+    let a = exit(40.0);
+    assert!(a.rollout_cross_m.unwrap() < 12.0, "{:?}", a.rollout_cross_m);
+    // The same turn at 80 kt is a veer-off: tracked to 30 kt, 22.5 m off.
+    let a = exit(80.0);
+    assert!(a.rollout_cross_m.unwrap() > 22.5, "{:?}", a.rollout_cross_m);
+}
+
+#[test]
 fn a_slewed_approach_is_graded_from_the_end_of_the_slew() {
     // Slewed until 40 s before contact (~470 ft): the window starts 5 s
     // after it, not at 1000 ft.

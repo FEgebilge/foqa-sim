@@ -41,6 +41,13 @@ const REVERSERS: [&str; 4] = [
 const DECEL_SEARCH_US: i64 = 30_000_000;
 /// The rollout's centreline tracking ends below this ground speed (RE.7).
 const ROLLOUT_END_KT: f64 = 30.0;
+/// Or where the aircraft turns off: ground track this far off the runway
+/// heading, at no more than exit speed, past the touchdown zone. Rapid exit
+/// taxiways leave at 25-45 deg and are designed for 93 km/h, 50 kt (ICAO
+/// Annex 14 Vol I 3.9, Doc 9157 Part 2); a veer-off at that speed and place
+/// cannot be told from an exit without taxiway data.
+const TURN_OFF_DEG: f64 = 15.0;
+const EXIT_MAX_KT: f64 = 50.0;
 /// Taxi speed on a dry runway (FAA-S-ACS-11A): stopped on the runway.
 const TAXI_KT: f64 = 20.0;
 
@@ -147,8 +154,8 @@ pub struct Approach {
     /// a touch-and-go, or the recording ending airborne; `None` if it ends
     /// on the ground. The rollout ends there.
     pub liftoff: Option<SimTime>,
-    /// Largest centreline offset from contact down to 30 kt or the
-    /// liftoff, m.
+    /// Largest centreline offset from contact down to 30 kt, the turn-off
+    /// onto an exit or the liftoff, m.
     pub rollout_cross_m: Option<f64>,
     /// Taxi speed reached before the liftoff.
     pub slowed: Option<Slowed>,
@@ -204,7 +211,7 @@ impl Approach {
             }),
             rollout_cross_m: fix.and_then(|f| {
                 let end = (td_i..ground_end)
-                    .find(|&i| track.gs_kt[i] < ROLLOUT_END_KT)
+                    .find(|&i| track.gs_kt[i] < ROLLOUT_END_KT || turning_off(flight, track, f, i))
                     .unwrap_or(ground_end);
                 (td_i..end)
                     .filter_map(|i| position(flight, track.t[i]))
@@ -362,6 +369,21 @@ fn crossing(flight: &Flight, track: &Track, fix: &RunwayFix, td: SimTime) -> Opt
         next = Some((i, a));
     }
     None
+}
+
+/// Whether the rollout at track point `i` is a turn-off onto an exit.
+fn turning_off(flight: &Flight, track: &Track, fix: &RunwayFix, i: usize) -> bool {
+    let t = track.t[i];
+    let (Some(a), Some(b)) = (
+        position(flight, t.add_us(-DRIFT_SPAN_US)),
+        position(flight, t),
+    ) else {
+        return false;
+    };
+    track.gs_kt[i] <= EXIT_MAX_KT
+        && fix.offsets(b.0, b.1).0 > fix.tdz_m
+        && distance_m(a, b) >= DRIFT_MIN_M
+        && wrap180(ground_track_deg(a, b) - fix.heading_deg).abs() >= TURN_OFF_DEG
 }
 
 /// Time from the last descent through 50 ft above the runway to contact.

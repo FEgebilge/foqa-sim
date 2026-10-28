@@ -222,7 +222,7 @@ goes away: outside the TDZ is level 2, not zero.
 | D2 | Crab at touchdown | **new**: \|true heading − runway true heading\| at contact | light | 1° \| 3° \| 5° \| 8° \| 12° | S3/S4 "axis aligned" ✔; numbers est |
 | | | | T/J | 2° \| 5° \| 7° \| 10° \| 15° | S9: crab touchdown accepted ✔; numbers est |
 | D3 | Drift at touchdown | **new**: GS · sin(track − runway), track over the 1 s before contact | all | 1 \| 2 \| 4 \| 6 \| 8 kt | S3/S4 "no side drift" ✔; numbers est |
-| D4 | Rollout centreline | max \|cross\| from touchdown to 30 kt or the next liftoff (exists: `rollout_cross_m`) | all | ½ track \| 3 m \| 7.6 m \| 12.2 m \| runway exit → cap | S6 RE.7 ✔ (measure); numbers est |
+| D4 | Rollout centreline | max \|cross\| from touchdown to 30 kt, the turn-off or the next liftoff (`rollout_cross_m`). A turn-off is a ground track ≥ 15° off the runway at ≤ 50 kt past the TDZ: rapid exits leave at 25–45° and are designed for 50 kt (ICAO Annex 14 Vol I 3.9, Doc 9157 Part 2), so a fast exit is no excursion; a veer-off there cannot be told from an exit without taxiway data | all | ½ track \| 3 m \| 7.6 m \| 12.2 m \| runway exit → cap | S6 RE.7 ✔ (measure); numbers est |
 
 Main-gear track: new profile field `main_gear_track` (with its source).
 Fallbacks, all est: light 2.5 m, turboprop 4 m, jet 6 m.
@@ -332,7 +332,7 @@ event that caused it.
 | **Continued unstable approach**: T/J by the D4S rule (≥ 1 A criterion at SL2B/SL3, i.e. L2/L3 below 500 ft, or ≥ 3 distinct A criteria at L1/L2 above 500 ft, glideslope and localizer counting as one A5) without a go-around; light: any A criterion at L2+ below 300 ft, or ≥ 3 at L1+ | 59 (Poor) | S1 ✔, S5 "go around" ✔; light adaptation est |
 | **Inspection-level contact**: `hard-landing-inspection` (peak g > the manufacturer's `hard_landing_g`, Decision 5; no separate sink cap), or tail margin < 0 (tail strike) | 39 | S10 ✔, S12 ⚠ |
 | **Undershoot**: touchdown before the threshold | 39 | `short-landing` |
-| **Runway excursion or crash**: left the runway sides before 30 kt, overran (F3), sim crash/damage flag | 0, outcome shown | S6 RE.7/RE.8 |
+| **Runway excursion or crash**: left the runway sides on the landing roll (D4: before 30 kt or the turn-off), overran (F3), sim crash/damage flag | 0, outcome shown | S6 RE.7/RE.8 |
 
 **Go-around.**
 

@@ -424,7 +424,7 @@ fn bounce(track: &Track, tds: &[Touchdown], index: usize) -> f64 {
 /// Leaving the runway on the rollout, in words.
 fn excursion(a: &Approach, fix: &analyzer::RunwayFix) -> Option<String> {
     if a.rollout_cross_m.is_some_and(|c| c > fix.width_m / 2.0) {
-        return Some("Left the side of the runway before slowing to 30 kt".into());
+        return Some("Left the side of the runway on the landing roll".into());
     }
     a.slowed
         .as_ref()
