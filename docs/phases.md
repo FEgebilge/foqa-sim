@@ -26,6 +26,7 @@ above the aerodrome (AAL, pressure altitude) where RA is invalid.
 | Standing | STD | On the ground under 2 kt | Moving |
 | Taxi | TXI | Moving on the ground under `roll_kt` | A takeoff roll starts, or stopped |
 | Takeoff | TOF | On the ground above `roll_kt` and continuing to liftoff; after a touch-and-go, at the lowest ground speed of the roll (power applied) | 35 ft above the runway |
+| Rejected takeoff | TOF subphase | On the ground above `roll_kt`, accelerating from under it, reaching `rto_kt` and slowing under `roll_kt` again without a liftoff | Under `roll_kt` |
 | Initial climb | ICL | 35 ft above the runway | `climb_end_ft` above the aerodrome, or the top of a lower climb |
 | En route | ENR | End of the initial climb | Descending through `approach_ft`; for a leg topping under it, through `climb_end_ft` |
 | Approach | APR | Descending through `approach_ft` above the aerodrome, past the top of a climb that stayed under `climb_end_ft`, or descending through `climb_end_ft` from a top between the two | Flare: below `flare_ft` above the runway |
@@ -40,6 +41,13 @@ from its height, so its approach starts at CICTT's other VFR mark,
 descending through `climb_end_ft` (1000 ft); until then a dip and climb in
 that cruise is en route, not an approach and a go-around.
 
+A rejected takeoff is a ground run no leg follows: it must start from
+under `roll_kt` (not a rollout already under way when the recording
+starts) and slow under it again, so a run cut by the end of the recording
+or a ground-speed dropout stays taxi. A transport taxiing at 35 kt is
+under `rto_kt` and stays taxi; a line-up stops or rolls on into the
+takeoff. The `rejected-takeoff` rules grade it by its highest speed.
+
 A touch-and-go splits the ground run between the two legs at its lowest
 ground speed: CICTT ends the landing when takeoff power is applied, and the
 speed starts rising there. The second leg so has its own takeoff roll and
@@ -51,12 +59,13 @@ switch comes once the speed is 5 kt above that lowest, a few seconds later.
 Defaults by class; a type profile may override them (`phases:` in
 `profiles/<ICAO>.yaml`, `docs/rules.md`), each value with its source. A
 flight of unknown class takes the transport values. Merged with the
-defaults, `climb_end_ft` is at most 1000 ft, `approach_ft` at least
-`climb_end_ft`, and `flare_ft` below `approach_ft`.
+defaults, `rto_kt` is at least `roll_kt`, `climb_end_ft` at most 1000 ft,
+`approach_ft` at least `climb_end_ft`, and `flare_ft` below `approach_ft`.
 
 | Value | Light | Transport | Why |
 |---|---|---|---|
 | `roll_kt` | 30 | 30 | Above any taxi speed, below every liftoff speed |
+| `rto_kt` | 30 | 40 | A light aircraft taxis at a walking pace (FAA-H-8083-3 ch. 2); transport: 10 kt (a tailwind) above the 30 kt straight-line taxi limit of the Boeing and Airbus FCTMs |
 | `climb_end_ft`, `approach_ft` | 1000 | 1000 | CICTT: 1000 ft or the VFR pattern; FAA AIM 4-3-3 pattern 1000 ft AGL (piston), 1500 ft (turbine, by profile) |
 | `flare_ft` | 20 | 50 | Light flare about 10–20 ft; transport 30–50 ft, 50 ft being also the threshold crossing height |
 | `go_around_rise_ft` | 200 | 200 | A smaller rise is not told apart from a balloon or a levelling-off at these sample rates |
@@ -87,7 +96,8 @@ climbing), so the light flare's horn is not a finding.
 ## Not yet (known gaps)
 
 - Climb, cruise and descent subphases; pushback.
-- Rejected takeoff (a takeoff roll that slows without a liftoff).
+- Rejected takeoff live: the panel shows the run as a takeoff until it
+  slows; the debrief labels it.
 - Runway exit (not groundspeed alone) as the end of the landing roll, which
   EOFDM recommends.
 - Go-around by thrust or TOGA rather than by height.

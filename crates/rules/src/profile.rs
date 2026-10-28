@@ -122,6 +122,7 @@ impl ProfileField {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PhaseField {
     RollKt,
+    RtoKt,
     ClimbEndFt,
     ApproachFt,
     FlareFt,
@@ -130,8 +131,9 @@ pub enum PhaseField {
 }
 
 impl PhaseField {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::RollKt,
+        Self::RtoKt,
         Self::ClimbEndFt,
         Self::ApproachFt,
         Self::FlareFt,
@@ -143,6 +145,7 @@ impl PhaseField {
     pub fn name(self) -> &'static str {
         match self {
             Self::RollKt => "roll_kt",
+            Self::RtoKt => "rto_kt",
             Self::ClimbEndFt => "climb_end_ft",
             Self::ApproachFt => "approach_ft",
             Self::FlareFt => "flare_ft",
@@ -153,7 +156,7 @@ impl PhaseField {
 
     pub fn unit(self) -> Unit {
         match self {
-            Self::RollKt => Unit::Knots,
+            Self::RollKt | Self::RtoKt => Unit::Knots,
             _ => Unit::Feet,
         }
     }
@@ -161,6 +164,7 @@ impl PhaseField {
     fn of(self, c: &mut PhaseConfig) -> &mut f64 {
         match self {
             Self::RollKt => &mut c.roll_kt,
+            Self::RtoKt => &mut c.rto_kt,
             Self::ClimbEndFt => &mut c.climb_end_ft,
             Self::ApproachFt => &mut c.approach_ft,
             Self::FlareFt => &mut c.flare_ft,
@@ -479,6 +483,7 @@ struct Doc {
 #[serde(deny_unknown_fields)]
 struct PhasesDoc {
     roll_kt: Option<SourcedDoc>,
+    rto_kt: Option<SourcedDoc>,
     climb_end_ft: Option<SourcedDoc>,
     approach_ft: Option<SourcedDoc>,
     flare_ft: Option<SourcedDoc>,
@@ -490,6 +495,7 @@ impl PhasesDoc {
     fn take(&mut self, f: PhaseField) -> Option<SourcedDoc> {
         match f {
             PhaseField::RollKt => self.roll_kt.take(),
+            PhaseField::RtoKt => self.rto_kt.take(),
             PhaseField::ClimbEndFt => self.climb_end_ft.take(),
             PhaseField::ApproachFt => self.approach_ft.take(),
             PhaseField::FlareFt => self.flare_ft.take(),
@@ -725,7 +731,9 @@ impl Compiler<'_> {
                 set.push((f, s));
             }
         }
-        let wrong = if c.climb_end_ft > CLIMB_END_MAX_FT {
+        let wrong = if c.rto_kt < c.roll_kt {
+            "`rto_kt` below `roll_kt`"
+        } else if c.climb_end_ft > CLIMB_END_MAX_FT {
             "`climb_end_ft` above 1000 ft, where CICTT ends the initial climb"
         } else if c.approach_ft < c.climb_end_ft {
             "`approach_ft` below `climb_end_ft`"
@@ -1067,6 +1075,9 @@ flaps:
         );
         assert!(
             err("  roll_kt: { value: 30 ft, source: x }\n").contains("is ft, but the field is kt")
+        );
+        assert!(
+            err("  rto_kt: { value: 20 kt, source: x }\n").contains("`rto_kt` below `roll_kt`")
         );
         assert!(err("  flare: { value: 30 ft, source: x }\n").contains("unknown field `flare`"));
     }

@@ -494,7 +494,9 @@ mod tests {
     #[test]
     fn a_value_hovering_at_the_threshold_is_one_event() {
         // 6 s over the low level with a 1/8 s dip under it every second.
-        let hovering: Vec<f64> = (0..49).map(|i| if i % 8 == 4 { 50.0 } else { 150.0 }).collect();
+        let hovering: Vec<f64> = (0..49)
+            .map(|i| if i % 8 == 4 { 50.0 } else { 150.0 })
+            .collect();
         assert_eq!(continuous("sustain: 5 s", &hovering).len(), 1);
         // A dip longer than 1 s ends the run: two 3 s runs, neither 5 s.
         let mut split = vec![150.0; 24];

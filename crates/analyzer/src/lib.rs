@@ -24,7 +24,9 @@ pub use approach::{
 pub use flight::Flight;
 pub use landing::{Touchdown, touchdowns};
 pub use live::{LiveInput, LivePoint, LiveTrack};
-pub use phase::{Basis, Cause, Phase, PhaseConfig, Span, Trigger, phase_labels, phases};
+pub use phase::{
+    Basis, Cause, Phase, PhaseConfig, Span, Trigger, phase_labels, phases, rotation_rate,
+};
 pub use runs::runs;
 pub use runway::{
     RunwayFix, Threshold, ground_track_deg, locate, magnetic_deg, thresholds, wind_components,

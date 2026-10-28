@@ -317,9 +317,15 @@ pub(crate) mod tests {
 
     #[test]
     fn gear_position_holds_its_last_sample() {
-        let f = flight(&[ok("gear.extended", 0.0, 0.0), ok("gear.extended", 4.0, 100.0)]);
+        let f = flight(&[
+            ok("gear.extended", 0.0, 0.0),
+            ok("gear.extended", 4.0, 100.0),
+        ]);
         let at = |s| f.at("gear.extended", SimTime::from_secs_f64(s));
-        assert_eq!((at(2.0), at(3.9), at(4.0)), (Some(0.0), Some(0.0), Some(100.0)));
+        assert_eq!(
+            (at(2.0), at(3.9), at(4.0)),
+            (Some(0.0), Some(0.0), Some(100.0))
+        );
     }
 
     #[test]

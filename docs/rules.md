@@ -174,10 +174,11 @@ published, strictly increasing with one `ias` each; a table has one
 `source` (and optional `approximate`, `note`) for all its entries.
 
 `phases:` overrides the class defaults of `docs/phases.md` where the type
-differs, each value sourced like the others: `roll_kt` (kt), `climb_end_ft`,
-`approach_ft`, `flare_ft`, `go_around_rise_ft`, `go_around_drop_ft` (ft).
-Merged with the defaults, `climb_end_ft` may not exceed 1000 ft (where CICTT
-ends the initial climb), `approach_ft` may not be below `climb_end_ft`, and
+differs, each value sourced like the others: `roll_kt`, `rto_kt` (kt),
+`climb_end_ft`, `approach_ft`, `flare_ft`, `go_around_rise_ft`,
+`go_around_drop_ft` (ft). Merged with the defaults, `rto_kt` may not be
+below `roll_kt`, `climb_end_ft` may not exceed 1000 ft (where CICTT ends
+the initial climb), `approach_ft` may not be below `climb_end_ft`, and
 `flare_ft` must be below `approach_ft`. A flight of unknown class takes the
 transport defaults. The debrief lists the values in effect and where each
 comes from (`phase_values`). The shipped turbine singles (PC12, TBM9, C208)
