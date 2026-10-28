@@ -1,5 +1,5 @@
 // Sourced context for the landing card and charts, display only (events come from the rules, type limits from the profile).
-// A "reference" is published (manufacturer, regulator, ICAO/FAA). The shaded bands under a gauge are the landing-2 bands of
+// A "reference" is published (manufacturer, regulator, ICAO/FAA). The shaded bands under a gauge are the landing-3 bands of
 // the criterion that grades that value (lib/assessment.ts), so the gauge and the score cannot disagree.
 import type { CriterionAssessment, Debrief, RunwayFix, Sourced } from "../types";
 import { ZONE_COLOR, ZONES, zones } from "./assessment";

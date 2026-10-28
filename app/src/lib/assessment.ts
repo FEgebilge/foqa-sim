@@ -1,4 +1,4 @@
-// The landing-2 assessment (docs/scoring.md) for display: the domain bars' geometry, the zones of a criterion's band strip
+// The landing-3 assessment (docs/scoring.md) for display: the domain bars' geometry, the zones of a criterion's band strip
 // and the words for values, levels and deductions. Pure functions, so the panel, the landing card's gauges and the EFB
 // mirror read one set of bands and cannot disagree with the score.
 import type { Anchors, CriterionAssessment, Debrief, DomainAssessment, LandingAssessment } from "../types";

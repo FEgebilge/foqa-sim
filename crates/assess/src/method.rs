@@ -11,8 +11,8 @@ use rules::expr::{self, Expr, Scope, Ty, Values};
 use rules::{Domain, Level, Limits, Rule, Scalar, ScoringClass, Side};
 use serde::Deserialize;
 
-/// The shipped `landing-2` and the core rules it takes levels from.
-const LANDING_2: &str = include_str!("../../../scoring/landing-2.yaml");
+/// The shipped `landing-3` and the core rules it takes levels from.
+const LANDING_3: &str = include_str!("../../../scoring/landing-3.yaml");
 const CORE_RULES: &str = include_str!("../../../rules/core.yaml");
 
 /// The scored domains, in their order on the page.
@@ -28,7 +28,7 @@ pub const DOMAINS: [Domain; 6] = [
 /// The levels of the scale, at the anchors ideal, tolerance, L1, L2, L3.
 pub const ANCHOR_ELL: [f64; 5] = [0.0, 0.5, 1.0, 2.0, 3.0];
 
-/// A name an anchor may use (`scoring/landing-2.yaml` header).
+/// A name an anchor may use (`scoring/landing-3.yaml` header).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Var {
     Add,
@@ -332,10 +332,10 @@ fn quantity(path: &str, value: &Scalar, unit: Unit) -> Result<f64, MethodError> 
 }
 
 impl Method {
-    /// The shipped `landing-2`, its levels taken from the core rules.
-    pub fn landing_2() -> Result<Self, MethodError> {
+    /// The shipped `landing-3`, its levels taken from the core rules.
+    pub fn landing_3() -> Result<Self, MethodError> {
         let rules = rules::load(CORE_RULES).map_err(|e| MethodError(e.to_string()))?;
-        Self::load(LANDING_2, &rules)
+        Self::load(LANDING_3, &rules)
     }
 
     /// Loads a method, taking `levels_from` thresholds from `rules`.

@@ -1,4 +1,4 @@
-//! The flight's landing-2 assessment (docs/scoring.md): every landing
+//! The flight's landing-3 assessment (docs/scoring.md): every landing
 //! scored by `assess`, its findings pointing at `Debrief.events`, the
 //! flight graded by its last full-stop landing (Decision 3) and the rest of
 //! the flight. A flight without a scored landing keeps the points method.

@@ -47,7 +47,7 @@ fn flown(
     let selection = profiles.select(&flight);
     let found = evaluate(&rules, &selection, &flight, &track);
     let tds = touchdowns(&flight, &track);
-    Method::landing_2().unwrap().assess(&Landing {
+    Method::landing_3().unwrap().assess(&Landing {
         flight: &flight,
         track: &track,
         selection: &selection,
@@ -289,7 +289,7 @@ fn a_crash_on_the_landing_caps_the_score() {
     let profiles = ProfileSet::load([("TEST", PROFILE)]).unwrap();
     let (rules, selection) = (load(CORE).unwrap(), profiles.select(&flight));
     let tds = touchdowns(&flight, &track);
-    let Assessment::Scored { score, .. } = Method::landing_2().unwrap().assess(&Landing {
+    let Assessment::Scored { score, .. } = Method::landing_3().unwrap().assess(&Landing {
         flight: &flight,
         track: &track,
         selection: &selection,

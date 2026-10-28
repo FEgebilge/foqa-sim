@@ -386,7 +386,7 @@ view's. A view ignores replies whose `req` is not the one it waits for, and
 a new query replaces a waiting one. With nothing complete after about 8 s
 it shows an error and **Try again**, which asks again with a new `req`.
 
-The debrief view opens with the flight's landing-2 score and grade
+The debrief view opens with the flight's landing-3 score and grade
 ([scoring.md](scoring.md)), six domain mini-bars of the grading landing
 (track as long as the weight, the share of it lost in the level's colour,
 labelled with the points lost) and
@@ -425,8 +425,8 @@ interface DebriefPart {
 interface CompactDebrief {
   flight: FlightItem & {     // the assessment (debrief-api.md) and how it came about:
     profile: string;
-    method: "landing-2" | "points";
-    score?: number;          // landing-2, 0-100
+    method: "landing-3" | "points";
+    score?: number;          // landing-3, 0-100
     confidence?: "full" | "partial";
     // The grading landing's six domains in order (stability, energy, point,
     // lateral, contact, rollout) as mini-bars: [weight, points lost or null

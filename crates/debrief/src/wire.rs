@@ -194,7 +194,7 @@ pub struct RuleCount {
 }
 
 /// The flight graded as a whole, as the flight list shows it: by
-/// `landing-2` (docs/scoring.md) when a landing was scored, else by points.
+/// `landing-3` (docs/scoring.md) when a landing was scored, else by points.
 /// `points` and `findings` are the points method's (each rule it broke
 /// counts once, at its worst level: high 4 points, medium 2, low 1,
 /// advisories none), kept for one release.
@@ -204,7 +204,7 @@ pub struct Assessment {
     pub points: u32,
     /// Rules broken at low or above.
     pub findings: usize,
-    /// `landing-2`, or `points`.
+    /// `landing-3`, or `points`.
     #[serde(default = "points_method")]
     pub method: String,
     /// 0-100, with a scored landing.
@@ -263,7 +263,7 @@ pub struct GradeBand {
 /// the points method's parts and bands.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct AssessmentDetail {
-    /// `landing-2`, or `points` without a scored landing.
+    /// `landing-3`, or `points` without a scored landing.
     pub method: String,
     pub score: Option<f64>,
     pub grade: Grade,
@@ -283,7 +283,7 @@ pub struct AssessmentDetail {
     pub legacy_findings: usize,
     pub parts: Vec<AssessmentPart>,
     pub bands: [GradeBand; 3],
-    /// landing-2's grade edges: Good from `good`, Fair from `fair`.
+    /// landing-3's grade edges: Good from `good`, Fair from `fair`.
     pub grades: ScoreBands,
 }
 
@@ -338,7 +338,7 @@ pub struct LandingAssessment {
     pub caps: Vec<CapNote>,
     pub stable_from_ft: Option<f64>,
     /// The height splitting the approach window into its two halves, by
-    /// class (`windows` of scoring/landing-2.yaml); `None` when insufficient.
+    /// class (`windows` of scoring/landing-3.yaml); `None` when insufficient.
     pub split_ft: Option<f64>,
     pub speeds: Option<Speeds>,
     pub domains: Vec<DomainAssessment>,
@@ -378,7 +378,7 @@ pub struct ApproachProfile {
     pub loc_dot: Vec<f64>,
     pub path_deg: f64,
     pub tch_ft: f64,
-    /// The window's top and bottom heights (`windows` of scoring/landing-2.yaml).
+    /// The window's top and bottom heights (`windows` of scoring/landing-3.yaml).
     pub top_ft: f64,
     pub bottom_ft: f64,
 }
@@ -1029,12 +1029,12 @@ mod grade_band_tests {
             outcome: Default::default(),
             partial: Vec::new(),
         };
-        Method::landing_2().unwrap().score(&m).score
+        Method::landing_3().unwrap().score(&m).score
     }
 
     #[test]
     fn single_findings_keep_todays_grade() {
-        let method = Method::landing_2().unwrap();
+        let method = Method::landing_3().unwrap();
         assert_eq!(landing(&[]), 100.0);
         for domain in assess::DOMAINS {
             for level in [Low, Medium, High] {

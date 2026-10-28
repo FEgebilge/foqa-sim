@@ -4,7 +4,7 @@ The landing score says *how much* an approach cost; the reference approach shows
 landing's approach is drawn against the profile it was graded by, as an instructor's debrief
 overlays the flown path on the ideal one: the 3° path to the threshold, the approach speed, the
 sink rate that path needs at your ground speed, and the stabilised gate, with the bands of
-`scoring/landing-2.yaml` around each. There is no second set of numbers: the bands on the chart
+`scoring/landing-3.yaml` around each. There is no second set of numbers: the bands on the chart
 are the criteria's own (`CriterionAssessment.bands`), so the picture and the score always agree.
 
 ## What the reference is
@@ -34,7 +34,7 @@ interface ApproachProfile {
   loc_dot: number[];      // localizer deviation, dots, right of course positive; NaN without a signal
   path_deg: number;       // 3.0
   tch_ft: number;         // 50
-  top_ft: number;         // the window's top and bottom heights (scoring/landing-2.yaml windows)
+  top_ft: number;         // the window's top and bottom heights (scoring/landing-3.yaml windows)
   bottom_ft: number;
 }
 ```

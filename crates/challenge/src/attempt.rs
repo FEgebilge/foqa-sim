@@ -10,7 +10,7 @@ use recorder::{AttemptPhase, SimEvent};
 use rules::{Aircraft, Domain};
 use serde::Serialize;
 
-use crate::score::{LANDING_2, Landing, Part, SCORING, Score, landing_1};
+use crate::score::{LANDING_3, Landing, Part, SCORING, Score, landing_1};
 use crate::{Challenge, M_PER_NM};
 
 /// The rollout ends below this groundspeed.
@@ -41,16 +41,16 @@ pub struct Attempt {
     pub touchdown_s: Option<f64>,
     /// `None` without a landing on the challenge's runway past its gate.
     pub score: Option<Score>,
-    /// A landing-2 attempt's grade, confidence and caps (docs/scoring.md),
+    /// A landing-3 attempt's grade, confidence and caps (docs/scoring.md),
     /// as the debrief wire has them; absent for landing-1.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub assessment: Option<Assessment>,
 }
 
-/// The assessment of a ranked landing-2 attempt: `score` is `score.total`.
+/// The assessment of a ranked landing-3 attempt: `score` is `score.total`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Assessment {
-    /// `landing-2`.
+    /// `landing-3`.
     pub method: String,
     pub score: f64,
     pub grade: Grade,
@@ -91,7 +91,7 @@ fn check(name: &'static str, ok: bool, detail: String) -> Check {
 struct Graded {
     gate: SimTime,
     touchdown: SimTime,
-    /// `None` when landing-2 lacks the data any score needs.
+    /// `None` when landing-3 lacks the data any score needs.
     score: Option<Score>,
     assessment: Option<Assessment>,
 }
@@ -373,7 +373,7 @@ fn landing(
             })),
             None,
         ),
-        _ => landing_2(a, k, gate_i, checks).unzip(),
+        _ => landing_3(a, k, gate_i, checks).unzip(),
     };
     Some(Graded {
         gate: from,
@@ -383,14 +383,14 @@ fn landing(
     })
 }
 
-/// The landing-2 score of touchdown `k` (docs/scoring.md), the shared
+/// The landing-3 score of touchdown `k` (docs/scoring.md), the shared
 /// assessment as a ranked attempt flown from the gate: no selected-speed
 /// fallback, the window starting at the gate where it is lower. Adds the
 /// `go_around` check (an attempt that went around is not ranked) and the
 /// `data` check (ranking needs every expected value). The parts are the
 /// domains, their weights shared out where one is n/a; a safety cap holds
 /// `total` below their sum.
-fn landing_2(
+fn landing_3(
     a: &Analysis,
     k: usize,
     gate_i: usize,
@@ -466,7 +466,7 @@ fn landing_2(
         caps: s.caps.iter().map(|c| CapNote::of(c, None)).collect(),
     };
     let score = Score {
-        version: LANDING_2,
+        version: LANDING_3,
         total: s.score,
         parts,
     };

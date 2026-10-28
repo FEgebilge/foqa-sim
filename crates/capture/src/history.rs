@@ -332,7 +332,7 @@ struct CompactFlight {
     #[serde(flatten)]
     item: FlightItem,
     profile: String,
-    /// `landing-2`, or `points` without a scored landing.
+    /// `landing-3`, or `points` without a scored landing.
     method: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     score: Option<f64>,
@@ -681,7 +681,7 @@ mod tests {
         assert_eq!((mini[5].1, mini[5].3), (None, 0.0));
         let doc = serde_json::to_string(&CompactDebrief::from(debrief)).unwrap();
         let f = &serde_json::from_str::<Value>(&doc).unwrap()["flight"];
-        assert_eq!(f["method"], "landing-2");
+        assert_eq!(f["method"], "landing-3");
         assert!(f["score"].as_f64().is_some_and(|s| s > 0.0 && s <= 100.0));
         let bars = f["bars"].as_array().unwrap();
         assert_eq!(bars.len(), 6);

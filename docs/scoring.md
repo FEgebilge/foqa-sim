@@ -1,4 +1,4 @@
-# Landing assessment `landing-2` (design, draft)
+# Landing assessment `landing-3` (design, draft)
 
 One method grades every approach and landing. The same numbers drive the
 debrief's Good / Fair / Poor, the 0–100 challenge score and the
@@ -7,8 +7,8 @@ leaderboard. The debrief and the leaderboard therefore tell the same story.
 challenges that name it.
 
 Status: implemented (§7 slices 1-8): profile fields, analyzer values, rule
-set v2, `crates/assess` with `scoring/landing-2.yaml`, the debrief wire
-(`assessment_detail`, [debrief-api.md](debrief-api.md)), `landing-2`
+set v2, `crates/assess` with `scoring/landing-3.yaml`, the debrief wire
+(`assessment_detail`, [debrief-api.md](debrief-api.md)), `landing-3`
 challenges ([challenges.md](challenges.md)), the app's assessment panel
 and the EFB summary. Not yet: go-around approaches assessed on A and B
 (§4; the debrief scores touchdowns only), A7 low thrust, a challenge's own
@@ -293,7 +293,7 @@ How a finding is scored:
 - **The thresholds have one home.** The L1–L3 anchors of a criterion that
   has a rule (A2 ↔ unstable-sink-500 / high-sink-below-1000, E1 ↔
   hard-landing, D1 ↔ off-centreline-touchdown, …) are taken from that rule,
-  through `levels_from: <rule-id>` in the scoring definition. landing-2 adds
+  through `levels_from: <rule-id>` in the scoring definition. landing-3 adds
   only the ideal and tolerance anchors. As part of this work the rule set
   moves to v2 with thresholds equal to §2.5 (e.g. `unstable-speed-500`
   against Vref, D4S height split as two rules ≥ 500 / < 500 ft).
@@ -303,11 +303,11 @@ How a finding is scored:
   points it cost.
 
 **Relation to today's assessment** (`Assessment::of`: high 4 / medium 2 /
-low 1; Good ≤ 1, Fair ≤ 5, Poor ≥ 6). landing-2 replaces it for every
+low 1; Good ≤ 1, Fair ≤ 5, Poor ≥ 6). landing-3 replaces it for every
 flight with a scoreable landing. The grade bands were chosen to agree with
 it:
 
-| Today | Points | landing-2 | Typical score |
+| Today | Points | landing-3 | Typical score |
 |---|---|---|---|
 | Nothing or one low | 0–1 | One L1 in any domain | 91–97 → Good |
 | Two lows or one medium | 2 | L2 caps the score at 84.9 (§4) | ≤ 84.9 → Fair |
@@ -386,7 +386,7 @@ is no break: the recorder keeps no frames while sim time stands still.
 
 D4S (S1, p. 20 ✔) uses Vref in this order: a recorded Vref; a table by gross
 weight and flap; a table by gross weight at a fixed landing flap.
-landing-2 does the same:
+landing-3 does the same:
 
 1. **Profile table by weight and flap** (new profile field; source
    required, as for every profile value):
@@ -422,14 +422,26 @@ cite a primary document, as `profiles/` already requires.
 ## 6. Versioning, fairness, worked examples
 
 **Versioning.** `scoring.version` in a challenge file selects `landing-1` or
-`landing-2`. The two live side by side: landing-1 is frozen code, and
-landing-2 is a data file `scoring/landing-2.yaml` (anchors, weights,
+`landing-3`. The two live side by side: landing-1 is frozen code, and
+landing-3 is a data file `scoring/landing-3.yaml` (anchors, weights,
 caps, sources) built into `fdm` and checked on load, the way rules are.
 Once a version is published its file never changes; a correction becomes
-`landing-3`. The debrief always uses the newest version and states it
+`landing-4`. The debrief always uses the newest version and states it
 (`assessment.method`). The challenge server re-scores an uploaded slice
 with the version the challenge names, so the leaderboard is unaffected
 by app updates.
+
+**landing-2** (0.10) is retired. landing-3 (0.11) keeps its numbers but
+measures differently: peak g at 16 samples/s (E1), a light aircraft's
+150 m target (C1) and B1 at the wheels against the 3° path, a fast exit
+that is no excursion (D4), the crash cap, touchdowns on a displaced
+threshold, a held deceleration as a means (F1), the gear checked on every
+light approach, and touchdowns after slew, teleport or reload left out.
+Those changes are code, so landing-2 cannot be reproduced and no longer
+scores: a challenge that names it parses and is graded with landing-3,
+and its attempts say so (`score.version`, `assessment.method`). An attempt
+graded before keeps the method and score it recorded; a site that wants a
+landing-3 board publishes a new challenge version.
 
 **Fairness.**
 
@@ -529,7 +541,7 @@ results.
    domain (load-time), existing rule tests updated, one new test per
    changed threshold.
 4. **Scoring module** (new crate `crates/assess`, used by `debrief` and
-   `challenge`): `scoring/landing-2.yaml` (anchors, `levels_from`,
+   `challenge`): `scoring/landing-3.yaml` (anchors, `levels_from`,
    weights, caps, sources), ℓ interpolation, loss curve, domain max,
    caps, n/a redistribution, confidence, Vref resolution. Tests: the
    anchor/loss tables, each cap, the D4S unstable rule (3 × SL1 versus
@@ -541,11 +553,11 @@ results.
    unit, ell, level, bands, standard }], findings[event ids], sets_by }] }],
    other_findings[], legacy_points }`. Tests: wire snapshot, and the grade
    bands agreeing with today's for single findings (the table in §3).
-6. **Challenge** (`crates/challenge`): `landing-2` accepted by
+6. **Challenge** (`crates/challenge`): `landing-3` accepted by
    `Challenge::parse` (requires a Vref source for the allowed types);
    `evaluate` calls the shared module; check `data`; go-around attempts
    not ranked; boards keyed by scoring class. Tests: landing-1 results
-   unchanged (frozen), landing-2 for the fixtures, parse rejections.
+   unchanged (frozen), landing-3 for the fixtures, parse rejections.
 7. **UI** (`app/src/components/debrief`, `msfs-panel/efb`): the debrief
    header shows score, grade, confidence and any cap banner. The
    assessment panel shows six horizontal domain bars (weight as the track,

@@ -8,6 +8,9 @@ use serde::Serialize;
 
 pub const SCORING: &str = "landing-1";
 /// The shared landing assessment (docs/scoring.md), crates/assess.
+pub const LANDING_3: &str = "landing-3";
+/// Retired (0.10): its measures changed in code, so it cannot be
+/// reproduced; a challenge naming it is graded with `LANDING_3`.
 pub const LANDING_2: &str = "landing-2";
 
 #[derive(Debug, Clone, PartialEq, Serialize)]

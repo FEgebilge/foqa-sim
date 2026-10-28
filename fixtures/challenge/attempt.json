@@ -61,7 +61,7 @@
   "gate_s": 41.25,
   "touchdown_s": 124.0,
   "score": {
-    "version": "landing-2",
+    "version": "landing-3",
     "total": 55.9,
     "parts": [
       {
@@ -109,7 +109,7 @@
     ]
   },
   "assessment": {
-    "method": "landing-2",
+    "method": "landing-3",
     "score": 55.9,
     "grade": "poor",
     "confidence": "full",

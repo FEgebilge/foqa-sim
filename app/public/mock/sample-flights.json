@@ -21,7 +21,7 @@
       "grade": "poor",
       "points": 10,
       "findings": 6,
-      "method": "landing-2",
+      "method": "landing-3",
       "score": 59.9,
       "confidence": "full"
     }
@@ -47,7 +47,7 @@
       "grade": "fair",
       "points": 0,
       "findings": 0,
-      "method": "landing-2",
+      "method": "landing-3",
       "score": 72.8,
       "confidence": "full"
     }
@@ -98,7 +98,7 @@
       "grade": "poor",
       "points": 7,
       "findings": 4,
-      "method": "landing-2",
+      "method": "landing-3",
       "score": 53.1,
       "confidence": "full"
     }
@@ -121,7 +121,7 @@
       "grade": "poor",
       "points": 8,
       "findings": 5,
-      "method": "landing-2",
+      "method": "landing-3",
       "score": 59.9,
       "confidence": "full"
     }
