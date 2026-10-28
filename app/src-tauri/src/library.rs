@@ -66,10 +66,9 @@ impl Library {
                 kept.id
             ));
         }
-        if self.conflict(json).is_none() {
-            fs::write(self.dir.join(format!("{}.json", entry.key)), json)
-                .map_err(|e| e.to_string())?;
-        }
+        // Always written: a conflicting copy is replaced here, the callers
+        // having asked first (`conflict`).
+        fs::write(self.dir.join(format!("{}.json", entry.key)), json).map_err(|e| e.to_string())?;
         Ok(entry)
     }
 
@@ -261,6 +260,17 @@ mod tests {
             None,
             "another version is another entry"
         );
+    }
+
+    #[test]
+    fn importing_a_conflicting_copy_replaces_the_kept_bytes() {
+        let (_tmp, lib) = library();
+        lib.import(JSON).unwrap();
+        let other = JSON.replace("Runway 20", "Runway 20, edited");
+        let entry = lib.import(&other).unwrap();
+        assert_eq!(lib.get(&entry.key).unwrap().1, other);
+        assert_eq!(lib.list()[0].sha256, entry.sha256);
+        assert_eq!(lib.conflict(&other), None);
     }
 
     #[test]
