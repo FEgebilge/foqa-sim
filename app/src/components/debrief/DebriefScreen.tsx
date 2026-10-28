@@ -346,7 +346,8 @@ function CursorReadout({ series, phases, bus }: { series: Series; phases: Debrie
           <dd className="readout truncate text-sm">{text}</dd>
         </div>
       ))}
-      {t === null ? <p className="col-span-full text-xs text-fg-3">Click the timeline, a chart or the track to place the cursor.</p> : null}
+      {/* Always one line, so the rows below never move as the pointer comes and goes. */}
+      <p className="col-span-full truncate text-xs text-fg-3">{hover !== null ? "Values at the pointer · click to place the cursor here." : t !== null ? "Values at the cursor · click the timeline, a chart or the track to move it." : "Click the timeline, a chart or the track to place the cursor."}</p>
     </dl>
   );
 }

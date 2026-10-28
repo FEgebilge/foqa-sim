@@ -124,6 +124,8 @@ function Chart({ spec, refs, last, debrief, theme, bus, shared }: ChartProps) {
     const known = series[line.key].filter((v) => v !== null);
     return known.length ? `${fmt(Math.min(...known))} to ${fmt(Math.max(...known))}` : "–";
   }), [series, spec.lines, fmt]);
+  // Each value keeps the room of its range, longer than any one value with its unit, so the legend never rewraps as the cursor moves.
+  const room = useMemo(() => rest.map((r) => `${r.length}ch`), [rest]);
   useHover(bus, useCallback((t: number | null) => {
     const i = t === null ? -1 : indexAt(series.t_s, t);
     spec.lines.forEach((line, n) => {
@@ -263,7 +265,7 @@ function Chart({ spec, refs, last, debrief, theme, bus, shared }: ChartProps) {
               <li key={line.key} className="flex items-center gap-1.5">
                 <Swatch color={LINE[theme][i] ?? LINE[theme][0]} dash={line.dash} width={2} />
                 <span className="text-fg-3">{line.label}</span>
-                <span ref={(node) => { values.current[i] = node; }} className="readout text-fg">{rest[i]}</span>
+                <span ref={(node) => { values.current[i] = node; }} className="readout inline-block text-fg" style={{ minWidth: room[i] }}>{rest[i]}</span>
               </li>
             ))}
             {hasLimit ? (
