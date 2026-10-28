@@ -59,6 +59,8 @@ export interface Api extends ChallengesApi, SitesApi {
   deleteFlight(id: string): Promise<void>;
   recorderStatus(): Promise<RecorderStatus>;
   openFlightsFolder(): Promise<void>;
+  /** Opens the folder holding the app's log file, for a recorder error. */
+  openLogFolder(): Promise<void>;
   storageUsage(): Promise<StorageUsage>;
   setupStatus(): Promise<SetupStatus>;
   setupInstall(pkg: string): Promise<SetupStatus>;
@@ -92,6 +94,7 @@ const tauriApi: Api = {
   flightMetaSet: (id, meta) => invoke<void>("flight_meta_set", { id, meta }),
   recorderStatus: () => invoke<RecorderStatus>("recorder_status"),
   openFlightsFolder: () => invoke<void>("open_flights_folder"),
+  openLogFolder: () => invoke<void>("open_log_folder"),
   storageUsage: () => invoke<StorageUsage>("storage_usage"),
   setupStatus: () => invoke<SetupStatus>("setup_status"),
   setupInstall: (pkg) => invoke<SetupStatus>("setup_install", { package: pkg }),
