@@ -175,11 +175,18 @@ impl Approach {
         let gs = flight.at("groundspeed", td.t);
         let td_i = track.index_at(td.t);
         let liftoff = liftoff(track, td_i);
-        let ground_end = liftoff.unwrap_or(track.len());
+        // The rollout also ends where the sim next moves the aircraft.
+        let moved = (flight.breaks().into_iter())
+            .filter(|b| b.start > td.t)
+            .map(|b| track.t.partition_point(|&x| x < b.start))
+            .min();
+        let ground_end = liftoff
+            .unwrap_or(track.len())
+            .min(moved.unwrap_or(track.len()));
         Self {
             config_changes,
             threshold: fix.and_then(|f| crossing(flight, track, f, td.t)),
-            float_s: float_s(track, td.t),
+            float_s: float_s(flight, track, td.t),
             crab_deg: fix.and_then(|f| {
                 let magnetic = flight.at("heading.mag", td.t)?;
                 Some(wrap180(magnetic - f.magvar_deg - f.heading_deg))
@@ -225,15 +232,20 @@ fn height(track: &Track, i: usize) -> f64 {
 }
 
 /// The airborne points of the leg that ends at the contact `t`, up to the
-/// last one before it.
-fn before_contact(track: &Track, t: SimTime) -> Range<usize> {
+/// last one before it, from the end of the last `Flight::breaks` span in
+/// it (an approach slewed or teleported into is graded from there).
+fn before_contact(flight: &Flight, track: &Track, t: SimTime) -> Range<usize> {
     let last = track.t.partition_point(|&x| x < t);
     let start = track
         .legs
         .iter()
         .find(|l| l.airborne.contains(&last.saturating_sub(1)))
         .map_or(0, |l| l.airborne.start);
-    start..last
+    let resumed = (flight.breaks().into_iter())
+        .filter(|b| b.end <= t)
+        .map(|b| track.t.partition_point(|&x| x < b.end))
+        .max();
+    start.max(resumed.unwrap_or(0))..last
 }
 
 /// The first point from `from` that leaves the ground for longer than a
@@ -253,7 +265,7 @@ impl Window {
     /// The window before the contact at `td`: from just below the last point
     /// above `top_ft` to the first point under `bottom_ft`.
     pub fn of(flight: &Flight, track: &Track, td: SimTime, top_ft: f64, bottom_ft: f64) -> Self {
-        let leg = before_contact(track, td);
+        let leg = before_contact(flight, track, td);
         let start = leg
             .clone()
             .rev()
@@ -328,7 +340,7 @@ fn changes(
 /// The last crossing of the threshold before contact (along 0 m).
 fn crossing(flight: &Flight, track: &Track, fix: &RunwayFix, td: SimTime) -> Option<Crossing> {
     let along = |i: usize| position(flight, track.t[i]).map(|(lat, lon)| fix.offsets(lat, lon).0);
-    let leg = before_contact(track, td);
+    let leg = before_contact(flight, track, td);
     let mut next: Option<(usize, f64)> = None;
     for i in leg.rev() {
         let Some(a) = along(i) else {
@@ -353,8 +365,8 @@ fn crossing(flight: &Flight, track: &Track, fix: &RunwayFix, td: SimTime) -> Opt
 }
 
 /// Time from the last descent through 50 ft above the runway to contact.
-fn float_s(track: &Track, td: SimTime) -> Option<f64> {
-    let leg = before_contact(track, td);
+fn float_s(flight: &Flight, track: &Track, td: SimTime) -> Option<f64> {
+    let leg = before_contact(flight, track, td);
     let i = leg
         .clone()
         .rev()

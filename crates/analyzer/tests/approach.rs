@@ -94,3 +94,16 @@ fn a_flap_change_in_the_window_is_found_once() {
     // 60 s before contact: 700 ft.
     assert!(near(c.height_ft, 700.0, 40.0), "{c:?}");
 }
+
+#[test]
+fn a_slewed_approach_is_graded_from_the_end_of_the_slew() {
+    // Slewed until 40 s before contact (~470 ft): the window starts 5 s
+    // after it, not at 1000 ft.
+    let a = approach(|t| Pt {
+        set: vec![("IS SLEW ACTIVE", f64::from(u8::from(t < TD_S - 40.0)))],
+        ..landing(t, TD_S, 1.2)
+    });
+    let start = a.window.t[0].as_secs_f64();
+    let td = a.window.t.last().unwrap().as_secs_f64() + 6.4;
+    assert!(near(td - start, 35.0, 0.5), "{}", td - start);
+}

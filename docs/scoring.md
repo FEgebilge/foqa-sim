@@ -351,6 +351,14 @@ event that caused it.
   speed, also when the recording ends airborne. Its rollout ends at that
   liftoff, so the climb-out never counts as leaving the runway.
 
+**Sim interventions.** Slew (`sim.slew`), a teleport, a flight (re)load,
+skip or back-on-track (flow events) and, in recordings without those, a
+position jump faster than 2000 kt are breaks, each extended 5 s for the
+aircraft to settle. A touchdown in a break is not a landing; an approach
+is graded from the end of the last break before contact (as a recording
+that starts on final is), and the rollout ends at the next break. A pause
+is no break: the recorder keeps no frames while sim time stands still.
+
 **Insufficient data.** Missing data never earns full credit.
 
 - **Required** for any score: a runway fix (`td.runway`), `peak_g`, a sink

@@ -3,6 +3,7 @@ use std::ops::RangeInclusive;
 use fdm_core::geo::distance_m;
 use fdm_core::{Airport, SimTime};
 
+use crate::flight::SETTLE_US;
 use crate::runway::{RunwayFix, ground_track_deg, locate};
 use crate::track::{ground_edges, hops};
 use crate::{Flight, Track};
@@ -11,9 +12,6 @@ use crate::{Flight, Track};
 /// landing a bounced one. Longer than track.rs's `BOUNCE_MAX_US`, which only
 /// decides whether a brief ground contact still belongs to the same leg.
 pub(crate) const BOUNCE_AIRBORNE_MAX_US: i64 = 5_000_000;
-/// A flight loaded in the air that is on the ground within this long was
-/// placed there by the sim (spawn, slew), not landed.
-const SETTLE_MAX_US: i64 = 5_000_000;
 /// Window for the touchdown load: just before contact to gear compression.
 const PEAK_G_BEFORE_US: i64 = 500_000;
 const PEAK_G_AFTER_US: i64 = 1_500_000;
@@ -66,7 +64,7 @@ struct Contact {
 }
 
 /// Touchdowns from the valid air/ground samples only; a failed sample is not
-/// a state change. Each touchdown's peak-g window is cut at the neighbouring
+/// a state change, and none falls in a `Flight::breaks` span. Each touchdown's peak-g window is cut at the neighbouring
 /// liftoffs so a bounce's hard impact does not grade the light one before it.
 pub fn touchdowns(flight: &Flight, track: &Track) -> Vec<Touchdown> {
     let airports = flight.airports();
@@ -81,15 +79,21 @@ fn contacts(flight: &Flight, track: &Track) -> Vec<Contact> {
     let mut edges = ground_edges(flight);
     let first = flight.series("air_ground").iter().find(|s| s.is_valid());
     let settled = matches!((first, edges.first()), (Some(s), Some(&(t, true)))
-        if t.us_since(s.t) < SETTLE_MAX_US);
+        if t.us_since(s.t) < SETTLE_US);
     let hops = hops(&track.t, &track.ra_ft, &edges);
     edges.retain(|&(t, _)| !hops.iter().any(|h| h.start == t || h.end == t));
     let edges = &edges[usize::from(settled)..];
+    let breaks = flight.breaks();
     let mut out = Vec::new();
     let (mut prev, mut liftoff): (Option<SimTime>, Option<SimTime>) = (None, None);
     for (i, &(t, is_touchdown)) in edges.iter().enumerate() {
         if !is_touchdown {
             liftoff = Some(t);
+            continue;
+        }
+        // Placed by the sim (slew, teleport, reload): no landing.
+        if breaks.iter().any(|b| b.contains(&t)) {
+            prev = None;
             continue;
         }
         // A bounce needs an earlier touchdown and a short hop since it.
@@ -270,6 +274,40 @@ mod tests {
         let td = run(&rows(&ground, &[]));
         assert_eq!(td.len(), 1);
         assert!(!td[0].bounce);
+    }
+
+    #[test]
+    fn a_slew_or_teleport_to_the_ground_is_not_a_landing() {
+        // Slewed down 5-8 s, then a circuit: only the 12 s landing counts.
+        let ground = [(0.0, false), (7.0, true), (9.0, false), (14.0, true)];
+        let mut slewed = rows(&ground, &[]);
+        slewed.extend([ok("sim.slew", 5.0, 1.0), ok("sim.slew", 8.0, 0.0)]);
+        let td = run(&slewed);
+        assert_eq!(td.len(), 1);
+        assert!((td[0].t.as_secs_f64() - 14.0).abs() < 0.11);
+        // Teleported onto the ground at 7 s: flow events only.
+        let mut f = flight(&rows(&ground, &[]));
+        f.events = vec![
+            (
+                SimTime::from_secs_f64(6.5),
+                recorder::SimEvent::Flow(recorder::FlowEvent::TeleportStart),
+            ),
+            (
+                SimTime::from_secs_f64(7.0),
+                recorder::SimEvent::Flow(recorder::FlowEvent::TeleportDone),
+            ),
+        ];
+        assert_eq!(touchdowns(&f, &Track::new(&f).unwrap()).len(), 1);
+        // An old recording: the position jumps 50 km in 1 s at the 7 s touchdown.
+        let mut jumped = rows(&ground, &[]);
+        jumped.extend((0..=15).flat_map(|s| {
+            let lat = if s < 7 { 38.0 } else { 38.45 };
+            [
+                ok("pos.lat", f64::from(s), lat),
+                ok("pos.lon", f64::from(s), 27.0),
+            ]
+        }));
+        assert_eq!(run(&jumped).len(), 1);
     }
 
     #[test]
