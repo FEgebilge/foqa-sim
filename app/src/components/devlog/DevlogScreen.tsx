@@ -46,12 +46,12 @@ function useOpenState(defaults: Record<string, boolean>) {
   return [open, set] as const;
 }
 
-function Disclosure({ id, open, onToggle, summary, children, nested }: {
-  id: string; open: boolean; onToggle: (open: boolean) => void; summary: React.ReactNode; children: React.ReactNode; nested?: boolean;
+function Disclosure({ id, open, onToggle, summary, children, nested, current }: {
+  id: string; open: boolean; onToggle: (open: boolean) => void; summary: React.ReactNode; children: React.ReactNode; nested?: boolean; current?: boolean;
 }) {
   return (
     <details id={id} open={open} onToggle={(e) => { if (e.currentTarget.open !== open) onToggle(e.currentTarget.open); }} className="group scroll-mt-4">
-      <summary className={`flex cursor-pointer list-none items-center gap-2 rounded-md px-3 py-2 outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-accent [&::-webkit-details-marker]:hidden ${nested ? "text-sm" : ""}`}>
+      <summary style={current ? { boxShadow: "inset 3px 0 0 var(--accent)" } : undefined} className={`flex cursor-pointer list-none items-center gap-2 rounded-md px-3 py-2 outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-accent [&::-webkit-details-marker]:hidden ${nested ? "text-sm" : ""} ${current ? "bg-muted" : ""}`}>
         <ChevronRight size={14} aria-hidden className="shrink-0 text-fg-3 transition-transform group-open:rotate-90" />
         {summary}
       </summary>
@@ -101,7 +101,7 @@ export function DevlogScreen({ updater }: { updater: Updater }) {
                   <span className="text-xs text-fg-3">{s.entries.length} {s.entries.length === 1 ? "release" : "releases"}{s.range ? ` · ${s.range}` : ""}</span></>}>
                 <div className="ml-4 flex flex-col gap-0.5 border-l border-line pl-2">
                   {s.entries.map((e) => (
-                    <Disclosure key={e.version} nested id={`v-${e.version}`} open={!!open[`v:${e.version}`]} onToggle={(v) => setOpen(`v:${e.version}`, v)}
+                    <Disclosure key={e.version} nested current={e.version === current} id={`v-${e.version}`} open={!!open[`v:${e.version}`]} onToggle={(v) => setOpen(`v:${e.version}`, v)}
                       summary={<>
                         <span className="readout font-medium">v{e.version}</span>
                         {e.title ? <span className="text-fg-2">· {e.title}</span> : null}
