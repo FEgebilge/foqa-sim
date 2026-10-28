@@ -765,6 +765,7 @@ mod tests {
                 skills: Default::default(),
                 rule_counts: BTreeMap::new(),
                 flown: Default::default(),
+                kind: Default::default(),
             },
             events: vec![],
             landings: vec![notice(); landings],
