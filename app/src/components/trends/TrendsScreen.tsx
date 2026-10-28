@@ -3,10 +3,11 @@ import { FolderOpen, RefreshCw, SearchX, ServerCrash, TrendingUp } from "lucide-
 import { Button } from "@ui/components/button/button";
 import { EmptyState } from "@ui/components/empty-state/empty-state";
 import SegmentedControl from "@ui/components/segmented-control/segmented-control";
+import { Select } from "@ui/components/select/select";
 import { useTheme } from "../../lib/context";
 import { number } from "../../lib/format";
 import type { Theme } from "../../lib/palette";
-import { delta } from "../../lib/trends";
+import { delta, trendNeeds } from "../../lib/trends";
 import { useTrends } from "../../lib/use-backend";
 import type { TrendFilter, Trends } from "../../types";
 import { useOpenFolder } from "../use-open-folder";
@@ -18,7 +19,10 @@ import { SkillsRow } from "./SkillsRow";
 import { ByAircraftTable, ByAirportTable, Change, EventsTable } from "./TrendTables";
 
 const PERIODS = [{ value: "30", label: "30 days" }, { value: "90", label: "90 days" }, { value: "365", label: "1 year" }, { value: "all", label: "All" }];
-const field = "h-8 min-w-32 rounded-md border border-line bg-surface px-2 text-sm text-fg outline-none focus-visible:border-accent";
+const ALL = "all";
+/** Select items cannot be empty, so "all" stands for an absent filter field. */
+const choice = (value?: string) => value ?? ALL;
+const pick = (value: string) => (value === ALL ? undefined : value);
 
 /** One pilot's flights over time, the way an airline's FOQA programme reads its fleet: rates, dispersion and the landing area that keeps costing points. */
 export function TrendsScreen() {
@@ -56,20 +60,12 @@ function Filters({ options, filter, onChange, filtered }: { options: Trends["opt
   const set = (patch: Partial<TrendFilter>) => onChange({ ...filter, ...patch });
   return (
     <div className="flex flex-wrap items-end gap-x-5 gap-y-3" role="group" aria-label="Filters">
-      <label className="flex flex-col gap-1"><span className="eyebrow">Aircraft</span>
-        <select className={field} value={filter.aircraft ?? ""} onChange={(e) => set({ aircraft: e.target.value || undefined })}>
-          <option value="">All types</option>
-          {options.aircraft.map((a) => <option key={a.icao} value={a.icao}>{a.icao} ({a.flights})</option>)}
-        </select>
-      </label>
-      <label className="flex flex-col gap-1"><span className="eyebrow">Airport</span>
-        <select className={field} value={filter.airport ?? ""} onChange={(e) => set({ airport: e.target.value || undefined })}>
-          <option value="">All airports</option>
-          {options.airports.map((a) => <option key={a.icao} value={a.icao}>{a.icao} ({a.landings})</option>)}
-        </select>
-      </label>
+      <Select label="Aircraft" size="sm" className="min-w-40" value={choice(filter.aircraft)} onValueChange={(v) => set({ aircraft: pick(v) })}
+        options={[{ value: ALL, label: "All types" }, ...options.aircraft.map((a) => ({ value: a.icao, label: `${a.icao} · ${a.flights} ${a.flights === 1 ? "flight" : "flights"}` }))]} />
+      <Select label="Airport" size="sm" className="min-w-40" value={choice(filter.airport)} onValueChange={(v) => set({ airport: pick(v) })}
+        options={[{ value: ALL, label: "All airports" }, ...options.airports.map((a) => ({ value: a.icao, label: `${a.icao} · ${a.landings} ${a.landings === 1 ? "landing" : "landings"}` }))]} />
       <div className="flex flex-col gap-1"><span className="eyebrow">Period</span>
-        <SegmentedControl label="Period" options={PERIODS} value={filter.days === undefined ? "all" : String(filter.days)} onValueChange={(v) => set({ days: v === "all" ? undefined : Number(v) })} />
+        <SegmentedControl label="Period" options={PERIODS} value={filter.days === undefined ? ALL : String(filter.days)} onValueChange={(v) => set({ days: v === ALL ? undefined : Number(v) })} />
       </div>
       {filtered ? <Button variant="ghost" size="sm" onClick={() => onChange({})}>Clear filters</Button> : null}
     </div>
@@ -93,10 +89,11 @@ function NoFlights({ filtered, onReset, recordings }: { filtered: boolean; onRes
   );
 }
 
-const Kpi = ({ label, children, note }: { label: string; children: ReactNode; note?: ReactNode }) => (
+const Kpi = ({ label, children, note, why }: { label: string; children: ReactNode; note?: ReactNode; why: string }) => (
   <div className="bg-surface px-4 py-3">
     <dt className="eyebrow">{label}</dt>
     <dd className="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-0.5"><span className="readout text-xl">{children}</span>{note}</dd>
+    <dd className="mt-0.5 text-[11px] text-fg-3">{why}</dd>
   </div>
 );
 
@@ -119,16 +116,16 @@ function Content({ data, theme, stale }: { data: Trends; theme: Theme; stale: bo
   return (
     <div className={`flex flex-col gap-5 transition-opacity ${stale ? "opacity-60" : ""}`}>
       <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-[var(--radius-panel)] border border-line bg-line sm:grid-cols-4">
-        <Kpi label="Flights" note={<span className="text-xs text-fg-3">of {number(data.recordings.total)} recordings</span>}>{number(data.flights)}</Kpi>
-        <Kpi label="Hours flown">{number(data.hours, 1)} h</Kpi>
-        <Kpi label="Landings" note={data.scored < data.landing_count ? <span className="text-xs text-fg-3">{data.scored} scored</span> : undefined}>{number(data.landing_count)}</Kpi>
-        <Kpi label="Mean landing score" note={score.mean === null ? undefined : <Change change={delta(score.recent, score.earlier)} higherIsBetter />}>
+        <Kpi label="Flights" why="Recordings that really flew, not ramp sessions." note={<span className="text-xs text-fg-3">of {number(data.recordings.total)} recordings</span>}>{number(data.flights)}</Kpi>
+        <Kpi label="Hours flown" why="Airborne time only.">{number(data.hours, 1)} h</Kpi>
+        <Kpi label="Landings" why="Touch-and-goes included." note={data.scored < data.landing_count ? <span className="text-xs text-fg-3">{data.scored} scored</span> : undefined}>{number(data.landing_count)}</Kpi>
+        <Kpi label="Mean landing score" why={trendNeeds(data.scored, "scored landings") ?? "Arrow: newer half against the older."} note={score.mean === null ? undefined : <Change change={delta(score.recent, score.earlier)} higherIsBetter />}>
           {score.mean === null ? "–" : number(score.mean, 1)}
         </Kpi>
       </dl>
       <LeftOut recordings={data.recordings} className="-mt-2" />
       <div className="grid items-start gap-5 xl:grid-cols-3">
-        <Panel className="xl:col-span-2" title="Landing score over time" why="Each dot is one landing, coloured by grade. The line smooths the last five, so you see the direction rather than the luck of one touchdown.">
+        <Panel className="xl:col-span-2" title="Landing score over time" why="Each dot is one landing, coloured by grade; the line averages the last five, so one touchdown does not decide the picture.">
           {noScores ? <Nothing text="No scored landings yet. A landing is scored when the recording has enough data around touchdown." /> : <ScoreChart landings={data.landings} theme={theme} />}
         </Panel>
         <Panel title="Landing areas" why="Which part of the landing costs points. Longer bars are worse; the share is how often it reached level 2 or more.">
@@ -136,15 +133,17 @@ function Content({ data, theme, stale }: { data: Trends; theme: Theme; stale: bo
         </Panel>
       </div>
       <SkillsRow skills={data.skills} />
-      <Panel title="Touchdown footprint" why="Where the wheels touched, past the threshold and off the centreline. A tight cluster near the aiming point is a stable technique; a long smear is a habit to fix.">
-        <Footprint landings={data.landings} />
-      </Panel>
-      <Panel title="Events" why="How many flights in every 100 had each event: a count means little without its denominator, and repeats within one flight count once. The arrow compares your newer half of flights with the older half.">
-        <EventsTable events={data.events} />
-      </Panel>
-      <div className="grid items-start gap-5 lg:grid-cols-2">
+      <div className="grid items-start gap-5 xl:grid-cols-3">
+        <Panel className="xl:col-span-2" title="Touchdown footprint" why="Where the wheels touched, past the threshold and off the centreline. A tight cluster near the aiming point is a stable technique; a long smear is a habit to fix.">
+          {data.landings.some((l) => l.along_m !== undefined) ? <Footprint landings={data.landings} /> : <Nothing text="No landing has a runway match yet: the footprint needs the touchdown point on a known runway." />}
+        </Panel>
+        <Panel title="By airport" why="Some runways and approaches are harder. In zone and offset show where the dispersion comes from."><ByAirportTable rows={data.by_airport} /></Panel>
+      </div>
+      <div className="grid items-start gap-5 xl:grid-cols-3">
+        <Panel className="xl:col-span-2" title="Events" why={`How many flights in every 100 had each event; repeats within a flight count once. ${trendNeeds(data.flights, "flights") ?? "The arrow compares the newer half of your flights with the older."}`}>
+          <EventsTable events={data.events} />
+        </Panel>
         <Panel title="By aircraft" why="Does one type carry the problems? Mean score and events per flight side by side."><ByAircraftTable rows={data.by_aircraft} /></Panel>
-        <Panel title="By airport" why="Some runways and approaches are harder. Zone share and offset show where the dispersion comes from."><ByAirportTable rows={data.by_airport} /></Panel>
       </div>
     </div>
   );

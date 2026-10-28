@@ -4,10 +4,12 @@ import { Badge } from "@ui/components/badge/badge";
 import { Button } from "@ui/components/button/button";
 import { EmptyState } from "@ui/components/empty-state/empty-state";
 import { SearchField } from "@ui/components/search-field/search-field";
+import { Stepper } from "@ui/components/stepper/stepper";
 import { Tooltip } from "@ui/components/tooltip/tooltip";
 import { api } from "../../api";
 import { useNotify } from "../../lib/context";
 import { flightDate, number } from "../../lib/format";
+import { FLOW, flowStep, scoringFact } from "../../lib/challenge-flow";
 import { challengeHref } from "../../lib/route";
 import type { RecorderState } from "../../lib/use-backend";
 import { useAttempts, useChallenges, useLoad } from "../../lib/use-backend";
@@ -16,7 +18,7 @@ import { ConfirmDialog } from "../ConfirmDialog";
 import { OPEN_STATES } from "../../lib/attempts";
 import { useVisible } from "../../lib/visible";
 import { type SiteAttempt, useConnect, useSiteAttempts, useSites } from "../../lib/sites";
-import { AttemptList, Stages } from "./AttemptList";
+import { AttemptList, Stages, type AttemptsState } from "./AttemptList";
 import { SitesPanel } from "./SitesPanel";
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
@@ -62,16 +64,18 @@ export function ChallengesScreen({ selected, recorder }: { selected?: string; re
     body = (
       <div className="panel">
         <EmptyState icon={<Trophy size={20} />} title="No challenges yet"
-          description="A challenge is a JSON file: an airport, a runway, an aircraft and the conditions everyone flies. Open one to see its briefing, place the aircraft at its start and get graded here."
+          description="A challenge is a JSON file: an airport, a runway, an aircraft and the conditions everyone flies. Open one that a challenge site or another pilot gave you (the format is in docs/challenges.md of the FOQA-Sim repository) to see its briefing, place the aircraft at its start and get graded here."
           action={openButton} />
+        <Stepper className="border-t border-line px-5 py-4" steps={FLOW} current={0} details="all" label="How a challenge is flown" />
       </div>
     );
   } else {
     const views = attempts.state.status === "ready" ? attempts.state.data : [];
+    const attemptsState = attempts.state.status === "error" ? { error: attempts.state.message, retry: attempts.refresh } : attempts.state.status === "loading" ? { loading: true as const } : undefined;
     body = (
       <div className="grid items-start gap-5 lg:grid-cols-[minmax(15rem,19rem)_minmax(0,1fr)] 2xl:grid-cols-[minmax(17rem,22rem)_minmax(0,1fr)]">
         <Library entries={entries} selected={key} attempts={views} onRemove={setDoomed} />
-        <ChallengeDetail key={key} challengeKey={key} attempts={views.filter((a) => a.key === key)} sites={siteAttempts} recorder={recorder} onChanged={attempts.refresh} />
+        <ChallengeDetail key={key} entry={entries.find((e) => e.key === key)!} attempts={views.filter((a) => a.key === key)} attemptsState={attemptsState} sites={siteAttempts} recorder={recorder} onChanged={attempts.refresh} onRemove={setDoomed} />
       </div>
     );
   }
@@ -139,7 +143,8 @@ function Library({ entries, selected, attempts, onRemove }: { entries: Challenge
   );
 }
 
-function ChallengeDetail({ challengeKey, attempts, sites, recorder, onChanged }: { challengeKey: string; attempts: AttemptView[]; sites: Map<string, SiteAttempt>; recorder: RecorderState | null; onChanged: () => void }) {
+function ChallengeDetail({ entry, attempts, attemptsState, sites, recorder, onChanged, onRemove }: { entry: ChallengeEntry; attempts: AttemptView[]; attemptsState?: AttemptsState; sites: Map<string, SiteAttempt>; recorder: RecorderState | null; onChanged: () => void; onRemove: (entry: ChallengeEntry) => void }) {
+  const challengeKey = entry.key;
   const { lines, checking, check } = usePreflight(challengeKey, recorder?.value.state);
   const load = useCallback(() => api.challengeBriefing(challengeKey), [challengeKey]);
   const { state } = useLoad<Briefing>(load);
@@ -149,14 +154,15 @@ function ChallengeDetail({ challengeKey, attempts, sites, recorder, onChanged }:
   const briefing = state.data;
   return (
     <div className="flex min-w-0 flex-col gap-5">
+      <Stepper className="panel px-5 py-3" steps={FLOW} current={flowStep(lines, attempts)} details="current" label="How a challenge is flown" />
       <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,3fr)_minmax(20rem,2fr)]">
-        <BriefingCard briefing={briefing} />
+        <BriefingCard briefing={briefing} attempts={attempts} onRemove={() => onRemove(entry)} />
         <div className="flex flex-col gap-5">
           <PreflightCard lines={lines} checking={checking} onCheck={check} />
           <Actions briefing={briefing} attempts={attempts} simReady={lines?.find((l) => l.name === "sim")?.state === "ok"} ranking={lines?.find((l) => l.name === "ranking")} onChanged={onChanged} />
         </div>
       </div>
-      <AttemptList attempts={attempts} sites={sites} />
+      <AttemptList attempts={attempts} sites={sites} state={attemptsState} />
     </div>
   );
 }
@@ -182,7 +188,7 @@ const band = ({ min, max }: { min?: number; max?: number }) =>
   min !== undefined && max !== undefined ? `${min} to ${max} kt` : max !== undefined ? `up to ${max} kt` : min !== undefined ? `at least ${min} kt` : "any";
 
 /** The definition in plain words, fact by fact. */
-function facts(d: ChallengeDefinition): { label: string; value: string; note?: string }[] {
+function facts(d: ChallengeDefinition, attempts: AttemptView[]): { label: string; value: string; note?: string }[] {
   const { start, conditions = {}, rules = {}, aircraft = {} } = d;
   const types = aircraft.types ?? [], classes = aircraft.classes ?? [];
   const list: { label: string; value: string; note?: string }[] = [
@@ -203,11 +209,11 @@ function facts(d: ChallengeDefinition): { label: string; value: string; note?: s
   ].filter(Boolean);
   list.push({ label: "Rules", value: ruleText.length ? ruleText.join(" · ") : "Integrity only", note: "Always: sim rate 1, no pause, no slew, continuous data." });
   if (d.window) list.push({ label: "Open", value: `${flightDate(d.window.from)} to ${flightDate(d.window.to)}`, note: "Enforced by a site; local attempts can be flown any time." });
-  list.push({ label: "Scoring", value: d.scoring.version, note: "0 to 100: touchdown point, sink rate, centreline, stability, peak g, bounce, rollout." });
+  list.push({ label: "Scoring", ...scoringFact(d.scoring.version, attempts.find((a) => a.result?.score)?.result?.score) });
   return list;
 }
 
-function BriefingCard({ briefing }: { briefing: Briefing }) {
+function BriefingCard({ briefing, attempts, onRemove }: { briefing: Briefing; attempts: AttemptView[]; onRemove: () => void }) {
   const d = briefing.definition;
   return (
     <section className="panel min-w-0 overflow-hidden" aria-labelledby="briefing-title">
@@ -216,13 +222,14 @@ function BriefingCard({ briefing }: { briefing: Briefing }) {
           <p className="eyebrow">Briefing · {d.airport} runway {d.runway}</p>
           <h2 id="briefing-title" className="mt-1 font-display text-lg font-semibold tracking-tight">{d.title}</h2>
         </div>
-        <div className="flex flex-wrap gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
           <Badge size="sm">v{d.version}</Badge>
           <Badge size="sm" tone="info">{d.start.mode === "teleport" ? "Placed on final" : "Self-flown"}</Badge>
+          <Button variant="ghost" size="sm" onClick={onRemove}><Trash2 size={14} aria-hidden="true" />Remove</Button>
         </div>
       </div>
       <dl className="grid grid-cols-1 gap-px bg-line sm:grid-cols-2 2xl:grid-cols-3">
-        {facts(d).map((fact) => (
+        {facts(d, attempts).map((fact) => (
           <div key={fact.label} className="bg-surface px-5 py-3">
             <dt className="eyebrow">{fact.label}</dt>
             <dd className="readout mt-1 text-base">{fact.value}</dd>

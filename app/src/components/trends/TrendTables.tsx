@@ -31,8 +31,8 @@ const eventColumns: DataColumn<EventRow>[] = [
     render: (_, row) => <span className="flex min-w-0 flex-col leading-tight"><span className="truncate font-medium">{row.title}</span><span className="readout truncate text-[11px] text-fg-3">{row.rule}</span></span>,
   },
   { key: "rank", label: "Level", width: 110, numeric: false, render: (_, row) => <LevelBadge level={row.event.level} /> },
-  { key: "flights", label: "Flights", width: 90, numeric: true, render: (_, row) => <span className="readout">{row.flights}</span> },
-  { key: "per_100", label: "Per 100 flights", width: 140, numeric: true, render: (_, row) => <span className="readout">{number(row.per_100, 1)}</span> },
+  { key: "flights", label: "Flights", width: 104, numeric: true, render: (_, row) => <span className="readout">{row.flights}</span> },
+  { key: "per_100", label: "Per 100 flights", width: 170, numeric: true, render: (_, row) => <span className="readout">{number(row.per_100, 1)}</span> },
   {
     key: "change", label: "Recent vs earlier", width: 160, numeric: false,
     render: (_, row) => (

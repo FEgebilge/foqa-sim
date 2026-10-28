@@ -143,6 +143,197 @@
     ]
   },
   {
+    "id": "a7b6c5d4-e3f2-4a1b-9c8d-7e6f5a4b3c2d",
+    "key": "ltbj-16l-calm-v2",
+    "challenge": "ltbj-16l-calm",
+    "version": 2,
+    "title": "Izmir 16L, calm morning",
+    "definition_sha256": "41d7e0c3b2a19f8e7d6c5b4a39281706f5e4d3c2b1a0918273645546372819a0",
+    "n": 2,
+    "state": "done",
+    "created_at": "2026-10-27T09:40:02.311Z",
+    "updated_at": "2026-10-27T09:44:30.052Z",
+    "flight_id": "flight-1792677600",
+    "begin_s": 512.0,
+    "touchdown_s": 701.4,
+    "reason": "stopped",
+    "result": {
+      "challenge": "ltbj-16l-calm",
+      "challenge_version": 2,
+      "valid": false,
+      "checks": [
+        {
+          "name": "aircraft",
+          "ok": true,
+          "detail": "C172 (light)"
+        },
+        {
+          "name": "runway",
+          "ok": true,
+          "detail": "landed on LTBJ 16L"
+        },
+        {
+          "name": "gate",
+          "ok": true,
+          "detail": "2 NM out at 612 ft"
+        },
+        {
+          "name": "sim_rate",
+          "ok": true,
+          "detail": "up to 1x"
+        },
+        {
+          "name": "slew",
+          "ok": true,
+          "detail": "no slew"
+        },
+        {
+          "name": "pause",
+          "ok": true,
+          "detail": "no pause"
+        },
+        {
+          "name": "continuity",
+          "ok": true,
+          "detail": "continuous"
+        },
+        {
+          "name": "go_around",
+          "ok": true,
+          "detail": "no go-around"
+        },
+        {
+          "name": "data",
+          "ok": false,
+          "detail": "partial: no recorded Vref, speed bands from the POH"
+        },
+        {
+          "name": "stop_on_runway",
+          "ok": true,
+          "detail": "below 30 kt on the runway"
+        }
+      ],
+      "gate_s": 560.2,
+      "touchdown_s": 701.4,
+      "score": {
+        "version": "landing-3",
+        "total": 76.5,
+        "parts": [
+          {
+            "name": "stability",
+            "weight": 25,
+            "score": 0.84,
+            "value": null,
+            "unit": ""
+          },
+          {
+            "name": "energy",
+            "weight": 10,
+            "score": 0.7,
+            "value": null,
+            "unit": ""
+          },
+          {
+            "name": "point",
+            "weight": 20,
+            "score": 0.55,
+            "value": null,
+            "unit": ""
+          },
+          {
+            "name": "lateral",
+            "weight": 15,
+            "score": 0.9,
+            "value": null,
+            "unit": ""
+          },
+          {
+            "name": "contact",
+            "weight": 20,
+            "score": 0.82,
+            "value": null,
+            "unit": ""
+          },
+          {
+            "name": "rollout",
+            "weight": 10,
+            "score": 1.0,
+            "value": null,
+            "unit": ""
+          }
+        ]
+      },
+      "assessment": {
+        "method": "landing-3",
+        "score": 76.5,
+        "grade": "fair",
+        "confidence": "partial",
+        "caps": [
+          {
+            "kind": "material",
+            "score": 76.5,
+            "title": "Bounce",
+            "reason": "A bounce (level 2) holds this landing below Good (max 84.9).",
+            "source": "docs/scoring.md §4"
+          }
+        ]
+      }
+    },
+    "log": [
+      {
+        "at": "2026-10-27T09:40:02.311Z",
+        "seq": 1,
+        "event": "created",
+        "challenge": "ltbj-16l-calm",
+        "version": 2,
+        "definition_sha256": "41d7e0c3b2a19f8e7d6c5b4a39281706f5e4d3c2b1a0918273645546372819a0",
+        "app": "0.11.0"
+      },
+      {
+        "at": "2026-10-27T09:40:02.330Z",
+        "seq": 2,
+        "event": "placing"
+      },
+      {
+        "at": "2026-10-27T09:40:03.410Z",
+        "seq": 3,
+        "event": "placed",
+        "start": {
+          "alt_ft": 1500,
+          "ias_kt": 90
+        },
+        "flight_id": "flight-1792677600"
+      },
+      {
+        "at": "2026-10-27T09:42:10.000Z",
+        "seq": 4,
+        "event": "gate",
+        "sim_s": 560.2
+      },
+      {
+        "at": "2026-10-27T09:43:29.000Z",
+        "seq": 5,
+        "event": "touchdown",
+        "sink_fpm": 212,
+        "peak_g": 1.31
+      },
+      {
+        "at": "2026-10-27T09:44:29.900Z",
+        "seq": 6,
+        "event": "finished",
+        "reason": "stopped"
+      },
+      {
+        "at": "2026-10-27T09:44:30.052Z",
+        "seq": 7,
+        "event": "graded_local",
+        "score": 76.5,
+        "valid": false,
+        "failed_checks": ["data"]
+      }
+    ]
+  },
+  {
     "id": "f0e1d2c3-b4a5-4968-8776-655443322110",
     "key": "ltbj-16l-calm-v2",
     "challenge": "ltbj-16l-calm",
