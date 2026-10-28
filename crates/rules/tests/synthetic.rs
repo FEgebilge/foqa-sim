@@ -73,6 +73,39 @@ fn gear_up_at_500_ft_is_raised() {
     assert!(events(CORE, &flight, &track).contains(&("gear-not-down-500".into(), Level::High)));
 }
 
+/// A light retractable (BE36, PC12 …) with the gear up at 500 ft is
+/// raised as for a transport; fixed gear reads down and stays silent (the
+/// light landings below).
+#[test]
+fn light_gear_up_at_500_ft_is_raised() {
+    let (flight, track) = fly(LIGHT_LB, TD_S + ROLLOUT_S, |t| Pt {
+        gear: 0.0,
+        ..landing(t, TD_S, 1.2)
+    });
+    assert!(events(CORE, &flight, &track).contains(&("gear-not-down-500".into(), Level::High)));
+}
+
+/// The stall warning for 3 s in the flare, under 50 ft: a stick shaker in
+/// a transport (High), a light aircraft's horn by design (nothing).
+#[test]
+fn a_stall_warning_in_the_flare_counts_for_a_transport_only() {
+    let script = |t: f64| Pt {
+        set: if (TD_S - 4.0..TD_S - 1.0).contains(&t) {
+            vec![("STALL WARNING", 1.0)]
+        } else {
+            vec![]
+        },
+        ..landing(t, TD_S, 1.2)
+    };
+    let (flight, track) = fly(AIRLINER_LB, TD_S + ROLLOUT_S, script);
+    assert_eq!(
+        events(CORE, &flight, &track),
+        found(&[("stall-warning", Level::High)])
+    );
+    let (flight, track) = fly(LIGHT_LB, TD_S + ROLLOUT_S, script);
+    assert_eq!(events(CORE, &flight, &track), []);
+}
+
 /// The same landing with a 2.0 g impact: above the transport hard-landing
 /// medium level (1.8 g) but below high (2.1 g).
 #[test]
@@ -457,6 +490,151 @@ fn a_touch_and_go_splits_the_roll_and_checks_the_second_rotation() {
     );
 }
 
+const LIFTOFF_S: f64 = 30.0;
+
+/// A takeoff roll from 0 to 150 kt at `LIFTOFF_S`, the pitch along
+/// `pitch` (time, deg), flaps 5 down to `flaps_at_200` by 200 ft, a climb
+/// at 1500 fpm to 1500 ft, then the stable landing.
+fn takeoff(
+    pitch: &[(f64, f64)],
+    flaps_at_200: f64,
+    set: &[(f64, f64, &'static str, f64)],
+) -> Takeoff {
+    Takeoff {
+        pitch: pitch.to_vec(),
+        flaps_at_200,
+        set: set.to_vec(),
+    }
+}
+
+/// A scripted takeoff; `set` holds SimVars over (from, to) s.
+struct Takeoff {
+    pitch: Vec<(f64, f64)>,
+    flaps_at_200: f64,
+    set: Vec<(f64, f64, &'static str, f64)>,
+}
+
+const CLIMB_TOP_S: f64 = LIFTOFF_S + 60.0;
+const TAKEOFF_TD_S: f64 = CLIMB_TOP_S + APPROACH_S;
+
+impl Takeoff {
+    fn at(&self, t: f64) -> Pt {
+        if t >= CLIMB_TOP_S {
+            return landing(t, TAKEOFF_TD_S, 1.2);
+        }
+        let alt = lerp(&[(LIFTOFF_S, 0.0), (CLIMB_TOP_S, 1500.0)], t);
+        Pt {
+            alt,
+            speed: lerp(&[(0.0, 0.0), (LIFTOFF_S, 150.0)], t),
+            pitch: lerp(&self.pitch, t),
+            flaps: lerp(
+                &[
+                    (0.0, 5.0),
+                    (LIFTOFF_S + 4.0, 5.0),
+                    (LIFTOFF_S + 8.0, self.flaps_at_200),
+                ],
+                t,
+            ),
+            ground: t < LIFTOFF_S,
+            set: (self.set.iter())
+                .filter(|s| (s.0..s.1).contains(&t))
+                .map(|s| (s.2, s.3))
+                .collect(),
+            ..landing(TAKEOFF_TD_S - APPROACH_S, TAKEOFF_TD_S, 1.0)
+        }
+    }
+
+    fn events(&self) -> Vec<(String, Level)> {
+        let (flight, track) = fly(AIRLINER_LB, TAKEOFF_TD_S + ROLLOUT_S, |t| self.at(t));
+        events(CORE, &flight, &track)
+    }
+}
+
+/// Rotation at 6 deg/s is past the medium level (5 deg/s), at 1 deg/s
+/// under the low one (1.5 deg/s); 3 deg/s, the Airbus rate, is quiet.
+#[test]
+fn the_rotation_rate_is_graded_at_liftoff() {
+    let rotate = |rate: f64| {
+        let start = LIFTOFF_S - 8.0 / rate;
+        takeoff(
+            &[(start, 0.0), (LIFTOFF_S, 8.0), (LIFTOFF_S + 10.0, 8.0)],
+            5.0,
+            &[],
+        )
+        .events()
+    };
+    assert_eq!(rotate(6.0), found(&[("rotation-rate", Level::Medium)]));
+    assert_eq!(rotate(1.0), found(&[("rotation-rate", Level::Low)]));
+    assert_eq!(rotate(3.0), []);
+}
+
+const NORMAL_ROTATION: [(f64, f64); 2] = [(LIFTOFF_S - 3.0, 0.0), (LIFTOFF_S, 9.0)];
+
+/// Flaps 5 at liftoff, up by 200 ft: retracted below 400 ft (Medium).
+#[test]
+fn flaps_retracted_below_400_ft_after_takeoff_are_raised() {
+    let early = takeoff(&NORMAL_ROTATION, 0.0, &[]).events();
+    assert_eq!(early, found(&[("early-flap-retraction", Level::Medium)]));
+    assert_eq!(takeoff(&NORMAL_ROTATION, 5.0, &[]).events(), []);
+}
+
+/// The stick shaker for 2 s from liftoff, under 35 ft: a takeoff-phase
+/// stall warning (High); 18 deg of bank for 4 s from liftoff: over 15 deg
+/// below 500 ft (Medium).
+#[test]
+fn stall_warning_and_bank_at_liftoff_are_raised() {
+    let shaker = [(LIFTOFF_S, LIFTOFF_S + 2.0, "STALL WARNING", 1.0)];
+    assert_eq!(
+        takeoff(&NORMAL_ROTATION, 5.0, &shaker).events(),
+        found(&[("stall-warning", Level::High)])
+    );
+    let bank = [(LIFTOFF_S, LIFTOFF_S + 4.0, "PLANE BANK DEGREES", -18.0)];
+    assert_eq!(
+        takeoff(&NORMAL_ROTATION, 5.0, &bank).events(),
+        found(&[("bank-below-500", Level::Medium)])
+    );
+}
+
+/// Up to 90 kt, braked to a stop without lifting off: a rejected takeoff
+/// past the 80 kt high-speed split (Medium), at its highest speed.
+#[test]
+fn a_rejected_takeoff_is_graded_by_its_highest_speed() {
+    let (flight, track) = fly(AIRLINER_LB, 60.0, |t| Pt {
+        alt: 0.0,
+        speed: lerp(
+            &[
+                (0.0, 0.0),
+                (5.0, 10.0),
+                (25.0, 90.0),
+                (40.0, 10.0),
+                (45.0, 0.0),
+            ],
+            t,
+        ),
+        ground: true,
+        ..landing(TD_S, TD_S, 1.0)
+    });
+    assert_eq!(
+        sequence(&flight, &track),
+        [
+            Phase::Standing,
+            Phase::Taxi,
+            Phase::RejectedTakeoff,
+            Phase::Taxi,
+            Phase::Standing
+        ]
+    );
+    let [rto] = &all_events(CORE, &flight, &track)[..] else {
+        panic!("expected one event")
+    };
+    assert_eq!(
+        (rto.rule.as_str(), rto.level),
+        ("rejected-takeoff", Level::Medium)
+    );
+    assert!((rto.value.unwrap() - 90.0).abs() < 1.0);
+    assert_eq!(rto.detail.as_deref(), Some("rejected at 90 kt"));
+}
+
 /// A test type with speed and wind limits under what the scripted approach
 /// flies: VMO 132 kt, gear 150 kt extended and 125 kt moving, 10 kt
 /// demonstrated crosswind, 5 kt tailwind.
@@ -743,16 +921,16 @@ fn core_rules_map_to_the_scoring_domains() {
     };
     assert_eq!(
         ids(Stability),
-        "bank-above-500 bank-below-500 bank-light gear-not-down-500 \
+        "bank-above-500 bank-below-500 bank-light bank-light-above-300 gear-not-down-500 \
          glideslope-deviation-500 glideslope-deviation-above-500 high-sink-above-500 \
-         high-sink-below-500 high-sink-light localizer-deviation-500 \
+         high-sink-below-500 high-sink-light high-sink-light-above-500 localizer-deviation-500 \
          localizer-deviation-above-500 unstable-bank-500 unstable-sink-500 \
          unstable-speed-above-500 unstable-speed-below-500 unstable-speed-light"
     );
     assert_eq!(
         ids(Energy),
         "flap-overspeed gear-extended-overspeed gear-operating-overspeed stall-warning \
-         vmo-exceedance"
+         stall-warning-light vmo-exceedance"
     );
     assert_eq!(ids(Point), "long-landing short-landing");
     assert_eq!(
@@ -765,5 +943,9 @@ fn core_rules_map_to_the_scoring_domains() {
          high-sink-touchdown high-sink-touchdown-light tailstrike-risk-landing"
     );
     assert_eq!(ids(Rollout), "tailwind-landing-limit");
-    assert_eq!(ids(Other), "go-around tailstrike-risk-takeoff");
+    assert_eq!(
+        ids(Other),
+        "early-flap-retraction go-around rejected-takeoff rejected-takeoff-light rotation-rate \
+         tailstrike-risk-takeoff"
+    );
 }

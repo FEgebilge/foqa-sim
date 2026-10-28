@@ -5,22 +5,28 @@ The built-in set is [`rules/core.yaml`](../rules/core.yaml); `fdm analyze
 <flight> --rules my.yaml` uses another. Every rule is compiled and
 unit-checked when loaded, so a broken rule fails before any flight is read.
 
+The shipped `bank-below-500`, its texts shortened:
+
 ```yaml
 rule: bank-below-500            # id, unique in the file
-version: 1                      # bump when the definition changes
+version: 3                      # bump when the definition changes
 title: Excessive bank below 500 ft
-description: Source of the thresholds.
+domain: stability               # stability | energy | point | lateral | contact | rollout | other
+description: Source of the thresholds (EASA Data4Safety SL2B / SL3).
 why_it_matters: Steep bank near the ground raises the stall speed.  # optional, for pilots
 advice: Finish the turn to final above 500 ft.                     # optional, for pilots
-phase: [Approach, Landing]      # CICTT phases the rule applies to
-domain: stability               # stability | energy | point | lateral | contact | rollout | other
+phase: [Takeoff, InitialClimb, Approach, Landing, GoAround]  # phases the rule applies to
 aircraft: transport             # optional: light | transport
-when: height < 500 ft           # optional precondition
+when: height < 500 ft and not air_ground   # optional precondition
 measure: abs(roll)              # what is measured
 detail: "{value} bank, limit {threshold}"   # optional, the event in words
-sustain: 2 s                    # how long a level must hold
-above: { low: 15 deg, medium: 20 deg, high: 30 deg }
+sustain: 3 s                    # how long a level must hold
+above: { medium: 15 deg, high: 30 deg }
 ```
+
+The phases are those of `docs/phases.md`: `Standing`, `Taxi`, `Takeoff`,
+`RejectedTakeoff`, `InitialClimb`, `EnRoute`, `Approach`, `Landing`,
+`GoAround`.
 
 Every rule names the `domain` of a landing assessment its events count
 toward (`docs/scoring.md` §3): approach `stability`, threshold and flare
@@ -56,8 +62,8 @@ without one fails to load.
 
 ## Expressions
 
-Numbers carry units: `ft`, `kt`, `deg`, `g`, `fpm`, `dot`, `%`, `degC`,
-`hPa`, `lb`, `s`. Operands of `+ - < <= > >= == !=` must have the same unit.
+Numbers carry units: `ft`, `kt`, `deg`, `deg/s`, `g`, `fpm`, `dot`, `%`,
+`degC`, `hPa`, `lb`, `s`. Operands of `+ - < <= > >= == !=` must have the same unit.
 `* /` only scale by a plain number. A unit mistake is a load error that
 points at the problem:
 
@@ -83,6 +89,8 @@ false).
 | `vs` | fpm | Inertial vertical speed (derived) |
 | `height` | ft | Above the departure aerodrome up to the highest point, above the arrival aerodrome after |
 | `ra` | ft | Radio height, on-ground bias removed, valid below 2500 ft |
+| `takeoff.rotation_rate` | deg/s | From the takeoff roll to the end of the initial climb after it: the rotation's peak pitch rate over 0.5 s, from the pitch 1 deg above the roll's (the `rotation_rate_dps` skill measure); unknown elsewhere |
+| `takeoff.flap` | deg | Over the same points: the flap angle at liftoff |
 | `td.sink` | fpm | Touchdown rules: rate of descent at contact |
 | `td.peak_g` | g | Highest normal load around contact |
 | `td.pitch`, `td.roll` | deg | Attitude at contact |

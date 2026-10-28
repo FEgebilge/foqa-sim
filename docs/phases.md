@@ -76,9 +76,10 @@ AIM 4-3-3, turbine-powered aircraft enter the pattern at 1500 ft AGL).
 
 The rule thresholds stay independent of the boundaries: approach-gate
 rules (1000 ft, 500 ft) use heights, not phase boundaries. Moving
-`flare_ft` lengthens the approach rules' window down to the flare; the
-stall-warning rule keeps its own 50 ft exclusion (below 50 ft only while
-climbing), so the light flare's horn is not a finding.
+`flare_ft` lengthens the approach rules' window down to the flare. The
+light stall-warning rule keeps its own 50 ft exclusion (below 50 ft only
+while climbing), so the light flare's horn is not a finding; the transport
+rule counts the whole flight in the air, liftoff and flare included.
 
 ## Explaining them
 
