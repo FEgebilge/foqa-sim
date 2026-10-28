@@ -49,9 +49,9 @@ export const aircraftName = (aircraft?: Aircraft) => aircraft?.icao ?? aircraft?
 
 export const number = (value: number, digits = 0) => value.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });
 
-/** Decimals for a measured value: enough for g, none for fpm or ft unless `digits` asks for more. */
+/** Decimals for a measured value: enough for g and Mach (M), none for fpm or ft unless `digits` asks for more. */
 export function measured(value: number, unit?: string, digits?: number) {
-  const places = digits ?? (unit === "g" ? 2 : Math.abs(value) < 10 && !Number.isInteger(value) ? 1 : 0);
+  const places = digits ?? (unit === "g" ? 2 : unit === "M" ? 3 : Math.abs(value) < 10 && !Number.isInteger(value) ? 1 : 0);
   return `${number(value, places)}${unit ? ` ${unit}` : ""}`;
 }
 
