@@ -1,7 +1,8 @@
 use std::collections::HashSet;
 use std::ffi::{CString, c_char};
 use std::mem::size_of;
-use std::{fmt, ptr, slice};
+use std::time::Duration;
+use std::{fmt, ptr, slice, thread};
 
 use crate::facility::Requests;
 use crate::ffi::{self, HResult, InitPosition};
@@ -124,10 +125,16 @@ pub enum Facility {
     },
 }
 
+/// How long `wait` sleeps at most when SimConnect has no event to signal.
+const POLL: Duration = Duration::from_millis(1);
+
 /// An open connection to the simulator. Closed on drop. Not `Send`: the
 /// handle belongs to the thread that opened it.
 pub struct SimConnect {
     handle: ffi::Handle,
+    /// The Win32 event SimConnect signals on each message it queues; null
+    /// if it could not be created, and `wait` then polls.
+    event: ffi::Handle,
     /// Definitions built with `add_text`, whose data decodes as strings.
     text_defines: HashSet<u32>,
     /// Definitions already holding the "Initial Position" datum.
@@ -138,20 +145,30 @@ impl SimConnect {
     pub fn open(app_name: &str) -> Result<Self, Error> {
         let name = c_string(app_name)?;
         let mut handle = ptr::null_mut();
-        // SAFETY: valid out-pointer and NUL-terminated name; no window or event handle.
+        // SAFETY: no attributes or name; an auto-reset event, unsignalled.
+        let event = unsafe { ffi::create_event(ptr::null_mut(), 0, 0, ptr::null()) };
+        // SAFETY: valid out-pointer and NUL-terminated name; no window; the
+        // event (or null for none) outlives the connection (`Drop`).
         let hr = unsafe {
             ffi::open(
                 &mut handle,
                 name.as_ptr(),
                 ptr::null_mut(),
                 0,
-                ptr::null_mut(),
+                event,
                 ffi::OPEN_CONFIGINDEX_LOCAL,
             )
         };
-        check("SimConnect_Open", hr)?;
+        if let Err(e) = check("SimConnect_Open", hr) {
+            if !event.is_null() {
+                // SAFETY: created above and handed to no one.
+                unsafe { ffi::close_handle(event) };
+            }
+            return Err(e);
+        }
         Ok(Self {
             handle,
+            event,
             text_defines: HashSet::new(),
             init_defines: HashSet::new(),
         })
@@ -232,13 +249,16 @@ impl SimConnect {
         self.last_sent_packet_id()
     }
 
-    /// Streams a definition for the user aircraft once per simulation frame.
-    pub fn request_every_sim_frame(
+    /// Streams a definition for the user aircraft every `skip + 1`
+    /// simulation frames: each frame at 0. Asked again with the same
+    /// `request_id`, the new rate replaces the old one.
+    pub fn request_sim_frames(
         &mut self,
         request_id: u32,
         define_id: u32,
+        skip: u32,
     ) -> Result<(), Error> {
-        self.request(request_id, define_id, ffi::PERIOD_SIM_FRAME, 0)
+        self.request(request_id, define_id, ffi::PERIOD_SIM_FRAME, 0, skip)
     }
 
     /// Sends a definition for the user aircraft now, then whenever one of its
@@ -249,6 +269,7 @@ impl SimConnect {
             define_id,
             ffi::PERIOD_SECOND,
             ffi::DATA_REQUEST_FLAG_CHANGED,
+            0,
         )
     }
 
@@ -283,6 +304,7 @@ impl SimConnect {
         define_id: u32,
         period: i32,
         flags: u32,
+        interval: u32,
     ) -> Result<(), Error> {
         // SAFETY: open handle; scalar arguments only.
         let hr = unsafe {
@@ -294,7 +316,7 @@ impl SimConnect {
                 period,
                 flags,
                 0,
-                0,
+                interval,
                 0,
             )
         };
@@ -342,6 +364,21 @@ impl SimConnect {
             unsafe { slice::from_raw_parts(data.cast::<u8>(), len as usize) },
             &self.text_defines,
         )))
+    }
+
+    /// Waits up to about `timeout` (rounded up to the millisecond) for a
+    /// message to be queued, which `try_dispatch` then finds; at most `POLL`
+    /// without the connection's event. It may return early. Drain the queue
+    /// before waiting again: the event is signalled as messages are queued,
+    /// not while the queue holds any.
+    pub fn wait(&self, timeout: Duration) {
+        let ms = u32::try_from(timeout.as_micros().div_ceil(1000)).unwrap_or(u32::MAX);
+        // SAFETY: the event stays open while `self` lives.
+        if self.event.is_null()
+            || unsafe { ffi::wait_for_single_object(self.event, ms) } == ffi::WAIT_FAILED
+        {
+            thread::sleep(timeout.min(POLL));
+        }
     }
 
     /// Asks for the sim's state (`Sim`, user aircraft loaded) as
@@ -445,8 +482,14 @@ impl Requests for SimConnect {
 
 impl Drop for SimConnect {
     fn drop(&mut self) {
-        // SAFETY: the handle is open and never used after this call.
-        unsafe { ffi::close(self.handle) };
+        // SAFETY: the handle is open and never used after this call; the
+        // event outlives it, then is closed once.
+        unsafe {
+            ffi::close(self.handle);
+            if !self.event.is_null() {
+                ffi::close_handle(self.event);
+            }
+        }
     }
 }
 
