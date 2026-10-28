@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { Check, CircleCheck, CircleX, Copy, Download, FolderSearch, RefreshCw, ServerCrash, Trash2, TriangleAlert, Wrench } from "lucide-react";
+import { Badge } from "@ui/components/badge/badge";
 import { Button } from "@ui/components/button/button";
 import { EmptyState } from "@ui/components/empty-state/empty-state";
 import SegmentedControl from "@ui/components/segmented-control/segmented-control";
@@ -8,6 +9,7 @@ import { api } from "../../api";
 import { useNotify } from "../../lib/context";
 import type { Setup } from "../../lib/use-backend";
 import type { CheckState, SetupCheck, SetupFix, SetupStatus } from "../../types";
+import { GROUPS, has2024, worst } from "./setup-groups";
 
 const CHECK_STATE: Record<CheckState, { label: string; color: string; Icon: typeof CircleCheck }> = {
   pass: { label: "Pass", color: "var(--success)", Icon: CircleCheck },
@@ -15,16 +17,10 @@ const CHECK_STATE: Record<CheckState, { label: string; color: string; Icon: type
   fail: { label: "Fail", color: "var(--danger)", Icon: CircleX },
 };
 
-const GROUPS: { title: string; hint: string; has: (id: string) => boolean }[] = [
-  { title: "Simulator", hint: "Where MSFS is and where it loads community packages from.", has: (id) => ["sim", "community", "sim_running"].includes(id) },
-  { title: "In-sim packages", hint: "The toolbar panel and the EFB app, checked file by file against the copies this app ships.", has: (id) => id.startsWith("package:") },
-  { title: "FOQA-Sim app", hint: "Where flights are saved and whether the recorder can reach the sim.", has: (id) => id === "flights" || id === "recorder" },
-];
-
 const STORE = { ms_store: "MS Store", steam: "Steam" } as const;
 const CUSTOM = "custom";
 
-/** Installation status, like a BITE page: every check with pass, warn or fail, and a fix beside each failure. */
+/** Setup, like a BITE page: the checks in three steps, each with pass, warn or fail and a fix beside each failure. */
 export function SetupScreen({ setup }: { setup: Setup }) {
   const { state, refresh, refreshing } = setup;
 
@@ -37,9 +33,9 @@ export function SetupScreen({ setup }: { setup: Setup }) {
     <main className="flex w-full flex-col gap-5 px-6 py-6 2xl:px-8">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className="eyebrow">Built-in test</p>
-          <h1 className="mt-1 font-display text-2xl font-semibold tracking-tight">Installation</h1>
-          <p className="mt-1 text-sm text-fg-2">Everything FOQA-Sim needs to record and show flights in the sim. Each failing check has its fix beside it.</p>
+          <p className="eyebrow">Recorder and in-sim panel</p>
+          <h1 className="mt-1 font-display text-2xl font-semibold tracking-tight">Setup</h1>
+          <p className="mt-1 max-w-3xl text-sm text-fg-2">A built-in test of everything FOQA-Sim uses, in the order you set it up. Recording needs step 1 only; steps 2 and 3 add the panel that shows your landing inside MSFS 2024. A failing check has its fix beside it.</p>
         </div>
         <Button variant="secondary" size="sm" onClick={refresh} loading={refreshing}><RefreshCw size={15} aria-hidden="true" />Re-check</Button>
       </header>
@@ -51,8 +47,16 @@ export function SetupScreen({ setup }: { setup: Setup }) {
 function Checks({ status, setup }: { status: SetupStatus; setup: Setup }) {
   const count = (s: CheckState) => status.checks.filter((check) => check.state === s).length;
   const [fail, warn, pass] = [count("fail"), count("warn"), count("pass")];
-  const verdict: CheckState = fail ? "fail" : warn ? "warn" : "pass";
-  const { Icon, color } = CHECK_STATE[verdict];
+  const groups = GROUPS.map((group) => ({ ...group, checks: status.checks.filter((check) => group.has(check.id)) }));
+  const record = worst(groups[0].checks);
+  const panel = worst(groups.slice(1).flatMap((g) => g.checks));
+  const sim = has2024(status);
+  // What the pilot can do now, before the counts: recording is what matters, the panel is extra.
+  const verdict: { state: CheckState; text: string } = record === "fail" ? { state: "fail", text: "Recording blocked" }
+    : !sim ? { state: "pass", text: "Ready to record" }
+    : panel === "fail" ? { state: "warn", text: "Records; panel needs a fix" }
+    : record === "warn" || panel === "warn" ? { state: "warn", text: "Works, with warnings" } : { state: "pass", text: "All clear" };
+  const { Icon, color } = CHECK_STATE[verdict.state];
 
   return (
     <>
@@ -61,34 +65,40 @@ function Checks({ status, setup }: { status: SetupStatus; setup: Setup }) {
           <dt className="eyebrow">Result</dt>
           <dd className="mt-1 flex items-center gap-2 text-xl font-medium" style={{ color }}>
             <Icon size={20} aria-hidden="true" />
-            {fail ? "Action needed" : warn ? "Works, with warnings" : "All clear"}
+            {verdict.text}
           </dd>
         </div>
         <Stat label="Passed" value={`${pass} of ${status.checks.length}`} />
         <Stat label="Warnings" value={warn} color={warn ? CHECK_STATE.warn.color : undefined} />
         <Stat label="Failures" value={fail} color={fail ? CHECK_STATE.fail.color : undefined} />
       </dl>
-      {GROUPS.map((group) => {
-        const checks = status.checks.filter((check) => group.has(check.id));
-        return checks.length ? (
-          <section key={group.title} aria-label={group.title}>
-            <div className="mb-2 flex flex-wrap items-baseline gap-x-3">
-              <h2 className="font-display text-sm font-semibold">{group.title}</h2>
-              <p className="text-xs text-fg-3">{group.hint}</p>
-            </div>
+      {groups.map((group, index) => group.checks.length || group.id === "packages" ? (
+        <section key={group.id} aria-labelledby={`setup-${group.id}`}>
+          <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span className="readout flex size-6 items-center justify-center rounded-full border text-xs font-semibold" style={{ borderColor: CHECK_STATE[worst(group.checks)].color, color: CHECK_STATE[worst(group.checks)].color }} aria-hidden="true">{index + 1}</span>
+            <h2 id={`setup-${group.id}`} className="font-display text-sm font-semibold"><span className="sr-only">Step {index + 1}: </span>{group.title}</h2>
+            <Badge size="sm" tone={group.required ? "info" : "neutral"} animated={false}>{group.required ? "Required" : "Optional"}</Badge>
+            <p className="basis-full text-xs text-fg-3 sm:basis-auto">{group.hint}</p>
+          </div>
+          {!sim && group.id !== "record" ? (
+            <Note>Flying MSFS 2020? Recording works as it is; the in-sim panel is for MSFS 2024 only, so {group.id === "sim" ? "this step can stay failing" : "there is nothing to install"}.</Note>
+          ) : !group.checks.length ? <Note>Checked once step 2 has a Community folder.</Note> : null}
+          {group.checks.length ? (
             <ul className="panel divide-y divide-line overflow-hidden">
-              {checks.map((check) => (
+              {group.checks.map((check) => (
                 <CheckRow key={check.id} check={check} setup={setup}>
                   {check.id === "community" ? <CommunityChoice status={status} check={check} setup={setup} /> : null}
                 </CheckRow>
               ))}
             </ul>
-          </section>
-        ) : null;
-      })}
+          ) : null}
+        </section>
+      ) : null)}
     </>
   );
 }
+
+const Note = ({ children }: { children: ReactNode }) => <p className="mb-2 rounded-md border border-line-subtle bg-muted px-3 py-2 text-xs text-fg-2">{children}</p>;
 
 const Stat = ({ label, value, color }: { label: string; value: ReactNode; color?: string }) => (
   <div className="bg-surface px-4 py-3">
