@@ -38,6 +38,9 @@ export function valueAt(times: number[], values: SeriesValues, t: number, how: I
   return (((a + turn * f) % 360) + 360) % 360;
 }
 
+/** Whether any sample has a position: a flight without one has no map to draw. */
+export const hasPosition = (series: Series) => series.lat.some((v) => v !== null);
+
 /** Position at t, interpolated like any other parameter. */
 export function positionAt(series: Series, t: number): Position | null {
   const lat = valueAt(series.t_s, series.lat, t), lon = valueAt(series.t_s, series.lon, t);

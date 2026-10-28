@@ -1,4 +1,4 @@
-import { useCallback, useRef, type MouseEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, type MouseEvent, type ReactNode } from "react";
 import { Tooltip } from "@ui/components/tooltip/tooltip";
 import { clock, LEVEL_LABEL, phaseName } from "../../lib/format";
 import { contacts, groupLandings } from "../../lib/landings";
@@ -16,7 +16,6 @@ interface Props {
   events: FlightEvent[];
   touchdowns: Touchdown[];
   range: TimeRange;
-  focus: number | null;
   view: TimeRange | null;
   selected: number | null;
   bus: TimeBus;
@@ -31,9 +30,10 @@ interface Props {
  * The flight at a glance: contiguous CICTT phases on one bar, events above it, touchdowns below.
  * Click the bar to put the cursor at a time; click a phase name to zoom the charts to it.
  */
-export function PhaseTimeline({ phases, phaseValues, events, touchdowns, range, focus, view, selected, bus, onFocus, onZoom, onSelectEvent, controls }: Props) {
+export function PhaseTimeline({ phases, phaseValues, events, touchdowns, range, view, selected, bus, onFocus, onZoom, onSelectEvent, controls }: Props) {
   const [barRef, width] = useElementWidth<HTMLDivElement>();
   const hoverRef = useRef<HTMLDivElement>(null);
+  const cursorRef = useRef<HTMLDivElement>(null);
   const [t0, t1] = range;
   const span = Math.max(1, t1 - t0);
   const pct = (t: number) => `${((Math.min(t1, Math.max(t0, t)) - t0) / span) * 100}%`;
@@ -46,6 +46,18 @@ export function PhaseTimeline({ phases, phaseValues, events, touchdowns, range, 
     node.style.display = t === null ? "none" : "block";
     if (t !== null) node.style.left = `${((t - t0) / span) * 100}%`;
   }, [t0, span]));
+
+  // The placed cursor moves by hand: playback ticks must not re-render the timeline.
+  useEffect(() => {
+    const move = () => {
+      const node = cursorRef.current, t = bus.placed;
+      if (!node) return;
+      node.style.display = t === null ? "none" : "block";
+      if (t !== null) node.style.left = `${((Math.min(t1, Math.max(t0, t)) - t0) / span) * 100}%`;
+    };
+    move();
+    return bus.onPlace(move);
+  }, [bus, t0, t1, span]);
 
   const timeAt = (event: MouseEvent<HTMLElement>) => {
     const box = event.currentTarget.getBoundingClientRect();
@@ -114,7 +126,7 @@ export function PhaseTimeline({ phases, phaseValues, events, touchdowns, range, 
         {selectedEvent ? (
           <div className="pointer-events-none absolute inset-y-0 min-w-[3px]" style={{ left: pct(selectedEvent.start_s), width: share(selectedEvent.end_s - selectedEvent.start_s), background: levelVar(selectedEvent.level), opacity: 0.85 }} />
         ) : null}
-        {focus !== null ? <div className="pointer-events-none absolute inset-y-0 w-0.5 -translate-x-1/2 bg-[var(--foreground)]" style={{ left: pct(focus) }} /> : null}
+        <div ref={cursorRef} className="pointer-events-none absolute inset-y-0 hidden w-0.5 -translate-x-1/2 bg-[var(--foreground)]" />
         <div ref={hoverRef} className="pointer-events-none absolute inset-y-0 hidden w-px bg-[var(--foreground)] opacity-60" />
       </div>
 

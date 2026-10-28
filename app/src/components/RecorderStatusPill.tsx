@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Tooltip } from "@ui/components/tooltip/tooltip";
 import { clock } from "../lib/format";
 import type { RecorderState } from "../lib/use-backend";
+import { useVisible } from "../lib/visible";
 import type { RecorderStatus } from "../types";
 
 const COPY: Record<RecorderStatus["state"], { label: string; hint: string; color: string }> = {
@@ -14,12 +15,13 @@ const COPY: Record<RecorderStatus["state"], { label: string; hint: string; color
 /** The recorder's state, always visible in the header: the first thing a pilot checks before flying. */
 export function RecorderStatusPill({ status }: { status: RecorderState | null }) {
   const [now, setNow] = useState(() => Date.now());
+  const visible = useVisible();
   const recording = status?.value.state === "recording";
   useEffect(() => {
-    if (!recording) return;
+    if (!recording || !visible) return;
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
-  }, [recording]);
+  }, [recording, visible]);
 
   if (!status) return <span className="h-8 w-36 animate-pulse rounded-full bg-muted" aria-label="Checking the recorder" />;
   const { value } = status;
@@ -31,7 +33,7 @@ export function RecorderStatusPill({ status }: { status: RecorderState | null })
     <Tooltip content={hint} side="bottom">
       <span role="status" tabIndex={0} className="inline-flex h-8 items-center gap-2 rounded-full border border-line bg-surface px-3 text-sm whitespace-nowrap">
         <span className="relative flex size-2.5" aria-hidden="true">
-          {recording || value.state === "connected" ? <span className="absolute inline-flex size-full animate-ping rounded-full opacity-60" style={{ background: copy.color }} /> : null}
+          {visible && (recording || value.state === "connected") ? <span className="absolute inline-flex size-full animate-ping rounded-full opacity-60" style={{ background: copy.color }} /> : null}
           <span className="relative inline-flex size-2.5 rounded-full" style={{ background: copy.color }} />
         </span>
         <span className="sr-only font-medium sm:not-sr-only sm:whitespace-nowrap">{copy.label}</span>

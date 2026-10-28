@@ -1,5 +1,5 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ArrowLeft, Database, FileWarning, Globe, Image, Pause, Play, PlaneLanding, Route, ScanSearch, ServerCrash, Sheet, UserRoundX, ZoomOut } from "lucide-react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { ArrowLeft, Database, FileWarning, Globe, Image, MapPinOff, Pause, Play, PlaneLanding, Route, ScanSearch, ServerCrash, Sheet, UserRoundX, ZoomOut } from "lucide-react";
 import { Button } from "@ui/components/button/button";
 import { EmptyState } from "@ui/components/empty-state/empty-state";
 import { api, type ExportFormat } from "../../api";
@@ -11,8 +11,8 @@ import { openFlights } from "../../lib/route";
 import { useNotify, useTheme } from "../../lib/context";
 import { landingAt } from "../../lib/assessment";
 import { groupLandings } from "../../lib/landings";
-import { adjacentEvent, valueAt } from "../../lib/series";
-import { TimeBus, useHover, type TimeRange } from "../../lib/time";
+import { adjacentEvent, hasPosition, valueAt } from "../../lib/series";
+import { TimeBus, useHover, usePlaced, type TimeRange } from "../../lib/time";
 import { useDebrief } from "../../lib/use-backend";
 import type { Debrief, Series } from "../../types";
 import { ErrorBoundary } from "../ErrorBoundary";
@@ -77,21 +77,22 @@ function DebriefView({ debrief, refreshing, onRefresh, onOpenFolder }: { debrief
   // Scored landings that carry the reference approach, with the index of their landing card.
   const profiled = useMemo(() => landings.flatMap((l, index) => { const a = landingAt(debrief, l.touchdown.t_s); return a?.status === "scored" && a.profile?.dist_nm.some((d) => d !== null) ? [{ landing: a, index }] : []; }), [landings, debrief]);
   const [selected, setSelected] = useState<number | null>(null);
-  const [focus, setFocus] = useState<number | null>(null);
   const [view, setView] = useState<TimeRange | null>(flown);
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(4);
   const selectedEvent = selected === null ? null : events[selected] ?? null;
   const clamp = useCallback((t: number) => Math.min(range[1], Math.max(range[0], t)), [range]);
-  const focusRef = useRef(focus);
 
-  /** Moves the cursor; a zoomed view follows it when it leaves, keeping its width. */
+  const viewRef = useRef(view);
+  useLayoutEffect(() => { viewRef.current = view; });
+
+  /** Moves the cursor through the bus, so a playback tick re-renders only what shows it; a zoomed view follows it when it leaves, keeping its width. */
   const place = useCallback((t: number) => {
-    focusRef.current = t;
-    setFocus(t);
-    setView((v) => (!v || (t >= v[0] && t <= v[1]) ? v : [t - (v[1] - v[0]) * 0.1, t + (v[1] - v[0]) * 0.9]));
-  }, []);
-  const from = useCallback(() => focusRef.current ?? view?.[0] ?? range[0], [view, range]);
+    bus.place(t);
+    const v = viewRef.current;
+    if (v && (t < v[0] || t > v[1])) setView([t - (v[1] - v[0]) * 0.1, t + (v[1] - v[0]) * 0.9]);
+  }, [bus]);
+  const from = useCallback(() => bus.placed ?? view?.[0] ?? range[0], [bus, view, range]);
 
   /** Selects an event: the view zooms around it and the cursor goes to its peak. */
   const openEvent = useCallback((index: number) => {
@@ -177,7 +178,7 @@ function DebriefView({ debrief, refreshing, onRefresh, onOpenFolder }: { debrief
       {/* Replay workspace: on wide screens it fills the window. The timeline is the one slider; under it the map and the
           rebuilt flight display sit side by side in one row (neither turns into a tall column), the charts scroll below. */}
       <section aria-label="Replay" className="flex flex-col gap-3 xl:h-[calc(100dvh-4.5rem)] xl:min-h-[680px]">
-        <PhaseTimeline phases={phases} phaseValues={flight.phase_values ?? {}} events={events} touchdowns={touchdowns} range={range} focus={focus} view={view} selected={selected} bus={bus} onFocus={place} onZoom={setView} onSelectEvent={selectEvent} controls={controls} />
+        <PhaseTimeline phases={phases} phaseValues={flight.phase_values ?? {}} events={events} touchdowns={touchdowns} range={range} view={view} selected={selected} bus={bus} onFocus={place} onZoom={setView} onSelectEvent={selectEvent} controls={controls} />
 
         <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(290px,340px)_minmax(0,1fr)]">
           <aside aria-labelledby="events-title" className="flex min-h-0 flex-col gap-2 xl:overflow-y-auto xl:pr-1">
@@ -193,18 +194,20 @@ function DebriefView({ debrief, refreshing, onRefresh, onOpenFolder }: { debrief
                 <h2 id="map-title" className="eyebrow border-b border-line-subtle px-3 py-2">Track and runways</h2>
                 {/* Landscape on a narrow screen; beside the display it takes the row's height and the width that is left. */}
                 <div className="aspect-[16/10] max-h-[55dvh] w-full lg:aspect-auto lg:max-h-none lg:min-h-0 lg:flex-1">
-                  <ErrorBoundary what="The map" size="sm">
-                    <Suspense fallback={<div className="h-full animate-pulse bg-muted" />}>
-                      <FlightMap debrief={debrief} theme={theme} focus={focus} selected={selectedEvent} bus={bus} onFocus={place} />
-                    </Suspense>
-                  </ErrorBoundary>
+                  {hasPosition(series) ? (
+                    <ErrorBoundary what="The map" size="sm">
+                      <Suspense fallback={<div className="h-full animate-pulse bg-muted" />}>
+                        <FlightMap debrief={debrief} theme={theme} selected={selectedEvent} bus={bus} onFocus={place} />
+                      </Suspense>
+                    </ErrorBoundary>
+                  ) : <EmptyState size="sm" icon={<MapPinOff size={18} />} title="No position recorded" description="This flight has no latitude/longitude samples to draw." />}
                 </div>
               </section>
               <div className="mx-auto aspect-[1.12] w-full max-w-[560px] lg:aspect-auto lg:h-full lg:max-w-none">
-                <ReplayPfd debrief={debrief} theme={theme} focus={focus} bus={bus} />
+                <ReplayPfd debrief={debrief} theme={theme} bus={bus} />
               </div>
             </div>
-            <CursorReadout series={series} phases={phases} focus={focus} bus={bus} />
+            <CursorReadout series={series} phases={phases} bus={bus} />
 
             <div className="flex min-h-0 flex-col gap-4 xl:flex-1 xl:overflow-y-auto xl:pr-1">
               <section className="panel px-3 pt-2 pb-1" aria-labelledby="charts-title">
@@ -214,7 +217,7 @@ function DebriefView({ debrief, refreshing, onRefresh, onOpenFolder }: { debrief
                 </div>
                 <ErrorBoundary what="The charts" size="sm">
                   <Suspense fallback={<ChartSkeleton />}>
-                    <Charts debrief={debrief} theme={theme} view={view} focus={focus} selected={selectedEvent} bus={bus} onView={setView} onFocus={place} />
+                    <Charts debrief={debrief} theme={theme} view={view} selected={selectedEvent} bus={bus} onView={setView} onFocus={place} />
                   </Suspense>
                 </ErrorBoundary>
               </section>
@@ -233,7 +236,7 @@ function DebriefView({ debrief, refreshing, onRefresh, onOpenFolder }: { debrief
               {profiled.length ? (
                 <section aria-labelledby="profile-title" className="flex flex-col gap-4">
                   <h2 id="profile-title" className="eyebrow">Reference approach</h2>
-                  {profiled.map(({ landing, index }) => <ApproachProfile key={landing.t_s} debrief={debrief} landing={landing} index={index} bus={bus} focus={focus} onFocus={place} />)}
+                  {profiled.map(({ landing, index }) => <ApproachProfile key={landing.t_s} debrief={debrief} landing={landing} index={index} bus={bus} onFocus={place} />)}
                 </section>
               ) : null}
             </div>
@@ -277,9 +280,10 @@ function Verdict({ debrief }: { debrief: Debrief }) {
 }
 
 /** Values at the hovered time, else at the focus: what the aircraft was doing where the map dot is. */
-function CursorReadout({ series, phases, focus, bus }: { series: Series; phases: Debrief["phases"]; focus: number | null; bus: TimeBus }) {
+function CursorReadout({ series, phases, bus }: { series: Series; phases: Debrief["phases"]; bus: TimeBus }) {
   const [hover, setHover] = useState<number | null>(null);
   useHover(bus, setHover);
+  const focus = usePlaced(bus);
   const t = hover ?? focus;
   const value = (values: Series["aal_ft"], unit: string, digits = 0) => { const v = t === null ? null : valueAt(series.t_s, values, t); return v === null ? "–" : `${number(v, digits)} ${unit}`; };
   const phase = t === null ? undefined : (phases.find((p) => t >= p.start_s && t < p.end_s) ?? phases.at(-1))?.phase;
