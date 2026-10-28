@@ -14,7 +14,7 @@ mod scale;
 mod score;
 mod text;
 
-pub use measure::{Assessment, Landing, SpeedSource, Speeds, scoring_class};
+pub use measure::{Assessment, Landing, SpeedSource, Speeds};
 pub use method::{
     ANCHOR_ELL, Additive, Anchor, Band, CapDef, Caps, Context, Criterion, DOMAINS, Height, Method,
     MethodError, WindowDef,
@@ -25,5 +25,6 @@ pub use score::{
     Grade, LandingScore, Measures, Outcome, Value,
 };
 pub use text::{
-    height_text, item_text, list, not_scored_text, number, reading_text, value_text, with_level,
+    NOT_RUNWAY_KIND, height_text, item_text, list, not_scored_text, number, reading_text,
+    value_text, with_level,
 };

@@ -17,6 +17,7 @@ why_it_matters: Steep bank near the ground raises the stall speed.  # optional, 
 advice: Finish the turn to final above 500 ft.                     # optional, for pilots
 phase: [Takeoff, InitialClimb, Approach, Landing, GoAround]  # phases the rule applies to
 aircraft: transport             # optional: light | transport
+engine: [jet]                   # optional: piston | turboprop | jet | electric, any of them
 when: height < 500 ft and not air_ground   # optional precondition
 measure: abs(roll)              # what is measured
 detail: "{value} bank, limit {threshold}"   # optional, the event in words
@@ -33,6 +34,14 @@ toward (`docs/scoring.md` §3): approach `stability`, threshold and flare
 `energy`, touchdown `point`, `lateral` control, touchdown `contact`,
 `rollout` and stopping, or `other` (never part of a landing score). A rule
 without one fails to load.
+
+A rule applies to the aircraft classes in `aircraft` (all without it; a
+flight of unknown class is graded as transport) and, with `engine`, only to
+those engines; a flight whose engine is unknown gets the rule, as before
+engines were known. A rule that reads a runway value (`td.distance`,
+`td.cross`, `td.crosswind`, `td.tailwind`, `td.lda`, `td.tdz`, `td.in_tdz`,
+`td.long_landing`, `td.short_landing`) is a runway landing rule: it does not
+apply to a helicopter or a glider (`airframe.kind`, below).
 
 ## Triggers
 
@@ -63,9 +72,10 @@ without one fails to load.
 ## Expressions
 
 Numbers carry units: `ft`, `kt`, `deg`, `deg/s`, `g`, `fpm`, `dot`, `%`,
-`degC`, `hPa`, `lb`, `s`. Operands of `+ - < <= > >= == !=` must have the same unit.
-`* /` only scale by a plain number. A unit mistake is a load error that
-points at the problem:
+`degC`, `hPa`, `lb`, `s`, `M` (Mach). Operands of `+ - < <= > >= == !=` must
+have the same unit. `* /` only scale by a plain number, and a unit over the
+same unit is a plain ratio (`(weight.gross / profile.mlw - 1) * 100 %`). A
+unit mistake is a load error that points at the problem:
 
 ```
 rule `bank-below-500`, `when`:
@@ -124,19 +134,52 @@ rules using them stay silent.
 | `profile.main_gear_track` | ft | Distance between the main gear centrelines |
 | `profile.vref` | kt | Vref at that point's gross weight and flap angle, from the profile's Vref table, approach speeds or VSO (below) |
 | `profile.vapp` | kt | The approach speed the profile gives there (light types: the middle of the published range, or 1.3 VSO) |
+| `profile.mlw` | lb | Maximum landing weight |
+| `profile.mmo` | M | Maximum operating Mach number, against the recorded `mach` |
+| `profile.eye_to_wheel` | ft | Pilot's eye (or glideslope antenna) above the main wheels on the approach; the landing score's threshold crossing (B1) uses it in place of its class estimate |
 
 ## Type profiles
 
 One YAML file per aircraft type, `profiles/<ICAO>.yaml`, named by its ICAO
 Doc 8643 type designator; every file there is built into `fdm`, so adding a
-type takes only its file. A flight is matched by the designator in its
-recorded aircraft identity (`ATC MODEL`). Its class is then the profile's;
-without a profile the class comes from the gross weight, and class rules
-(`aircraft:`) still apply; a flight of unknown class is graded with the
-transport rules, as with the transport phase boundaries. The debrief header
-says which: `C172 profile`,
-`transport class default (no B744 profile)` or
-`no aircraft identity, unknown class`.
+type takes only its file. Its class is the profile's; without a profile the
+class comes from the fallbacks below, and class rules (`aircraft:`) still
+apply; a flight of unknown class is graded with the transport rules, as
+with the transport phase boundaries. The debrief header says which: `C172
+profile`, `B738 profile (by its title)`, `transport class default (no B744
+profile)` or `no aircraft identity, unknown class`.
+
+### Identification
+
+The recorded aircraft identity (`docs/format.md`, "Aircraft identity") is
+matched in this order, and the first step that answers is recorded
+(`identification.matched` in the debrief):
+
+| Step | `matched` | Matches |
+|---|---|---|
+| 1 | `type` | The ICAO designator in `ATC MODEL` has a profile |
+| 2 | `model` | A profile `alias` equals `ATC MODEL` (`B737-800` for B738) |
+| 3 | `title` | A profile `alias` is part of `TITLE`; the longest wins (`A320neo` before `A320`) |
+| 4 | `sim` | No profile: the class from the sim's `MAX GROSS WEIGHT` (over 12,500 lb: transport), the airframe from `CATEGORY`, `ENGINE TYPE`, `NUMBER OF ENGINES` and the gear SimVars |
+| 5 | `weight` | No profile, no sim facts: the class by the highest recorded gross weight |
+| 6 | `unknown` | Nothing: the transport defaults |
+
+Aliases compare letters and digits only, in any case: `B737-800`, `b737
+800` and `B737800` are one. Without a profile, a transport turboprop (from
+the sim's engine type) is scored as `turboprop`. The sim calls an airplane
+with no engine a glider and gear on floats a seaplane; a helicopter is its
+`CATEGORY`. The airframe is the profile's, the sim's facts filling only what
+it leaves out; a profile scored as `turboprop` has a turboprop engine.
+
+The debrief says when a flight was graded on a class default (steps 4 to 6),
+where its class came from and which checks that need a profile value were
+therefore off (`identification.unchecked`: flap speeds, Vmo, Mmo, gear
+speeds, tail strike, hard-landing inspection, overweight landing, the
+approach speed against Vref, the crosswind and tailwind limits; gear speeds
+only for retractable or unknown gear, Mmo only for a jet or an unknown
+engine). A helicopter's or a glider's landing is not assessed (the landing
+score grades airplane runway landings), and the runway landing rules do not
+apply to it; the debrief says so.
 
 ```yaml
 type: C172                      # must match the file name
@@ -168,7 +211,25 @@ vref:                           # Vref by gross weight per landing flap (FCOM/QR
   source: "..."
   flaps:
     - { flap: 30 deg, weights_kg: [40000, 60000], ias: [120 kt, 140 kt] }
+airframe:                       # optional, facts not limits (no source); each key optional
+  kind: airplane                # airplane | helicopter | glider | seaplane-amphibian
+  engine: piston                # piston | turboprop | jet | electric
+  engines: 1                    # 1-8 with an engine, 0 without one
+  gear: fixed                   # fixed | retractable | floats | skids
+mlw: { value: 146300 lb, source: "..." }       # optional, as the next two
+mmo: { value: 0.82 M, source: "..." }
+eye_to_wheel: { value: 18 ft, source: "..." }
+aliases: ["B737-800", "Boeing 737-800"]        # optional: ATC MODEL values, TITLE substrings
+unreliable: [ap.engaged, sel.speed]            # optional: LFL signals read as no data
 ```
+
+`aliases` need at least 3 letters or digits, and an alias may name one
+type only and not another profile's designator; the load fails otherwise.
+`unreliable` lists LFL parameters known to be wrong on the type (an add-on
+that does not drive the standard SimVar): every sample of them is marked
+failed when the flight is analysed, so the rules, the landing score, the
+skills and the charts read no data there and stay silent instead of firing
+wrongly. A name the LFL lacks fails the load.
 
 `scoring_class` defaults to `light` for a light class and `jet` for a
 transport one. A landing's Vref and approach speed come from the first of

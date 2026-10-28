@@ -117,6 +117,20 @@ fn airliner_hard_landing_is_medium() {
     );
 }
 
+/// The jet airliner levels do not grade a transport turboprop: the same
+/// 2.0 g landing of a type whose profile scores it as one raises nothing.
+#[test]
+fn turboprop_is_not_graded_by_jet_hard_landing_levels() {
+    let profile = format!("{LIMITS_PROFILE}scoring_class: turboprop\n")
+        .replace("vmo: { value: 132 kt", "vmo: { value: 250 kt")
+        .replace("vlo: { value: 125 kt", "vlo: { value: 200 kt");
+    let (flight, track) = fly_to(&[identity("TEST")], AIRLINER_LB, TD_S + ROLLOUT_S, |t| {
+        landing(t, TD_S, 2.0)
+    });
+    let profiles = ProfileSet::load([("TEST", profile.as_str())]).unwrap();
+    assert_eq!(pairs(graded(&profiles, CORE, &flight, &track)), []);
+}
+
 /// 2.0 g is a hard landing for a 2300 lb light aircraft only at its low level
 /// (1.8 g; medium starts at 2.2 g), and the transport rule is not applied to
 /// it; 1.7 g is within limits.
@@ -699,6 +713,72 @@ fn speed_limits_of_the_type_profile_drive_their_rules() {
     );
 }
 
+/// The 140,000 lb test aircraft over an MLW of 138,000 lb (1.4 %, Medium)
+/// and of 130,000 lb (7.7 %, High); under it nothing.
+#[test]
+fn a_landing_above_the_mlw_is_graded_by_its_margin() {
+    let with = |mlw: &str| {
+        let profile = format!("{LIMITS_PROFILE}mlw: {{ value: {mlw}, source: synthetic }}\n");
+        let events = limits_flight_with(&profile, (0.0, 0.0));
+        events
+            .into_iter()
+            .filter(|(r, _)| r == "overweight-landing")
+            .map(|(_, l)| l)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(with("138000 lb"), [Level::Medium]);
+    assert_eq!(with("130000 lb"), [Level::High]);
+    assert_eq!(with("150000 lb"), []);
+}
+
+/// The approach at Mach 0.215 against an MMO of 0.2 (0.015 over, Medium);
+/// a recording without Mach stays silent.
+#[test]
+fn mach_above_mmo_is_an_overspeed() {
+    let profile = format!("{LIMITS_PROFILE}mmo: {{ value: 0.2 M, source: synthetic }}\n");
+    let fly = |mach: Option<f64>| {
+        let (flight, track) = fly_to(&[identity("TEST")], AIRLINER_LB, TD_S + ROLLOUT_S, |t| Pt {
+            set: mach.map(|m| ("AIRSPEED MACH", m)).into_iter().collect(),
+            ..landing(t, TD_S, 1.2)
+        });
+        let profiles = ProfileSet::load([("TEST", profile.as_str())]).unwrap();
+        let events = graded(&profiles, CORE, &flight, &track);
+        events
+            .into_iter()
+            .filter(|e| e.rule == "mmo-exceedance")
+            .collect::<Vec<_>>()
+    };
+    let [e] = &fly(Some(0.215))[..] else {
+        panic!("expected one Mmo exceedance")
+    };
+    assert_eq!(e.level, Level::Medium);
+    assert_eq!(e.detail.as_deref(), Some("0.215 M, limit 0.200 M"));
+    assert!(fly(None).is_empty());
+}
+
+/// A helicopter (the sim's `CATEGORY`) touching down past the touchdown
+/// zone: no runway landing rule grades it.
+#[test]
+fn runway_rules_skip_a_helicopter() {
+    let SimEvent::Aircraft(mut heli) = identity("H125") else {
+        unreachable!()
+    };
+    heli.facts.category = Some("Helicopter".into());
+    let recorded = [
+        SimEvent::Aircraft(heli),
+        SimEvent::Airport(runway_behind_touchdown(1500.0)),
+    ];
+    let (flight, track) = fly_to(&recorded, LIGHT_LB, TD_S + ROLLOUT_S, |t| {
+        landing(t, TD_S, 1.2)
+    });
+    assert_eq!(events(CORE, &flight, &track), []);
+    let (flight, track) = land_on(&[runway_behind_touchdown(1500.0)]);
+    assert_eq!(
+        events(CORE, &flight, &track),
+        found(&[("long-landing", Level::Medium)])
+    );
+}
+
 /// The gear retracted and put back down between two of its 4 s samples:
 /// no sample saw it in transit, so nothing says it moved above VLO.
 #[test]
@@ -929,8 +1009,8 @@ fn core_rules_map_to_the_scoring_domains() {
     );
     assert_eq!(
         ids(Energy),
-        "flap-overspeed gear-extended-overspeed gear-operating-overspeed stall-warning \
-         stall-warning-light vmo-exceedance"
+        "flap-overspeed gear-extended-overspeed gear-operating-overspeed mmo-exceedance \
+         stall-warning stall-warning-light vmo-exceedance"
     );
     assert_eq!(ids(Point), "long-landing short-landing");
     assert_eq!(
@@ -945,7 +1025,7 @@ fn core_rules_map_to_the_scoring_domains() {
     assert_eq!(ids(Rollout), "tailwind-landing-limit");
     assert_eq!(
         ids(Other),
-        "early-flap-retraction go-around rejected-takeoff rejected-takeoff-light rotation-rate \
-         tailstrike-risk-takeoff"
+        "early-flap-retraction go-around overweight-landing rejected-takeoff \
+         rejected-takeoff-light rotation-rate tailstrike-risk-takeoff"
     );
 }

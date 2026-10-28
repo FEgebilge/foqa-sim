@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use fdm_core::{AircraftId, Airport};
+use fdm_core::{AircraftId, Airport, SimFacts};
 use recorder::{Acquisition, Column, FlowEvent, SYSTEM_EVENTS, SimEvent, Telemetry};
 use sim_link::facility::{AirportFetch, Fetched};
 use sim_link::{Recv, SimConnect};
@@ -14,11 +14,14 @@ const DEFINE: u32 = 1;
 const FACILITY_DEFINE: u32 = 2;
 const IDENTITY_DEFINE: u32 = 3;
 const INIT_DEFINE: u32 = 4;
+const FACTS_DEFINE: u32 = 5;
 const REQUEST: u32 = 1;
 const IDENTITY_REQUEST: u32 = 2;
 const PROBE_REQUEST: u32 = 3;
-/// The identification SimVars, in `AircraftId` field order.
-const IDENTITY: [&str; 4] = ["TITLE", "ATC MODEL", "ATC TYPE", "ATC ID"];
+const FACTS_REQUEST: u32 = 4;
+/// The identification SimVars, in `AircraftId` field order, then the
+/// category of `SimFacts` (the one text fact).
+const IDENTITY: [&str; 5] = ["TITLE", "ATC MODEL", "ATC TYPE", "ATC ID", "CATEGORY"];
 /// The longest `poll` waits for an item: a paused sim or a loading screen
 /// sends none, and the recorder still acts on requests in the meantime.
 const TICK: Duration = Duration::from_millis(250);
@@ -78,6 +81,9 @@ impl LiveSource {
         for simvar in IDENTITY {
             sent.insert(sim.add_text(IDENTITY_DEFINE, simvar)?, simvar.to_owned());
         }
+        for (simvar, unit) in SimFacts::SIMVARS {
+            sent.insert(sim.add_f64(FACTS_DEFINE, simvar, unit)?, simvar.to_owned());
+        }
         for (id, name) in (KEY_EVENT_BASE..).zip(KEY_EVENTS) {
             sent.insert(sim.map_event(id, name)?, format!("key event {name}"));
         }
@@ -90,6 +96,7 @@ impl LiveSource {
         // now and then on change, checked each second, instead of every
         // frame. `Identity` repeats it to each new flight.
         sim.request_on_change(IDENTITY_REQUEST, IDENTITY_DEFINE)?;
+        sim.request_on_change(FACTS_REQUEST, FACTS_DEFINE)?;
         let airports = AirportFetch::new(&mut sim, FACILITY_DEFINE)?;
         Ok(Self {
             sim,
@@ -158,6 +165,13 @@ impl LiveSource {
             return Ok(None);
         };
         let item = match msg {
+            Recv::Data {
+                request_id: FACTS_REQUEST,
+                values,
+            } => {
+                self.identity.facts(&values);
+                None
+            }
             Recv::Data { values, .. } => {
                 if let Some(skip) = self.cadence.follow(&values) {
                     self.sim.request_sim_frames(REQUEST, DEFINE, skip)?;
@@ -283,6 +297,8 @@ fn system_event(id: u32, data: u32, file: &str) -> Option<Telemetry> {
 #[derive(Debug, Default)]
 struct Identity {
     current: Option<AircraftId>,
+    /// The latest sim facts; they arrive apart from the strings.
+    facts: SimFacts,
     /// `current` is to be emitted.
     due: bool,
     /// The next flight to open has not been given `current`.
@@ -292,15 +308,35 @@ struct Identity {
 impl Identity {
     /// The identity SimVars as the sim sent them, in `IDENTITY` order.
     fn report(&mut self, values: Vec<String>) {
-        let Ok([title, atc_model, atc_type, atc_id]) = <[String; 4]>::try_from(values) else {
+        let Ok([title, atc_model, atc_type, atc_id, category]) = <[String; 5]>::try_from(values)
+        else {
             return;
         };
-        let id = AircraftId {
+        self.facts.category = Some(category).filter(|c| !c.trim().is_empty());
+        self.update(AircraftId {
             title,
             atc_model,
             atc_type,
             atc_id,
-        };
+            facts: self.facts.clone(),
+        });
+    }
+
+    /// The `SimFacts::SIMVARS` values as the sim sent them. Before the
+    /// strings there is no identity to attach them to yet.
+    fn facts(&mut self, values: &[f64]) {
+        self.facts.from_values(values);
+        if let Some(id) = &self.current {
+            let id = AircraftId {
+                facts: self.facts.clone(),
+                ..id.clone()
+            };
+            self.update(id);
+        }
+    }
+
+    /// Emits `id` when it differs from the current identity.
+    fn update(&mut self, id: AircraftId) {
         if self.current.as_ref() != Some(&id) {
             self.current = Some(id);
             self.due = true;
@@ -559,6 +595,7 @@ mod tests {
             "ATCCOM.AC_MODEL C172.0.text",
             "ATCCOM.ATC_NAME CESSNA.0.text",
             "BILGE",
+            "Airplane",
         ]
         .map(String::from)
         .into()
@@ -576,6 +613,26 @@ mod tests {
         assert_eq!(identity.next().unwrap().title, "C172SP Classic");
         identity.report(vec!["too short".into()]);
         assert_eq!(identity.next(), None);
+    }
+
+    #[test]
+    fn sim_facts_join_the_identity_as_they_arrive() {
+        let mut identity = Identity::default();
+        // Facts before the strings wait for them.
+        identity.facts(&[0.0, 1.0, 0.0, 0.0, 0.0, 2550.0]);
+        assert_eq!(identity.next(), None);
+        identity.report(reported("C172SP G1000 Passengers"));
+        let facts = identity.next().unwrap().facts;
+        assert_eq!(facts.category.as_deref(), Some("Airplane"));
+        assert_eq!(
+            (facts.engine_type, facts.max_gross_lb),
+            (Some(0), Some(2550))
+        );
+        // A change of a fact alone is emitted; the same facts are not.
+        identity.facts(&[0.0, 1.0, 0.0, 0.0, 0.0, 2550.0]);
+        assert_eq!(identity.next(), None);
+        identity.facts(&[0.0, 1.0, 0.0, 0.0, 0.0, 2600.0]);
+        assert_eq!(identity.next().unwrap().facts.max_gross_lb, Some(2600));
     }
 
     #[test]

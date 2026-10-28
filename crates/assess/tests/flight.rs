@@ -138,6 +138,35 @@ fn the_selected_speed_is_only_a_debrief_fallback() {
     );
 }
 
+/// The profile's eye-to-wheel height replaces the class estimate in B1:
+/// 25 ft instead of the jet's 15 ft lowers the wheel height of the path by
+/// 10 ft, so the same crossing reads 10 ft higher.
+#[test]
+fn the_profile_eye_to_wheel_height_sets_the_threshold_crossing() {
+    let b1 = |profile: &str| {
+        let profiles = ProfileSet::load([("TEST", profile)]).unwrap();
+        let Assessment::Scored { score, .. } = assess(&profiles, true, true) else {
+            panic!("not scored")
+        };
+        criteria(&score, "B1")[0].value
+    };
+    let eye = format!("{PROFILE}eye_to_wheel: {{ value: 25 ft, source: synthetic }}\n");
+    assert!((b1(&eye) - b1(PROFILE) - 10.0).abs() < 1e-9);
+}
+
+/// A helicopter's landing is not given the airplane runway score.
+#[test]
+fn a_helicopter_landing_is_not_assessed() {
+    let heli = format!("{PROFILE}airframe: {{ kind: helicopter }}\n");
+    let profiles = ProfileSet::load([("TEST", heli.as_str())]).unwrap();
+    let missing = vec![NOT_RUNWAY_KIND];
+    assert_eq!(
+        assess(&profiles, true, false),
+        Assessment::Insufficient { missing }
+    );
+    assert!(not_scored_text(&[NOT_RUNWAY_KIND]).starts_with("Not assessed for this aircraft kind"));
+}
+
 #[test]
 fn a_landing_without_a_runway_is_not_scored() {
     let none = ProfileSet::load([]).unwrap();

@@ -187,7 +187,7 @@ shows it as "Stable from 1000 ft" or "Not stable until 380 ft".
 
 | Id | Measured | How | Class | ideal \| tol \| L1 \| L2 \| L3 | Standard |
 |---|---|---|---|---|---|
-| B1 | Threshold crossing height (TCH) | **new**: wheel height above the threshold (RA, else AAL against the threshold elevation) interpolated at `along_m = 0` on the approach, against the wheel height of the 3° path to the target (C): min(target · tan 3°, 50 ft), an eye/antenna height, less the eye-to-wheel height (light 6, turboprop 10, jet 15 ft, from the FAA Order 8260.3 height groups, est). Jet: 35 ft; light to 150 m: 20 ft | all | ref +5/−5 \| +15/−10 \| +25/−20 \| +50/−30 \| +100/−40 ft | S8: 50 ft standard, +200 ft per 10 ft ✔; bands est |
+| B1 | Threshold crossing height (TCH) | **new**: wheel height above the threshold (RA, else AAL against the threshold elevation) interpolated at `along_m = 0` on the approach, against the wheel height of the 3° path to the target (C): min(target · tan 3°, 50 ft), an eye/antenna height, less the eye-to-wheel height (the profile's `eye_to_wheel`, else light 6, turboprop 10, jet 15 ft, from the FAA Order 8260.3 height groups, est). Jet: 35 ft; light to 150 m: 20 ft | all | ref +5/−5 \| +15/−10 \| +25/−20 \| +50/−30 \| +100/−40 ft | S8: 50 ft standard, +200 ft per 10 ft ✔; bands est |
 | B2 | Touchdown IAS | `td.ias_kt` (exists, unused) vs Vref | T/J | Vref −2/+3 \| ±5 (+gust) \| +10/−7 \| +15/−10 \| +25/−15 | S9 ≥ Vref−5, Vref−10 tail clearance ✔; L1, L3 est |
 | | | vs Vapp | light | ≤ Vapp−10 \| ≤ Vapp−5 \| > Vapp \| > Vapp+10 \| > Vapp+20 | POH main wheels first ✔; bands est |
 | B3 | Float time | **new**: time from 50 ft above the runway to main-gear contact | T/J | 8 \| 10 \| 12 \| 15 \| 20 s | S7 RE28 measure ✔; S9 flare 4–8 s ✔; bands est |
@@ -271,12 +271,12 @@ domain. The core set maps as follows:
 | Domain | Rules |
 |---|---|
 | A stability | unstable-speed-above-500, unstable-speed-below-500, unstable-speed-light, high-sink-above-500, high-sink-below-500, high-sink-light, high-sink-light-above-500, bank-above-500, bank-below-500, bank-light, bank-light-above-300, localizer-deviation-above-500, glideslope-deviation-above-500, localizer-deviation-500, glideslope-deviation-500, gear-not-down-500, unstable-sink-500 and unstable-bank-500 (advisory gate notes) |
-| B energy | stall-warning, stall-warning-light, flap-overspeed, vmo-exceedance, gear-extended-overspeed, gear-operating-overspeed |
+| B energy | stall-warning, stall-warning-light, flap-overspeed, vmo-exceedance, mmo-exceedance, gear-extended-overspeed, gear-operating-overspeed |
 | C point | long-landing, short-landing |
 | D lateral | off-centreline-touchdown, crosswind-above-demonstrated |
 | E contact | hard-landing, hard-landing-light, high-sink-touchdown, high-sink-touchdown-light, bounced-landing, tailstrike-risk-landing, hard-landing-inspection |
 | F rollout | tailwind-landing-limit |
-| other (never in a landing score) | tailstrike-risk-takeoff, rejected-takeoff, rejected-takeoff-light, rotation-rate, early-flap-retraction, go-around (advisory) |
+| other (never in a landing score) | tailstrike-risk-takeoff, rejected-takeoff, rejected-takeoff-light, rotation-rate, early-flap-retraction, overweight-landing, go-around (advisory) |
 
 How a finding is scored:
 
@@ -369,6 +369,9 @@ is no break: the recorder keeps no frames while sim time stands still.
   rate and position on the rollout. Without them the landing reads
   "insufficient data": no score, findings only, legacy grade. In a
   challenge the attempt is invalid with check `data`.
+- A helicopter's or a glider's landing is **not assessed for this
+  aircraft kind** (`missing: ["aircraft kind"]`, docs/rules.md
+  "Identification"): the score grades airplane runway landings.
 - **Optional** criteria (A5 without an ILS, F1 for a light aircraft, D2
   without a true heading, A7 before its slice) are **n/a by design**. Their
   domain is scored on what remains. If a whole domain is n/a, its weight

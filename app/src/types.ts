@@ -473,6 +473,17 @@ export interface Airport {
   runways: { width_m: number; ends: RunwayEnd[] }[];
 }
 
+/** How the aircraft was identified (docs/rules.md, "Identification") and what that left unchecked. */
+export interface Identification {
+  /** The step that matched: a type profile by designator, ATC model alias or title alias; else the class from the sim's facts, the weight, or nothing. */
+  matched: "type" | "model" | "title" | "sim" | "weight" | "unknown";
+  airframe: { kind?: "airplane" | "helicopter" | "glider" | "seaplane-amphibian"; engine?: "piston" | "turboprop" | "jet" | "electric"; engines?: number; gear?: "fixed" | "retractable" | "floats" | "skids" };
+  /** The type-limit checks that could not run for want of a profile value, in words. */
+  unchecked: string[];
+  /** False for a helicopter or a glider: no landing score and no runway rules. */
+  runway_landing: boolean;
+}
+
 /** A type-profile value with the document it comes from. */
 export interface Sourced {
   value: number;
@@ -487,6 +498,8 @@ export interface Debrief {
     lfl_version: number;
     profile: string;
     class?: "light" | "transport";
+    /** Absent from a backend before 0.11. */
+    identification?: Identification;
     /** The profile's values by rule name, e.g. `hard_landing_g`, `tail_landing_pitch`. */
     profile_limits?: Record<string, Sourced>;
     /**

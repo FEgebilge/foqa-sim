@@ -5,6 +5,7 @@ import { EmptyState } from "@ui/components/empty-state/empty-state";
 import { api, type ExportFormat } from "../../api";
 import { verdict } from "../../lib/explain";
 import { clock, number, phaseName } from "../../lib/format";
+import { identityNotices } from "../../lib/identity";
 import { levelVar } from "../../lib/palette";
 import { shortcutAllowed } from "../../lib/keys";
 import { openFlights } from "../../lib/route";
@@ -169,11 +170,9 @@ function DebriefView({ debrief, refreshing, onRefresh, onOpenFolder }: { debrief
           The journal ends abruptly at byte {number(flight.damaged_at)} (the sim or the app probably closed mid-flight). The debrief covers everything recorded before that point; later phases, landings and events are missing.
         </Banner>
       ) : null}
-      {!flight.aircraft ? (
-        <Banner tone="info" icon={<UserRoundX size={16} />} title="Aircraft not identified">
-          The sim did not report which aircraft was flown, so type limits (flap speeds, tail clearance, hard-landing inspection) could not be checked. Rules ran with: {flight.profile}.
-        </Banner>
-      ) : null}
+      {identityNotices(flight).map((n) => (
+        <Banner key={n.kind} tone="info" icon={NOTICE_ICON[n.kind]} title={n.title}>{n.body}</Banner>
+      ))}
 
       {/* Replay workspace: on wide screens it fills the window. The timeline is the one slider; under it the map and the
           rebuilt flight display sit side by side in one row (neither turns into a tall column), the charts scroll below. */}
@@ -307,6 +306,12 @@ function CursorReadout({ series, phases, bus }: { series: Series; phases: Debrie
     </dl>
   );
 }
+
+const NOTICE_ICON = {
+  unidentified: <UserRoundX size={16} />,
+  "class-default": <Database size={16} />,
+  "not-assessed": <PlaneLanding size={16} />,
+};
 
 function Banner({ tone, icon, title, children }: { tone: "danger" | "info"; icon: ReactNode; title: string; children: ReactNode }) {
   const color = tone === "danger" ? "var(--danger)" : "var(--accent)";

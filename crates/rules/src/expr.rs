@@ -255,6 +255,7 @@ fn unit_named(word: &str) -> Option<Unit> {
         "hPa" => Unit::Hectopascal,
         "lb" => Unit::Pounds,
         "s" => Unit::Seconds,
+        "M" => Unit::Mach,
         _ => return None,
     })
 }
@@ -442,10 +443,12 @@ impl<S: Scope> Parser<'_, S> {
             self.pos += 1;
             let right = self.unary()?;
             let span = left.span.start..right.span.end;
-            // Scaling only: a unit times a unit has no LFL unit.
+            // Scaling only: a unit times a unit has no LFL unit; a unit
+            // over the same unit is a plain ratio.
             let ty = match (expect_num(&left)?, expect_num(&right)?) {
                 (unit, None) => Ty::Num(unit),
                 (None, unit) if op == Arith::Mul => Ty::Num(unit),
+                (a, b) if op == Arith::Div && a == b => Ty::Num(None),
                 _ => {
                     return Err(Error::new(
                         "only scaling by a plain number is supported",
@@ -648,6 +651,9 @@ mod tests {
         assert_eq!(eval("-vs > 2 * 500 fpm"), Some(1.0));
         assert_eq!(eval("not ap.engaged"), Some(1.0));
         assert_eq!(eval("max(height, 1000 ft) - 50 ft"), Some(950.0));
+        // A unit over the same unit is a plain ratio, scaled back to a unit.
+        assert_eq!(eval("(height / 400 ft - 1) * 100 %"), Some(100.0));
+        assert!(error("height / roll > 1").contains("only scaling"));
     }
 
     #[test]
@@ -694,6 +700,7 @@ mod tests {
         assert_eq!(literal("2 s"), Ok((2.0, Some(Unit::Seconds))));
         assert_eq!(literal("3 deg/s"), Ok((3.0, Some(Unit::DegreesPerSecond))));
         assert_eq!(literal("1.6"), Ok((1.6, None)));
+        assert_eq!(literal("0.82 M"), Ok((0.82, Some(Unit::Mach))));
         assert!(literal("height").is_err());
     }
 }
