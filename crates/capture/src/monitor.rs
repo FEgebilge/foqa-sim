@@ -314,7 +314,7 @@ impl Values<Var> for At<'_> {
             Var::Vs => finite(self.point.vs_fpm),
             Var::Height => finite(self.point.aal_ft),
             Var::Ra => finite(self.point.ra_ft),
-            Var::Td(_) => None,
+            Var::Td(_) | Var::Takeoff(_) => None,
             Var::Profile(field) => self
                 .profile?
                 .value(field, || param(self.frame, "flap.te_angle")),

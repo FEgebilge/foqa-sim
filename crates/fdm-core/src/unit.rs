@@ -7,6 +7,8 @@ pub enum Unit {
     Feet,
     Knots,
     Degrees,
+    /// Angular rate, e.g. the pitch rate at rotation.
+    DegreesPerSecond,
     /// Acceleration in multiples of standard gravity.
     G,
     FeetPerMinute,
@@ -31,6 +33,7 @@ impl Unit {
             Self::Feet => "ft",
             Self::Knots => "kt",
             Self::Degrees => "deg",
+            Self::DegreesPerSecond => "deg/s",
             Self::G => "g",
             Self::FeetPerMinute => "fpm",
             Self::Dots => "dot",

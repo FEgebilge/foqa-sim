@@ -89,6 +89,7 @@ pub enum Var {
     /// Calibrated radio height, ft.
     Ra,
     Td(TdField),
+    Takeoff(TakeoffField),
     /// A value of the flight's type profile; unknown without one.
     Profile(ProfileField),
 }
@@ -114,6 +115,16 @@ pub enum TdField {
     InTdz,
     LongLanding,
     ShortLanding,
+}
+
+/// Values of the takeoff a point belongs to (its takeoff roll to 35 ft and
+/// the initial climb after it), as `takeoff.*`; unknown elsewhere.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TakeoffField {
+    /// Peak pitch rate of the rotation (`analyzer::rotation_rate`), deg/s.
+    RotationRate,
+    /// Trailing-edge flap angle at liftoff, deg.
+    Flap,
 }
 
 /// When a rule is evaluated.
@@ -292,6 +303,7 @@ fn show(x: f64, unit: Option<Unit>, extra: usize) -> String {
     let x = round(x, digits);
     match unit.map(Unit::symbol) {
         Some("deg") => format!("{x:.digits$}°"),
+        Some("deg/s") => format!("{x:.digits$}°/s"),
         Some("") | None => format!("{x:.digits$}"),
         Some(symbol) => format!("{x:.digits$} {symbol}"),
     }
@@ -439,6 +451,11 @@ impl Scope for RuleScope {
             "vs" => (Var::Vs, num(Unit::FeetPerMinute)),
             "height" => (Var::Height, num(Unit::Feet)),
             "ra" => (Var::Ra, num(Unit::Feet)),
+            "takeoff.rotation_rate" => (
+                Var::Takeoff(TakeoffField::RotationRate),
+                num(Unit::DegreesPerSecond),
+            ),
+            "takeoff.flap" => (Var::Takeoff(TakeoffField::Flap), num(Unit::Degrees)),
             "td.sink" if self.touchdown => (Var::Td(TdField::Sink), num(Unit::FeetPerMinute)),
             "td.peak_g" if self.touchdown => (Var::Td(TdField::PeakG), num(Unit::G)),
             "td.pitch" if self.touchdown => (Var::Td(TdField::Pitch), num(Unit::Degrees)),
