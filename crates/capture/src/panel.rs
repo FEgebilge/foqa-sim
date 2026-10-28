@@ -9,6 +9,7 @@
 //! events and landings every few seconds, a reply to a query for a few
 //! seconds.
 
+use std::panic::{self, AssertUnwindSafe};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -328,19 +329,11 @@ pub(crate) fn tee(tee: Tee, mut history: History) {
     } = tee;
     thread::spawn(move || {
         let (mut board, mut link) = (Board::default(), Link::default());
-        loop {
-            match rx.recv_timeout(TICK) {
-                Ok(msg) => {
-                    board.take(&msg, Instant::now());
-                    if let Msg::Happening(h) = msg {
-                        // The receiver is gone only when the app is closing.
-                        let _ = out.send(h);
-                    }
-                }
-                Err(RecvTimeoutError::Timeout) => {}
-                Err(RecvTimeoutError::Disconnected) => break,
-            }
+        forward(rx, out, move |msg| {
             let now = Instant::now();
+            if let Some(msg) = msg {
+                board.take(&msg, now);
+            }
             for reply in history.poll() {
                 board.reply(reply, now);
             }
@@ -365,8 +358,39 @@ pub(crate) fn tee(tee: Tee, mut history: History) {
                     Err(ack) => board.take(&Msg::Ack(ack), now),
                 }
             }
-        }
+        });
     });
+}
+
+/// Passes each happening on `rx` to `out`, and every message (`None` each
+/// `TICK` without one) to the `panel`. Happenings go first, so a panel that
+/// panics cannot hold back a landing or a saved flight: it is reported as
+/// an error status and dropped, and forwarding goes on.
+fn forward(rx: Receiver<Msg>, out: Sender<Happening>, panel: impl FnMut(Option<Msg>)) {
+    let mut panel = Some(panel);
+    loop {
+        let msg = match rx.recv_timeout(TICK) {
+            Ok(msg) => Some(msg),
+            Err(RecvTimeoutError::Timeout) => None,
+            Err(RecvTimeoutError::Disconnected) => break,
+        };
+        if let Some(Msg::Happening(h)) = &msg {
+            // The receiver is gone only when the app is closing.
+            let _ = out.send(h.clone());
+        }
+        let Some(step) = &mut panel else {
+            continue;
+        };
+        if let Err(panic) = panic::catch_unwind(AssertUnwindSafe(|| step(msg))) {
+            let why = (panic.downcast_ref::<&str>().copied())
+                .or(panic.downcast_ref::<String>().map(String::as_str))
+                .unwrap_or("panic");
+            let message = format!("the in-sim panel stopped: {why}");
+            eprintln!("error: {message}");
+            let _ = out.send(Happening::Status(RecorderStatus::Error { message }));
+            panel = None;
+        }
+    }
 }
 
 /// Whether a view command goes to the recorder: with a flight open any
@@ -643,6 +667,24 @@ mod tests {
     use debrief::{Aircraft, Level, Touchdown};
 
     use super::*;
+
+    #[test]
+    fn a_panel_panic_is_reported_and_happenings_still_go_through() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (out, got) = std::sync::mpsc::channel();
+        let connected = Happening::Status(RecorderStatus::Connected);
+        for _ in 0..2 {
+            tx.send(Msg::Happening(connected.clone())).unwrap();
+        }
+        drop(tx);
+        forward(rx, out, |_| panic!("board broke"));
+        let message = "the in-sim panel stopped: board broke".into();
+        let error = Happening::Status(RecorderStatus::Error { message });
+        assert_eq!(
+            got.try_iter().collect::<Vec<_>>(),
+            [connected.clone(), error, connected]
+        );
+    }
 
     fn notice() -> LandingNotice {
         LandingNotice {
