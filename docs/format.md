@@ -4,7 +4,7 @@ Three files, mirroring the aircraft side of a real flight data chain:
 
 | File | Real-world analogue | Content |
 |---|---|---|
-| Raw capture (`.raw.jsonl.gz`) | Sensor bus traffic | Every sim frame, before wiring and sampling |
+| Raw capture (`.raw.jsonl.gz`) | Sensor bus traffic | Every streamed sim frame, before wiring and sampling: all of them on the ground and below 2000 ft radio height, at least 16 Hz of sim time above 2500 ft (`crates/capture/src/live.rs`) |
 | Journal (`.fqj`) | QAR / ARINC 767 recording | Parameters at LFL rates, as the FDAU recorded them |
 | Compact flight (`.fqz`) | Archived download from the QAR | The same records of a closed journal, column-wise and compressed |
 
@@ -176,8 +176,9 @@ designator.
 - Packets carry their own time and are **not** in time order. The touchdown
   pre-trigger buffer is written when the touchdown is detected, after
   later regular samples. Readers sort by `t`.
-- The recorder flushes after every sim frame. A killed process leaves at
-  most one cut-off packet at the end. Readers stop at the first packet that
+- The recorder flushes about once a second, at once after an event, and
+  when the flight closes. A killed process loses at most about the last
+  second and leaves at most one cut-off packet at the end. Readers stop at the first packet that
   is short or fails its CRC and report its offset. Everything before it is
   intact.
 - A packet with a valid CRC but an unknown kind or unknown event code is

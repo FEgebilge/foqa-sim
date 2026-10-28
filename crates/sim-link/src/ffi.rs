@@ -334,6 +334,25 @@ unsafe extern "C" {
     pub fn get_last_sent_packet_id(handle: Handle, send_id: *mut Dword) -> HResult;
 }
 
+/// `WAIT_FAILED`: `WaitForSingleObject` could not wait (an invalid handle).
+pub const WAIT_FAILED: Dword = Dword::MAX;
+
+// Win32 (kernel32, which every Windows program links): the event SimConnect
+// signals when it queues a message (`SimConnect_Open`'s `hEventHandle`).
+unsafe extern "system" {
+    #[link_name = "CreateEventW"]
+    pub fn create_event(
+        attributes: *mut c_void,
+        manual_reset: i32,
+        initial_state: i32,
+        name: *const u16,
+    ) -> Handle;
+    #[link_name = "WaitForSingleObject"]
+    pub fn wait_for_single_object(handle: Handle, milliseconds: Dword) -> Dword;
+    #[link_name = "CloseHandle"]
+    pub fn close_handle(handle: Handle) -> i32;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

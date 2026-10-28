@@ -16,6 +16,7 @@ var FoqaSim = (function () {
     var TOAST_MS = 6000;
     var CONFIRM_MS = 6000;      // a discard waits this long for its second click
     var ACK_WAIT_MS = 8000;
+    var WATCH_MS = 10000;       // "watch" this often while the app is heard: it sends Live, Events and Landings only to an open view
     var TOP_EVENTS = 3;
     var LEVELS = ["high", "medium", "low", "advisory"]; // most severe first
     var PHASE_NAMES = { InitialClimb: "Initial climb", EnRoute: "En route" };
@@ -117,6 +118,7 @@ var FoqaSim = (function () {
         this.now = now || function () { return Date.now(); };
         this.status = null;      // last Status message
         this.statusAt = 0;
+        this.watchAt = -WATCH_MS;
         this.live = null;
         this.liveAt = 0;
         this.events = null;      // last Events message
@@ -167,6 +169,10 @@ var FoqaSim = (function () {
         var msg = JSON.parse(json);
         this.status = msg;
         this.statusAt = this.now();
+        if (this.bus.send && this.statusAt - this.watchAt >= WATCH_MS) {
+            this.watchAt = this.statusAt;
+            this.bus.send(MSG.cmd, JSON.stringify({ v: 2, cmd: "watch" }));
+        }
         if (msg.ack) {
             var t = CMD_TEXT[msg.ack.cmd] || { ok: "Done", fail: "Failed" }, gone = this.pending && this.pending.flight;
             // A discarded flight leaves nothing behind on the board either.

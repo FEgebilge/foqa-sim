@@ -16,6 +16,7 @@ mod service;
 mod session;
 mod views;
 
+use std::collections::VecDeque;
 use std::fs::File;
 use std::io::{self, BufWriter};
 use std::ops::ControlFlow;
@@ -94,8 +95,8 @@ impl Command {
     }
 }
 
-/// `Break` stops recording; a command is carried out before the next item.
-/// One command per report: a second one before it is carried out is lost.
+/// `Break` stops recording; a command is carried out before the next item,
+/// in the order they came when several did.
 pub type Reply = ControlFlow<(), Option<Command>>;
 
 /// What one poll of the simulator gives.
@@ -125,6 +126,11 @@ const WRITE_RETRY_MAX: Duration = Duration::from_secs(5 * 60);
 /// How long after the app places the aircraft a teleport is its own; the
 /// sim reports one within a frame or two, if at all.
 const OWN_TELEPORT: Duration = Duration::from_secs(10);
+/// How often the open flight's journal is flushed to its file, about what
+/// a killed process loses (the raw capture makes the same trade, `raw.rs`):
+/// one write a second instead of one each frame. Events are flushed at
+/// once, as is a quiet journal (paused) and a closing one.
+const FLUSH_EVERY: Duration = Duration::from_secs(1);
 /// Names tried for a new flight, one second apart, before giving up.
 const NAME_TRIES: u64 = 60;
 /// The raw capture's file name ending, as `debrief` lists it.
@@ -175,7 +181,7 @@ fn run(
             r.session.placing(false);
         }
         // A command goes through the session like the sim's own items.
-        let item = match r.replies.command.take() {
+        let item = match r.replies.commands.pop_front() {
             Some(Command::Close) => None,
             Some(Command::Start) => {
                 r.session.start();
@@ -208,6 +214,11 @@ fn run(
                     None => continue,
                 },
                 Polled::Tick => {
+                    // Nothing more may come for long: paused, or about to crash.
+                    if let Some(Err(e)) = r.flight.as_mut().map(FlightFiles::flush) {
+                        r.failed(&e, now);
+                        source.track(None, Action::Close);
+                    }
                     r.report(Progress::Tick);
                     continue;
                 }
@@ -335,18 +346,20 @@ impl<F: FnMut(Progress) -> Reply> Run<'_, F> {
     }
 }
 
-/// What the replies to `record`'s reports ask for.
+/// What the replies to `record`'s reports ask for. One item can take
+/// several reports (a flight opening is `Opened` then `Recorded`), each
+/// with a command.
 #[derive(Default)]
 struct Replies {
     stop: bool,
-    command: Option<Command>,
+    commands: VecDeque<Command>,
 }
 
 impl Replies {
     fn take(&mut self, reply: Reply) {
         match reply {
             ControlFlow::Break(()) => self.stop = true,
-            ControlFlow::Continue(c) => self.command = self.command.take().or(c),
+            ControlFlow::Continue(c) => self.commands.extend(c),
         }
     }
 }
@@ -393,6 +406,7 @@ struct FlightFiles {
     raw_path: PathBuf,
     frames: u64,
     usage: Usage,
+    next_flush: Instant,
 }
 
 impl FlightFiles {
@@ -413,6 +427,7 @@ impl FlightFiles {
             raw_path,
             frames: 0,
             usage: Usage::new(columns),
+            next_flush: Instant::now() + FLUSH_EVERY,
             journal,
         };
         eprintln!("flight started: {name}");
@@ -428,22 +443,35 @@ impl FlightFiles {
             self.frames += 1;
         }
         self.usage.see(item);
+        if matches!(item, Telemetry::Event(_)) || Instant::now() >= self.next_flush {
+            self.flush()?;
+        }
         Ok(())
     }
 
-    /// Completes the raw capture (the journal is flushed per item), then
-    /// reports the flight as `Saved`, or deletes its files and reports
-    /// `Discarded` if it is not a flight (`Usage::verdict`). A raw capture
-    /// that fails to complete does not hold back its journal.
+    fn flush(&mut self) -> io::Result<()> {
+        self.next_flush = Instant::now() + FLUSH_EVERY;
+        self.recorder.flush()
+    }
+
+    /// Completes the journal and the raw capture, then reports the flight
+    /// as `Saved`, or deletes its files and reports `Discarded` if it is not
+    /// a flight (`Usage::verdict`). A raw capture that fails to complete
+    /// does not hold back its journal, nor a journal that fails to flush
+    /// what it has: up to its last intact record it reads back.
     fn finish_with(self, on: &mut impl FnMut(Progress) -> Reply) -> Reply {
         let Self {
             journal,
-            recorder,
+            mut recorder,
             raw,
             raw_path,
             frames,
             usage,
+            next_flush: _,
         } = self;
+        if let Err(e) = recorder.flush() {
+            eprintln!("{}: {e}", journal.display());
+        }
         drop(recorder);
         if let Some(Err(e)) = raw.map(RawWriter::finish) {
             eprintln!("{}: {e}", raw_path.display());
@@ -494,8 +522,6 @@ fn new_journal(dir: &Path, started: u64) -> io::Result<(String, PathBuf, File)> 
 
 #[cfg(test)]
 mod tests {
-    use std::collections::VecDeque;
-
     use recorder::{JournalReader, Record};
 
     use super::*;
@@ -682,6 +708,53 @@ mod tests {
                 .collect();
             assert_eq!(titles, [format!("{icao} test")]);
         }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn commands_answering_two_reports_of_one_item_are_both_carried_out() {
+        let dir = temp("two-commands");
+        let mut opened = None;
+        let mut marks = ["opened", "recorded"].into_iter();
+        script(&dir, frames(0, 30, IZMIR), |p| {
+            if let Progress::Opened(journal) = p {
+                opened = Some(journal.to_path_buf());
+            }
+            ControlFlow::Continue(marks.next().map(|m| Command::Mark(m.into())))
+        });
+        let file = File::open(opened.unwrap()).unwrap();
+        let notes: Vec<_> = JournalReader::new(file)
+            .unwrap()
+            .filter_map(|r| match r.unwrap() {
+                Record::Event(_, SimEvent::PilotReport(note)) => Some(note),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(notes, ["opened", "recorded"]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_journal_is_flushed_each_second_and_at_events() {
+        let dir = temp("flush");
+        let mut flight = FlightFiles::create(&dir, &columns(), false).unwrap();
+        let journal = flight.journal.clone();
+        let on_disk = || std::fs::metadata(&journal).unwrap().len();
+        for t in 0..3 {
+            flight.record(&frame(f64::from(t), IZMIR)).unwrap();
+        }
+        assert_eq!(on_disk(), 0);
+        let mark = Telemetry::Event(SimEvent::PilotReport("bird".into()));
+        flight.record(&mark).unwrap();
+        let marked = on_disk();
+        assert!(marked > 0);
+        flight.record(&frame(3.0, IZMIR)).unwrap();
+        assert_eq!(on_disk(), marked);
+        // A second later.
+        flight.next_flush = Instant::now();
+        flight.record(&frame(4.0, IZMIR)).unwrap();
+        assert!(on_disk() > marked);
+        drop(flight);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
