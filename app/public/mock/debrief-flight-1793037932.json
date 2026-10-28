@@ -2532,6 +2532,17 @@
       "why_it_matters": "A steep, fast descent at 500 ft leaves little height to arrest the sink, a common precursor of hard and short landings.",
       "advice": "Fly a stable path of about 3 degrees (roughly 500-700 fpm in a light aircraft, 700-800 fpm in a jet). More than 1000 fpm at the gate: go around.",
       "detail": "1568 fpm sink, limit 1000 fpm"
+    },
+    {
+      "rule": "pilot-report",
+      "version": 1,
+      "title": "Pilot report",
+      "description": "Gust on short final, pitch dropped. Check the airspeed here.",
+      "level": "advisory",
+      "start_s": 238.5,
+      "end_s": 238.5,
+      "peak_s": 238.5,
+      "measure": ""
     }
   ],
   "series": {

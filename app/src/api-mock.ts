@@ -3,7 +3,7 @@
 import { mockChallenges } from "./lib/challenges-mock";
 import { mockSetup } from "./lib/setup-mock";
 import { mockSites } from "./lib/sites-mock";
-import type { Api } from "./api";
+import type { Api, FlightMeta } from "./api";
 import type { Debrief, FlightSummary, Trends } from "./types";
 
 /** First JSON file that exists. Vite answers a missing file with index.html, so the content type decides. */
@@ -41,6 +41,10 @@ const many = Number(params.get("many") ?? 0);
 const COPY = "~";
 /** Mock flights "deleted" in this page session. */
 const deleted = new Set<string>();
+/** Titles, notes and tags written in this page session, over a sample so the debrief header shows them. */
+const meta = new Map<string, FlightMeta>([
+  ["flight-1793037932", { title: "Evening circuits, gusty", notes: "Wind 040/14G22. Second approach felt low on the base turn; carried 5 kt extra for the gusts.", tags: ["circuits", "crosswind"] }],
+]);
 
 export const mockApi: Api = {
   live: false,
@@ -69,6 +73,10 @@ export const mockApi: Api = {
   },
   async deleteFlight(id) {
     deleted.add(id);
+  },
+  flightMetaGet: async (id) => meta.get(id.split(COPY)[0]!) ?? { tags: [] },
+  async flightMetaSet(id, value) {
+    meta.set(id.split(COPY)[0]!, value);
   },
   debrief: (id) => firstJson<Debrief>(mockFiles(`debrief-${id.split(COPY)[0]}.json`)),
   async recorderStatus() {
