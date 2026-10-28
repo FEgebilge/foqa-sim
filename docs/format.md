@@ -4,7 +4,7 @@ Three files, mirroring the aircraft side of a real flight data chain:
 
 | File | Real-world analogue | Content |
 |---|---|---|
-| Raw capture (`.raw.jsonl.gz`) | Sensor bus traffic | Every sim frame, before wiring and sampling |
+| Raw capture (`.raw.jsonl.gz`) | Sensor bus traffic | Every streamed sim frame, before wiring and sampling: all of them on the ground and below 2000 ft radio height, at least 16 Hz of sim time above 2500 ft (`crates/capture/src/live.rs`) |
 | Journal (`.fqj`) | QAR / ARINC 767 recording | Parameters at LFL rates, as the FDAU recorded them |
 | Compact flight (`.fqz`) | Archived download from the QAR | The same records of a closed journal, column-wise and compressed |
 
