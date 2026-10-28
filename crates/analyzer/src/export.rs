@@ -15,7 +15,7 @@ use parquet::basic::Compression;
 use parquet::errors::Result;
 use parquet::file::metadata::KeyValue;
 use parquet::file::properties::WriterProperties;
-use recorder::SimEvent;
+use recorder::{AttemptPhase, SimEvent};
 
 use crate::Flight;
 
@@ -143,7 +143,28 @@ fn describe(event: &SimEvent, identity: bool) -> (String, String) {
         }
         SimEvent::Flow(flow) => (format!("{flow:?}"), String::new()),
         SimEvent::Airport(airport) => ("Airport".into(), airport.icao.clone()),
-        other => (format!("{other:?}"), String::new()),
+        // The pilot's own note: exported only with identity.
+        SimEvent::PilotReport(note) => (
+            "PilotReport".into(),
+            if identity {
+                note.clone()
+            } else {
+                String::new()
+            },
+        ),
+        // The attempt's reference ties it to an online run: never exported.
+        SimEvent::Attempt(m) => (
+            match m.phase {
+                AttemptPhase::Begin => "AttemptBegin",
+                AttemptPhase::End => "AttemptEnd",
+            }
+            .into(),
+            format!("{} v{}", m.challenge, m.version),
+        ),
+        SimEvent::SimStart => ("SimStart".into(), String::new()),
+        SimEvent::SimStop => ("SimStop".into(), String::new()),
+        SimEvent::Crashed => ("Crashed".into(), String::new()),
+        SimEvent::GearScaledV1 => ("GearScaledV1".into(), String::new()),
     }
 }
 
@@ -151,6 +172,7 @@ fn describe(event: &SimEvent, identity: bool) -> (String, String) {
 mod tests {
     use fdm_core::{Lfl, Sample, SignalId, SimTime};
     use parquet::file::reader::{FileReader, SerializedFileReader};
+    use recorder::AttemptMarker;
     use recorder::JournalWriter;
 
     use super::*;
@@ -183,6 +205,30 @@ mod tests {
             kv.iter()
                 .any(|kv| kv.key == "lfl_version" && kv.value.as_deref() == Some("1"))
         );
+    }
+
+    #[test]
+    fn notes_need_identity_and_attempt_refs_never_go_out() {
+        let note = SimEvent::PilotReport("rough, call me on 0555".into());
+        assert_eq!(
+            describe(&note, false),
+            ("PilotReport".into(), String::new())
+        );
+        assert_eq!(describe(&note, true).1, "rough, call me on 0555");
+        let attempt = SimEvent::Attempt(AttemptMarker {
+            phase: AttemptPhase::End,
+            challenge: "c172-pattern".into(),
+            version: 2,
+            reference: Some("secretref123".into()),
+            reason: Some("stopped".into()),
+        });
+        for identity in [false, true] {
+            let (name, text) = describe(&attempt, identity);
+            assert_eq!(
+                (name.as_str(), text.as_str()),
+                ("AttemptEnd", "c172-pattern v2")
+            );
+        }
     }
 
     #[test]

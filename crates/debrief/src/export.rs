@@ -58,6 +58,12 @@ pub fn events_path(samples: &Path) -> PathBuf {
     samples.with_extension("events.parquet")
 }
 
+/// The second file `format` would write at `path` that already exists: the
+/// OS save dialog confirms only `path` itself.
+pub fn existing_extra(format: Format, path: &Path) -> Option<PathBuf> {
+    Some(events_path(path)).filter(|p| format == Format::Parquet && p.exists())
+}
+
 /// Long-format Parquet of the recorded samples, and the events beside it
 /// (`events_path`). Needs no analysis, so any readable flight exports.
 pub fn parquet(flight: &Flight, options: Options, path: &Path) -> Result<Vec<PathBuf>, Error> {
@@ -647,8 +653,13 @@ fn logbook_note(f: &FlightSummary) -> String {
     )
 }
 
-/// A CSV field, quoted when it holds a comma, a quote or a line break.
+/// A CSV text field, quoted when it holds a comma, a quote or a line break.
+/// One a spreadsheet would run as a formula (`= + - @`, tab, CR) gets a
+/// leading apostrophe (OWASP CSV injection); numbers never pass through here.
 fn csv_field(v: &str) -> String {
+    if v.starts_with(['=', '+', '-', '@', '\t', '\r']) {
+        return csv_field(&format!("'{v}"));
+    }
     match v.contains([',', '"', '\n', '\r']) {
         true => format!("\"{}\"", v.replace('"', "\"\"")),
         false => v.to_owned(),
@@ -656,7 +667,11 @@ fn csv_field(v: &str) -> String {
 }
 
 /// `v` to `decimals`, without trailing zeros: `12.5`, `3`, `-0.25`.
+/// Empty for NaN and infinity.
 fn decimal(v: f64, decimals: usize) -> String {
+    if !v.is_finite() {
+        return String::new();
+    }
     let s = format!("{v:.decimals$}");
     let s = match s.contains('.') {
         true => s.trim_end_matches('0').trim_end_matches('.'),
@@ -1044,6 +1059,34 @@ mod tests {
         assert_eq!(decimal(38.123_456_78, 6), "38.123457");
         assert_eq!(csv_field("a, \"b\""), "\"a, \"\"b\"\"\"");
         assert_eq!(csv_field("plain"), "plain");
+        assert_eq!(decimal(f64::NAN, 4), "");
+        assert_eq!(decimal(f64::INFINITY, 4), "");
+        assert_eq!(decimal(f64::NEG_INFINITY, 4), "");
+    }
+
+    #[test]
+    fn text_a_spreadsheet_would_run_is_defused() {
+        for lead in ["=", "+", "-", "@", "\t", "\r"] {
+            let field = csv_field(&format!("{lead}SUM(A1)"));
+            assert!(field.trim_start_matches('"').starts_with('\''), "{field:?}");
+        }
+        assert_eq!(csv_field("=1,2"), "\"'=1,2\"");
+        assert_eq!(csv_field("a=b"), "a=b");
+    }
+
+    #[test]
+    fn a_second_parquet_file_is_reported_only_when_it_exists() {
+        let dir = std::env::temp_dir().join(format!("foqa-extra-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let out = dir.join("x.parquet");
+        assert_eq!(existing_extra(Format::Parquet, &out), None);
+        std::fs::write(events_path(&out), b"").unwrap();
+        assert_eq!(
+            existing_extra(Format::Parquet, &out),
+            Some(events_path(&out))
+        );
+        assert_eq!(existing_extra(Format::Csv, &out), None);
+        std::fs::remove_dir_all(&dir).unwrap();
         assert_eq!(kml_color("#34b87e", 0x40), "407eb834");
         assert_eq!(xml("a<b & \"c\""), "a&lt;b &amp; &quot;c&quot;");
         assert_eq!(html(&["x]]>".into()]), "<![CDATA[x]]&gt;]]>");

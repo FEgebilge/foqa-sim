@@ -22,7 +22,11 @@ is uploaded. One implementation (`crates/debrief/src/export.rs`, Parquet in
   added only when asked: the menu's "Include the aircraft's title and tail number" (off each
   time the menu opens), `--identity` on the command line. The landing card never names them.
 - Pilot reports (moments marked in the in-sim panel, with their notes) are findings and appear
-  in the KML like any other.
+  in the KML like any other. The Parquet events file carries a pilot note only with identity,
+  and never an attempt's reference.
+- Spreadsheets run text that starts with `=`, `+`, `-`, `@`, a tab or a CR as a formula: CSV
+  text fields (the logbook's) get a leading apostrophe. Numbers are written as they are; a
+  value that is not finite is an empty cell.
 
 ## CLI
 
@@ -33,7 +37,9 @@ fdm logbook <folder|flight> [--identity] [-o file]  # logbook.csv by default
 ```
 
 Without `-o` the file is `<flight id>.<format>` in the current folder. Parquet stays the
-default and writes `<name>.parquet` and `<name>.events.parquet`; it needs no analysis, so it
+default and writes `<name>.parquet` and `<name>.events.parquet` (the CLI overwrites both; the
+app's save dialog confirms the first file, so the app asks again before replacing an existing
+events file, and cancelling writes nothing); it needs no analysis, so it
 also exports a recording without air/ground data. `fdm` prints the files it wrote. For a
 folder, `logbook` reads the flights through its index (`index.json`), like `fdm list`.
 

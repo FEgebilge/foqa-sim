@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use ::debrief::export::{self, Format, Options};
 use tauri::{AppHandle, State};
-use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 
 use crate::commands::{Shared, blocking};
 
@@ -63,6 +63,25 @@ pub async fn export_flight(
         else {
             return Ok(None);
         };
+        // The dialog confirmed `out` only; Parquet writes a second file.
+        if let Some(extra) = export::existing_extra(format, &out) {
+            let replace = app
+                .dialog()
+                .message(format!(
+                    "{} already exists. Replace it too?",
+                    extra.display()
+                ))
+                .title("Export the flight")
+                .kind(MessageDialogKind::Warning)
+                .buttons(MessageDialogButtons::OkCancelCustom(
+                    "Replace".into(),
+                    "Cancel".into(),
+                ))
+                .blocking_show();
+            if !replace {
+                return Ok(None);
+            }
+        }
         let options = Options { identity };
         let fail = |e: ::debrief::Error| format!("{id}: {e}");
         match format {
