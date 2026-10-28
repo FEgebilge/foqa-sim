@@ -90,6 +90,9 @@ export interface CriterionAssessment {
   standard: string;
   /** It set its domain's deduction. */
   sets: boolean;
+  /** A series criterion: when it first left its tolerance band and when it was worst, as the score found them. */
+  first_out_s?: number;
+  worst_s?: number;
 }
 
 export interface FindingAssessment {
@@ -144,6 +147,27 @@ export interface LandingAssessment {
   split_ft: number | null;
   speeds: { vref_kt: number; vapp_kt: number; source: "profile" | "selected"; approximate: boolean; basis: string } | null;
   domains: DomainAssessment[];
+  /** The approach window against the reference approach (docs/reference-approach.md); absent without a runway fix or window. */
+  profile?: ApproachProfile;
+}
+
+/** The approach window's points, oldest first; every other line is read from `Debrief.series` at `t_s`. `null`: no value. */
+export interface ApproachProfile {
+  t_s: number[];
+  /** To the threshold along the extended centreline, positive before it. */
+  dist_nm: (number | null)[];
+  /** Above the runway, as graded. */
+  height_ft: (number | null)[];
+  /** Glideslope deviation in dots, fly-up positive; null without a signal. */
+  gs_dot: (number | null)[];
+  /** Localizer deviation in dots, right of course positive; null without a signal. */
+  loc_dot: (number | null)[];
+  /** The reference path angle, 3.0. */
+  path_deg: number;
+  /** Threshold crossing height of the reference path, 50. */
+  tch_ft: number;
+  top_ft: number;
+  bottom_ft: number;
 }
 
 /**

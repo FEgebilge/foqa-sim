@@ -4,7 +4,7 @@ import "uplot/dist/uPlot.min.css";
 import { Tooltip } from "@ui/components/tooltip/tooltip";
 import { clock, number } from "../../lib/format";
 import { APPROACH_GATES, hardLanding, SINK_LIMIT, type Mark } from "../../lib/references";
-import { alpha, cssVar, levelColor, phaseColor, type Theme } from "../../lib/palette";
+import { alpha, cssVar, levelColor, LINE, phaseColor, REF, type Theme } from "../../lib/palette";
 import { indexAt } from "../../lib/series";
 import { useHover, type TimeBus, type TimeRange } from "../../lib/time";
 import type { Debrief, FlightEvent, Series } from "../../types";
@@ -35,9 +35,6 @@ const SPECS: Spec[] = [
   { id: "att", title: "Attitude", unit: "°", height: 130, digits: 1, zero: true, lines: [{ key: "pitch_deg", label: "Pitch, nose up +" }, { key: "roll_deg", label: "Roll, right +", dash: true }] },
 ];
 
-const LINE = { dark: ["#62c9e3", "#c3aefc"], light: ["#0a6f8c", "#6447c0"] } as const;
-/** Reference lines: neutral grey, so they never read as an event level. */
-const REF = { dark: "#9aa5b8", light: "#5f6b80" } as const;
 const AXIS_WIDTH = 58;
 
 const Swatch = ({ color, dash, width }: { color: string; dash?: boolean; width: number }) => (

@@ -4,13 +4,13 @@
 
 use std::collections::BTreeMap;
 
-use analyzer::RunwayFix;
+use analyzer::{Flight, RunwayFix, Window};
 use assess::{Height, Speeds};
 pub use rules::Level;
 use rules::{Domain, ScoringClass, Sourced};
 use serde::{Deserialize, Serialize};
 
-use crate::{Skills, SkillsSummary};
+use crate::{Skills, SkillsSummary, secs};
 
 /// What the recorder is doing, as the tray and the app header show it.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -301,6 +301,77 @@ pub struct LandingAssessment {
     pub split_ft: Option<f64>,
     pub speeds: Option<Speeds>,
     pub domains: Vec<DomainAssessment>,
+    /// The approach against the reference it was graded by
+    /// (docs/reference-approach.md); absent without a runway fix or window.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profile: Option<ApproachProfile>,
+}
+
+/// Metres in a nautical mile.
+const NM_M: f64 = 1852.0;
+
+/// The standard glide path, ICAO PANS-OPS Vol II (3 deg, RDH 15 m = 50 ft);
+/// FAA AIM 1-1-9.
+pub const PATH_DEG: f64 = 3.0;
+pub const TCH_FT: f64 = 50.0;
+
+/// A landing's approach window against the reference path, parallel arrays
+/// over the window's points (docs/reference-approach.md). `NaN` goes out
+/// as `null`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ApproachProfile {
+    #[serde(serialize_with = "round::<3, _>")]
+    pub t_s: Vec<f64>,
+    /// To the landing threshold along the extended centreline, positive
+    /// before it, nautical miles.
+    #[serde(serialize_with = "round::<3, _>")]
+    pub dist_nm: Vec<f64>,
+    /// Above the runway (radio height, else above the aerodrome), as graded.
+    #[serde(serialize_with = "round::<1, _>")]
+    pub height_ft: Vec<f64>,
+    /// Glideslope deviation, fly-up positive; `NaN` without a signal.
+    #[serde(serialize_with = "round::<2, _>")]
+    pub gs_dot: Vec<f64>,
+    /// Localizer deviation, right of course positive; `NaN` without a signal.
+    #[serde(serialize_with = "round::<2, _>")]
+    pub loc_dot: Vec<f64>,
+    pub path_deg: f64,
+    pub tch_ft: f64,
+    /// The window's top and bottom heights (`windows` of scoring/landing-2.yaml).
+    pub top_ft: f64,
+    pub bottom_ft: f64,
+}
+
+impl ApproachProfile {
+    /// `None` for an empty window.
+    pub fn of(
+        flight: &Flight,
+        fix: &RunwayFix,
+        w: &Window,
+        top_ft: f64,
+        bottom_ft: f64,
+    ) -> Option<Self> {
+        if w.t.is_empty() {
+            return None;
+        }
+        let dist_nm = w.t.iter().map(|&t| {
+            let at = |name| flight.at(name, t);
+            at("pos.lat")
+                .zip(at("pos.lon"))
+                .map_or(f64::NAN, |(lat, lon)| -fix.offsets(lat, lon).0 / NM_M)
+        });
+        Some(Self {
+            t_s: w.t.iter().map(|&t| secs(t)).collect(),
+            dist_nm: dist_nm.collect(),
+            height_ft: w.height_ft.clone(),
+            gs_dot: w.gs_dev_dot.clone(),
+            loc_dot: w.loc_dev_dot.clone(),
+            path_deg: PATH_DEG,
+            tch_ft: TCH_FT,
+            top_ft,
+            bottom_ft,
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -349,6 +420,12 @@ pub struct CriterionAssessment {
     pub standard: String,
     /// It set its domain's loss.
     pub sets: bool,
+    /// For a series criterion, when it first left its tolerance band (its
+    /// persistence held) and when it was worst, as the score found them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub first_out_s: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub worst_s: Option<f64>,
 }
 
 /// The anchors [ideal, tolerance, L1, L2, L3] as resolved for the landing:
