@@ -4,7 +4,7 @@ import { mockChallenges } from "./lib/challenges-mock";
 import { mockSetup } from "./lib/setup-mock";
 import { mockSites } from "./lib/sites-mock";
 import type { Api } from "./api";
-import type { Debrief, FlightSummary, Trends } from "./types";
+import type { Debrief, FlightMeta, FlightSummary, Trends } from "./types";
 
 /** First JSON file that exists. Vite answers a missing file with index.html, so the content type decides. */
 async function firstJson<T>(paths: string[]): Promise<T> {
@@ -39,20 +39,29 @@ const mockFiles = (name: string) => (params.has("samples") ? [`/mock/sample-${na
 /** `?many=150` repeats the mock list to that length, to try search and sort at scale. Copies open their original's debrief. */
 const many = Number(params.get("many") ?? 0);
 const COPY = "~";
-/** Mock flights "deleted" in this page session. */
+/** Mock flights "deleted" (in the trash) in this page session, and the meta edited in it. */
 const deleted = new Set<string>();
+const metaEdits = new Map<string, FlightMeta>();
+const withMeta = (f: FlightSummary): FlightSummary => (metaEdits.has(f.id) ? { ...f, meta: metaEdits.get(f.id) } : f);
+/** As `flight_meta_set` keeps it: trimmed, blank fields dropped, tags without repeats. */
+function normalized({ title, notes, tags = [] }: FlightMeta): FlightMeta {
+  if ((title?.trim().length ?? 0) > 120) throw new Error("The title is longer than 120 characters.");
+  const kept: string[] = [];
+  for (const tag of tags.map((t) => t.trim().replace(/\s+/g, " ")).filter(Boolean)) if (!kept.some((k) => k.toLowerCase() === tag.toLowerCase())) kept.push(tag);
+  return { ...(title?.trim() ? { title: title.trim() } : {}), ...(notes?.trim() ? { notes: notes.trim() } : {}), ...(kept.length ? { tags: kept } : {}) };
+}
 
 export const mockApi: Api = {
   live: false,
   async listFlights() {
     const flights = await firstJson<FlightSummary[]>(mockFiles("flights.json"));
-    if (!(many > flights.length)) return flights.filter((f) => !deleted.has(f.id));
+    if (!(many > flights.length)) return flights.filter((f) => !deleted.has(f.id)).map(withMeta);
     return Array.from({ length: many }, (_, index) => {
       const base = flights[index % flights.length]!;
       if (index < flights.length) return base;
       const started = base.started_utc ? new Date(Date.parse(base.started_utc) - index * 86_400_000 * 0.7).toISOString() : undefined;
       return { ...base, id: `${base.id}${COPY}${index}`, started_utc: started };
-    }).filter((f) => !deleted.has(f.id));
+    }).filter((f) => !deleted.has(f.id)).map(withMeta);
   },
   /** The sample, narrowed to the filter: its landings, counts and mean score follow; the other tables stay as sampled. */
   async trends({ aircraft, airport, days }) {
@@ -67,8 +76,25 @@ export const mockApi: Api = {
       landings: rows, score: keep ? all.score : { mean, median: mean, recent: null, earlier: null },
       by_aircraft: all.by_aircraft.filter((r) => !aircraft || r.icao === aircraft), by_airport: all.by_airport.filter((r) => !airport || r.icao === airport) };
   },
-  async deleteFlight(id) {
-    deleted.add(id);
+  async deleteFlights(ids) {
+    for (const id of ids) deleted.add(id);
+    return { trashed: ids, failed: [] };
+  },
+  async restoreFlights(ids) {
+    const restored = ids.filter((id) => deleted.has(id));
+    for (const id of restored) deleted.delete(id);
+    return restored;
+  },
+  async purgeTrash() {
+    const purged = deleted.size;
+    deleted.clear(); // the mock forgets them, so they come back on a reload
+    return purged;
+  },
+  flightMetaGet: async (id) => (await mockApi.listFlights()).find((f) => f.id === id)?.meta ?? {},
+  async flightMetaSet(id, meta) {
+    const kept = normalized(meta);
+    metaEdits.set(id, kept);
+    return kept;
   },
   debrief: (id) => firstJson<Debrief>(mockFiles(`debrief-${id.split(COPY)[0]}.json`)),
   async recorderStatus() {
@@ -86,11 +112,11 @@ export const mockApi: Api = {
     throw new Error("Opening the flights folder needs the desktop app.");
   },
   async storageUsage() {
-    const flights = await firstJson<FlightSummary[]>(mockFiles("flights.json"));
-    return { flights: flights.length, bytes: flights.length * 1_800_000, folder: "Documents\\FOQA-Sim\\flights" };
+    const flights = (await mockApi.listFlights()).length;
+    return { trash: { flights: deleted.size, bytes: deleted.size * 1_800_000 }, flights, bytes: flights * 1_800_000, folder: "Documents\\FOQA-Sim\\flights" };
   },
   exportFlight: (id, format) => mockExport(`${id.split(COPY)[0]}.${format}`),
-  exportLogbook: () => mockExport("logbook.csv"),
+  exportLogbook: () => mockExport("logbook.csv"), // every flight, whatever `ids` asks
   saveImage: async (png, name) => download(png, name),
   ...mockSetup(params.get("setup")),
   ...mockChallenges(params.get("status")),

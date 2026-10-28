@@ -24,7 +24,160 @@
       "method": "landing-3",
       "score": 77.4,
       "confidence": "full"
+    },
+    "flown": {
+      "airborne_s": 540.5,
+      "distance_nm": 14.2,
+      "max_gs_kt": 112.4,
+      "started_airborne": false,
+      "ended_airborne": false
+    },
+    "kind": "flight",
+    "meta": {
+      "title": "Gusty circuits at Balıkesir",
+      "notes": "Crosswind from the left, about 12 kt. Floated on the second landing.",
+      "tags": [
+        "practice",
+        "crosswind"
+      ]
     }
+  },
+  {
+    "id": "flight-1793037932~a20n",
+    "started_utc": "2026-10-25T19:40:00Z",
+    "duration_s": 4980,
+    "aircraft": {
+      "icao": "A20N",
+      "title": "Airbus A320neo Turkish Airlines"
+    },
+    "departure": "LTFJ",
+    "arrival": "LTAI",
+    "landings": 1,
+    "worst_level": "low",
+    "event_counts": {
+      "advisory": 3,
+      "low": 1,
+      "medium": 0,
+      "high": 0
+    },
+    "assessment": {
+      "grade": "good",
+      "points": 1,
+      "findings": 1,
+      "method": "landing-3",
+      "score": 88.6,
+      "confidence": "full"
+    },
+    "flown": {
+      "airborne_s": 4210,
+      "distance_nm": 412.5,
+      "max_gs_kt": 468.2,
+      "started_airborne": false,
+      "ended_airborne": false
+    },
+    "kind": "flight",
+    "meta": {
+      "title": "VATSIM Antalya fly-in",
+      "tags": [
+        "VATSIM event"
+      ]
+    }
+  },
+  {
+    "id": "flight-1793037932~gate",
+    "started_utc": "2026-10-24T17:02:10Z",
+    "duration_s": 412,
+    "aircraft": {
+      "icao": "A20N",
+      "title": "Airbus A320neo Turkish Airlines"
+    },
+    "departure": "LTFJ",
+    "landings": 0,
+    "event_counts": {
+      "advisory": 0,
+      "low": 0,
+      "medium": 0,
+      "high": 0
+    },
+    "assessment": {
+      "grade": "good",
+      "points": 0,
+      "findings": 0,
+      "method": "landing-3"
+    },
+    "flown": {
+      "airborne_s": 0,
+      "distance_nm": 0,
+      "max_gs_kt": 0,
+      "started_airborne": false,
+      "ended_airborne": false
+    },
+    "kind": "ground_only"
+  },
+  {
+    "id": "flight-1793037932~hop",
+    "started_utc": "2026-10-23T09:15:44Z",
+    "duration_s": 188,
+    "aircraft": {
+      "icao": "C172",
+      "title": "C172SP G1000 Passengers"
+    },
+    "departure": "LTBL",
+    "arrival": "LTBL",
+    "landings": 1,
+    "worst_level": "medium",
+    "event_counts": {
+      "advisory": 1,
+      "low": 0,
+      "medium": 1,
+      "high": 0
+    },
+    "assessment": {
+      "grade": "fair",
+      "points": 3,
+      "findings": 1,
+      "method": "landing-3"
+    },
+    "flown": {
+      "airborne_s": 21,
+      "distance_nm": 0.4,
+      "max_gs_kt": 61,
+      "started_airborne": false,
+      "ended_airborne": false
+    },
+    "kind": "too_short"
+  },
+  {
+    "id": "flight-1793037932~taxi",
+    "started_utc": "2026-10-22T20:30:00Z",
+    "duration_s": 905,
+    "aircraft": {
+      "icao": "C172",
+      "title": "C172SP G1000 Passengers"
+    },
+    "departure": "LTBL",
+    "landings": 0,
+    "worst_level": "advisory",
+    "event_counts": {
+      "advisory": 2,
+      "low": 0,
+      "medium": 0,
+      "high": 0
+    },
+    "assessment": {
+      "grade": "good",
+      "points": 0,
+      "findings": 0,
+      "method": "landing-3"
+    },
+    "flown": {
+      "airborne_s": 0,
+      "distance_nm": 0,
+      "max_gs_kt": 0,
+      "started_airborne": false,
+      "ended_airborne": false
+    },
+    "kind": "ground_only"
   },
   {
     "id": "c172-pattern",
@@ -42,6 +195,19 @@
       "points": 6,
       "findings": 3,
       "method": "points"
+    },
+    "flown": {
+      "airborne_s": 240.3,
+      "distance_nm": 6.1,
+      "max_gs_kt": 98.7,
+      "started_airborne": false,
+      "ended_airborne": false
+    },
+    "kind": "flight",
+    "meta": {
+      "tags": [
+        "practice"
+      ]
     }
   }
 ]
