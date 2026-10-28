@@ -8,8 +8,8 @@ use std::io;
 use std::ops::ControlFlow;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -29,8 +29,6 @@ use crate::{Command, LiveSource, Progress, Reply, record};
 /// wait keeps an idle tray app from polling it many times a second.
 const RETRY_MIN: Duration = Duration::from_secs(2);
 const RETRY_MAX: Duration = Duration::from_secs(15);
-/// How often a wait checks for a stop request.
-const STOP_POLL: Duration = Duration::from_millis(100);
 /// Sim seconds after the last touchdown of a landing before it is analysed:
 /// the recorder's full-rate window after contact, plus time for the
 /// touchdown airport snapshot to arrive. A bounce restarts the wait, so one
@@ -38,8 +36,13 @@ const STOP_POLL: Duration = Duration::from_millis(100);
 const LANDING_AFTER_S: f64 = TOUCHDOWN_WINDOW_US as f64 / 1e6 + 2.0;
 /// The panel's live values, 4 Hz.
 const LIVE_EVERY: Duration = Duration::from_millis(250);
-/// The open flight analysed for the panel, at most one analysis at a time.
+/// The open flight analysed for the panel, at most one analysis at a time,
+/// and only while a view watches and sim time moves on.
 const SNAPSHOT_EVERY: Duration = Duration::from_secs(5);
+/// A snapshot analyses the whole journal so far, so its cost grows with the
+/// flight: the next waits at least this many times the last one's, which
+/// keeps it under 1% of a core (a 10 h flight about every 100 s).
+const SNAPSHOT_COST_FACTOR: u32 = 100;
 
 /// What the service reports.
 #[derive(Debug, Clone, PartialEq)]
@@ -54,16 +57,22 @@ pub enum Happening {
 }
 
 /// Asks a running `Service` to close any open flight and return.
-#[derive(Debug, Clone, Default)]
-pub struct Stopper(Arc<AtomicBool>);
+#[derive(Debug, Clone)]
+pub struct Stopper {
+    stopped: Arc<AtomicBool>,
+    /// Wakes a service waiting for the sim: a `Close`, which with no flight
+    /// open does nothing.
+    wake: Sender<Command>,
+}
 
 impl Stopper {
     pub fn stop(&self) {
-        self.0.store(true, Ordering::Relaxed);
+        self.stopped.store(true, Ordering::Relaxed);
+        let _ = self.wake.send(Command::Close);
     }
 
     fn stopped(&self) -> bool {
-        self.0.load(Ordering::Relaxed)
+        self.stopped.load(Ordering::Relaxed)
     }
 }
 
@@ -113,6 +122,10 @@ pub struct Service {
     raw: bool,
     /// An analysis for the panel is running.
     analysing: Arc<AtomicBool>,
+    /// The last one's cost, microseconds.
+    analysis_us: Arc<AtomicU64>,
+    /// A view showed lately that it is open (`panel::tee`).
+    watched: Arc<AtomicBool>,
     requests: Sender<Command>,
     /// The app's requests (`SimRequests`): `Place`, `Airport` and `Attempt`.
     requested: Receiver<Command>,
@@ -139,9 +152,14 @@ impl Service {
             index: Arc::new(Index::open(&dir)),
             dir,
             station,
-            stopper: Stopper::default(),
+            stopper: Stopper {
+                stopped: Arc::default(),
+                wake: requests.clone(),
+            },
             raw: false,
             analysing: Arc::default(),
+            analysis_us: Arc::default(),
+            watched: Arc::default(),
             requests,
             requested,
         })
@@ -197,6 +215,7 @@ impl Service {
             out,
             commands: commands_tx,
             app: self.app.clone(),
+            watched: self.watched.clone(),
         };
         panel::tee(tee, history);
         // Journals of earlier runs, listed before any new flight exists.
@@ -229,12 +248,14 @@ impl Service {
                     message: e.to_string(),
                 }),
             }
+            // Asleep until the retry, a request (refused at once) or a stop.
             let until = Instant::now() + retry;
-            while !self.stopper.stopped() && Instant::now() < until {
-                for request in self.requested.try_iter() {
-                    request.refuse("not connected to the simulator");
+            while !self.stopper.stopped() {
+                let wait = until.saturating_duration_since(Instant::now());
+                match self.requested.recv_timeout(wait) {
+                    Ok(request) => request.refuse("not connected to the simulator"),
+                    Err(RecvTimeoutError::Timeout | RecvTimeoutError::Disconnected) => break,
                 }
-                thread::sleep(STOP_POLL);
             }
             retry = (retry * 2).min(RETRY_MAX);
         }
@@ -263,6 +284,7 @@ impl Service {
                         monitor: Monitor::new(self.station.clone()),
                         next_live: now,
                         next_snapshot: now,
+                        snapshot_s: None,
                         closing: None,
                     }),
                     touchdown_s: None,
@@ -288,11 +310,13 @@ impl Service {
                         .is_some_and(|t| !(t..t + LANDING_AFTER_S).contains(&sim_time_s));
                     if due {
                         watch.touchdown_s = None;
+                        // The landing's analysis also refreshes the panel.
                         self.report(flight.journal.clone(), link.feed, false, |a| {
-                            a.landing().map(Happening::Landing).into_iter().collect()
+                            let landing = a.landing().map(|n| Happening::Landing(n).into());
+                            landing.into_iter().chain([snapshot(a)]).collect()
                         });
                     }
-                    self.panel(flight, link.feed);
+                    self.panel(flight, link.feed, sim_time_s);
                     command = link.command(flight);
                 }
             }
@@ -311,6 +335,7 @@ impl Service {
                             .map(Happening::Landing)
                             .into_iter()
                             .chain([Happening::FlightSaved(a.summary())])
+                            .map(Msg::from)
                             .collect()
                     });
                     if let Some(cmd) = closing {
@@ -346,16 +371,13 @@ impl Service {
         }
         // The app's requests wait for a frame without a panel command.
         let command = command.or_else(|| self.requested.try_recv().ok());
-        status.set(match (&watch.flight, &watch.fault) {
-            (Some(flight), _) => RecorderStatus::Recording {
-                flight_id: flight.id.clone(),
-                elapsed_s: flight.started.elapsed().as_secs() as f64,
-            },
-            (None, Some(message)) => RecorderStatus::Error {
+        match (&watch.flight, &watch.fault) {
+            (Some(flight), _) => status.recording(&flight.id, flight.started.elapsed()),
+            (None, Some(message)) => status.set(RecorderStatus::Error {
                 message: message.clone(),
-            },
-            (None, None) => RecorderStatus::Connected,
-        });
+            }),
+            (None, None) => status.set(RecorderStatus::Connected),
+        }
         if self.stopper.stopped() {
             ControlFlow::Break(())
         } else {
@@ -363,9 +385,13 @@ impl Service {
         }
     }
 
-    /// The panel's live values at 4 Hz, and every few seconds the flight
-    /// analysed as it stands, on a thread of its own and one at a time.
-    fn panel(&self, flight: &mut OpenFlight, feed: &Sender<Msg>) {
+    /// While a view watches: the panel's live values at 4 Hz, and every
+    /// few seconds of moving sim time the flight analysed as it stands, on
+    /// a thread of its own and one at a time.
+    fn panel(&self, flight: &mut OpenFlight, feed: &Sender<Msg>, sim_time_s: f64) {
+        if !self.watched.load(Ordering::Relaxed) {
+            return;
+        }
         let now = Instant::now();
         if now >= flight.next_live {
             flight.next_live = now + LIVE_EVERY;
@@ -373,24 +399,28 @@ impl Service {
                 let _ = feed.send(Msg::Live(live));
             }
         }
-        if now < flight.next_snapshot || self.analysing.swap(true, Ordering::Acquire) {
+        if now < flight.next_snapshot
+            || flight.snapshot_s == Some(sim_time_s)
+            || self.analysing.swap(true, Ordering::Acquire)
+        {
             return;
         }
-        flight.next_snapshot = now + SNAPSHOT_EVERY;
-        let (station, feed, busy) = (self.station.clone(), feed.clone(), self.analysing.clone());
-        let journal = flight.journal.clone();
+        let cost = Duration::from_micros(self.analysis_us.load(Ordering::Relaxed));
+        flight.next_snapshot = now + SNAPSHOT_EVERY.max(cost * SNAPSHOT_COST_FACTOR);
+        flight.snapshot_s = Some(sim_time_s);
+        let (station, feed, journal) = (self.station.clone(), feed.clone(), flight.journal.clone());
+        let (busy, cost) = (self.analysing.clone(), self.analysis_us.clone());
         thread::spawn(move || {
             let _clear = ClearOnDrop(busy);
+            let started = Instant::now();
             match station.open(&journal) {
                 Ok(a) => {
-                    let _ = feed.send(Msg::Snapshot(Snapshot {
-                        summary: a.summary(),
-                        events: a.events(),
-                        landings: a.landings(),
-                    }));
+                    let _ = feed.send(snapshot(&a));
                 }
                 Err(e) => eprintln!("{}: {e}", journal.display()),
             }
+            let us = u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
+            cost.store(us, Ordering::Relaxed);
         });
     }
 
@@ -403,14 +433,14 @@ impl Service {
         journal: PathBuf,
         feed: &Sender<Msg>,
         closed: bool,
-        pick: impl FnOnce(&Analysis) -> Vec<Happening> + Send + 'static,
+        pick: impl FnOnce(&Analysis) -> Vec<Msg> + Send + 'static,
     ) {
         let (station, feed) = (self.station.clone(), feed.clone());
         thread::spawn(move || {
             match station.open(&journal) {
-                Ok(analysis) => pick(&analysis).into_iter().for_each(|h| {
+                Ok(analysis) => pick(&analysis).into_iter().for_each(|msg| {
                     // The receiver is gone only when the app is closing.
-                    let _ = feed.send(h.into());
+                    let _ = feed.send(msg);
                 }),
                 Err(e) => eprintln!("{}: {e}", journal.display()),
             }
@@ -419,6 +449,15 @@ impl Service {
             }
         });
     }
+}
+
+/// The open flight as the panel shows it.
+fn snapshot(a: &Analysis) -> Msg {
+    Msg::Snapshot(Snapshot {
+        summary: a.summary(),
+        events: a.events(),
+        landings: a.landings(),
+    })
 }
 
 /// Clears the flag when dropped, even by a panic.
@@ -496,6 +535,8 @@ struct OpenFlight {
     monitor: Monitor,
     next_live: Instant,
     next_snapshot: Instant,
+    /// Sim time of the last snapshot: paused, the next waits.
+    snapshot_s: Option<f64>,
     /// The view command closing it: end or discard.
     closing: Option<ViewCommand>,
 }
@@ -507,10 +548,62 @@ struct StatusLine {
 }
 
 impl StatusLine {
+    /// Recording flight `id` for `elapsed`, in whole seconds; only built
+    /// when that changes, not at each frame.
+    fn recording(&mut self, id: &str, elapsed: Duration) {
+        let elapsed_s = elapsed.as_secs() as f64;
+        if let Some(RecorderStatus::Recording {
+            flight_id,
+            elapsed_s: last,
+        }) = &self.last
+            && flight_id == id
+            && *last == elapsed_s
+        {
+            return;
+        }
+        self.set(RecorderStatus::Recording {
+            flight_id: id.to_owned(),
+            elapsed_s,
+        });
+    }
+
     fn set(&mut self, status: RecorderStatus) {
         if self.last.as_ref() != Some(&status) {
             self.last = Some(status.clone());
             let _ = self.feed.send(Happening::Status(status).into());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_recording_status_goes_out_once_a_second() {
+        let (feed, rx) = mpsc::channel();
+        let mut status = StatusLine { feed, last: None };
+        for ms in [0, 400, 999, 1000, 1500, 2000] {
+            status.recording("flight-1", Duration::from_millis(ms));
+        }
+        status.recording("flight-2", Duration::from_secs(2));
+        let sent: Vec<_> = rx
+            .try_iter()
+            .map(|m| match m {
+                Msg::Happening(Happening::Status(RecorderStatus::Recording {
+                    flight_id,
+                    elapsed_s,
+                })) => (flight_id, elapsed_s),
+                other => panic!("{other:?}"),
+            })
+            .collect();
+        let at = |id: &str, s| (id.to_owned(), s);
+        let expected = [
+            at("flight-1", 0.0),
+            at("flight-1", 1.0),
+            at("flight-1", 2.0),
+            at("flight-2", 2.0),
+        ];
+        assert_eq!(sent, expected);
     }
 }
