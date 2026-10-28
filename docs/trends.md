@@ -57,7 +57,7 @@ airborne time, not the recording length.
   | `t_s` | number | first touchdown |
   | `full_stop` | bool | `false` for a touch-and-go |
   | `icao`, `runway` | string? | matched runway |
-  | `score` | number? | landing-2, 0-100 |
+  | `score` | number? | landing-3, 0-100 |
   | `grade` | `good`/`fair`/`poor`? | |
   | `confidence` | `full`/`partial`? | |
   | `domains` | `{domain id: level 0-3 or null}` | null: n/a |
@@ -95,7 +95,7 @@ airborne time, not the recording length.
     { "flight_id": "flight-…", "started_utc": "…", "aircraft": "B738",
       /* the LandingFacts fields */ }
   ],
-  "domains": [                         // landing-2 order
+  "domains": [                         // landing-3 order
     { "id": "stability", "title": "Approach stability", "short": "Approach",
       "graded": 13, "mean_level": 0.6, "level_2_plus": 2 }
   ],

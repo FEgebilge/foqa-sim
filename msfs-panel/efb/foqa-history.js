@@ -280,7 +280,7 @@ var FoqaHistory = (function () {
         return p.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/ (\w)/g, function (m, c) { return " " + c.toLowerCase(); });
     }
 
-    // The landing-2 score (debrief-api.md), "77.4/100", before the grade.
+    // The landing-3 score (debrief-api.md), "77.4/100", before the grade.
     function scoreHtml(f) {
         if (f.score === undefined || f.score === null) return "";
         return '<span class="score">' + f.score.toFixed(1) + '<span class="of">/100</span></span>';
@@ -303,7 +303,7 @@ var FoqaHistory = (function () {
 
     // "Landing score, partial data", or "12 points from 5 findings": what the grade is made of.
     function assessText(f) {
-        if (f.method === "landing-2") return "Landing score" + (f.confidence === "partial" ? " · partial data, not rankable" : "");
+        if (f.method === "landing-3") return "Landing score" + (f.confidence === "partial" ? " · partial data, not rankable" : "");
         if (!f.findings) return "No findings at low or above";
 
         return f.points + (f.points === 1 ? " point" : " points") + " from " + f.findings +

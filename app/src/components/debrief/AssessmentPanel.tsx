@@ -12,7 +12,7 @@ import { AssessmentBreakdown } from "./AssessmentBreakdown";
 interface Props { debrief: Debrief; onSelectEvent: (index: number) => void }
 
 /**
- * The landing-2 assessment of each landing (docs/scoring.md): six area bars, each track as long as its weight and shaded
+ * The landing-3 assessment of each landing (docs/scoring.md): six area bars, each track as long as its weight and shaded
  * by the points it lost in its level's colour; the selected domain opens beside them (below when narrow) to its criteria on
  * their band strips and its event cards, the one that set the deduction marked. Findings outside every landing follow.
  */

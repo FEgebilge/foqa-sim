@@ -21,7 +21,7 @@
       "grade": "fair",
       "points": 6,
       "findings": 2,
-      "method": "landing-2",
+      "method": "landing-3",
       "score": 77.4,
       "confidence": "full"
     },
@@ -122,7 +122,7 @@
       }
     },
     "assessment_detail": {
-      "method": "landing-2",
+      "method": "landing-3",
       "score": 77.4,
       "grade": "fair",
       "confidence": "full",

@@ -69,7 +69,7 @@ export function gearAt(series: Series, t: number): Gear | null {
   return extended >= 0.99 ? { state: "down" } : extended <= 0.01 ? { state: "up" } : { state: "transit", extended };
 }
 
-/** The approach speeds landing-2 graded the landing at or after t with (30 s past its touchdown still counts as it). */
+/** The approach speeds landing-3 graded the landing at or after t with (30 s past its touchdown still counts as it). */
 export function approachSpeedsAt(landings: LandingAssessment[], t: number) {
   const index = landings.findIndex((l) => l.t_s + 30 >= t);
   const speeds = index < 0 ? null : landings[index]!.speeds;
@@ -106,7 +106,7 @@ export interface Instruments {
   vfe: number | null;
   /** The type profile's maximum (VMO, or VNE for a light type). */
   vmo: number | null;
-  /** Reference speeds of the landing ahead, as landing-2 graded it. */
+  /** Reference speeds of the landing ahead, as landing-3 graded it. */
   speeds: ReturnType<typeof approachSpeedsAt>;
 }
 

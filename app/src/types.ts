@@ -16,7 +16,7 @@ export interface Aircraft {
 export type Grade = "good" | "fair" | "poor";
 
 /**
- * The flight graded as a whole: by landing-2 (docs/scoring.md) when a landing was scored (`score` 0-100), else by the
+ * The flight graded as a whole: by landing-3 (docs/scoring.md) when a landing was scored (`score` 0-100), else by the
  * points method. `points` and `findings` are the points method's (each rule broken counts once at its worst level: high 4,
  * medium 2, low 1, advisory 0), kept for one release; older summaries have no `method`.
  */
@@ -25,7 +25,7 @@ export interface Assessment {
   points: number;
   /** Rules broken at low or above. */
   findings: number;
-  method?: "landing-2" | "points";
+  method?: "landing-3" | "points";
   score?: number;
   confidence?: Confidence;
 }
@@ -175,7 +175,7 @@ export interface ApproachProfile {
  * `method: "points"` (no scored landing, or an older backend without `landings`) grades by the parts and bands.
  */
 export interface AssessmentDetail {
-  method?: "landing-2" | "points";
+  method?: "landing-3" | "points";
   score?: number | null;
   grade?: Grade;
   confidence?: Confidence | null;
@@ -281,7 +281,7 @@ export interface LandingFacts {
   full_stop: boolean;
   icao?: string;
   runway?: string;
-  /** landing-2, 0-100. */
+  /** landing-3, 0-100. */
   score?: number;
   grade?: Grade;
   confidence?: Confidence;
@@ -352,7 +352,7 @@ export interface Trends {
   score: { mean: number | null; median: number | null; recent: number | null; earlier: number | null };
   /** Oldest first: the chart and the footprint. */
   landings: TrendLanding[];
-  /** In landing-2 order. */
+  /** In landing-3 order. */
   domains: TrendDomain[];
   /** Most frequent first, then by level. */
   events: TrendEvent[];

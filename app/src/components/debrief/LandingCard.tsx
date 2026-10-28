@@ -43,7 +43,7 @@ export function LandingCard({ index, landing: { touchdown: td, bounces }, events
   const worst = judged[0]?.level;
   const fix = td.runway;
   const width = runwayWidth ?? (fix && debrief.airports.find((a) => a.icao === fix.icao)?.runways.find((r) => r.ends.some((e) => e.runway === fix.runway))?.width_m);
-  // The landing-2 assessment of this landing: its score and the bands the gauges shade.
+  // The landing-3 assessment of this landing: its score and the bands the gauges shade.
   const scored = landingAt(debrief, td.t_s);
   const c = (id: string) => criterion(scored, id);
   const sink = sinkScale(flight, td.sink_fpm, c("E2")), g = gScale(flight, td.peak_g, c("E1")), pitch = pitchScale(flight);

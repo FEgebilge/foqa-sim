@@ -199,16 +199,23 @@ const ROLL_MAX_GAP: usize = 2 * TRACK_HZ as usize;
 
 /// The phase at every track point.
 pub fn phase_labels(track: &Track, cfg: &PhaseConfig) -> Vec<Phase> {
-    Labels::of(track, cfg).into_iter().map(|(p, _)| p).collect()
+    segments(track, cfg)
+        .into_iter()
+        .flatten()
+        .map(|(p, _)| p)
+        .collect()
 }
 
-/// Contiguous phase spans covering the whole track, each with its cause.
+/// Contiguous phase spans covering the whole track, each with its cause; a
+/// break ends one (`Track::segments`).
 pub fn phases(track: &Track, cfg: &PhaseConfig) -> Vec<Span> {
     let mut spans: Vec<Span> = Vec::new();
-    for (i, (phase, cause)) in Labels::of(track, cfg).into_iter().enumerate() {
+    let labels = (segments(track, cfg).into_iter())
+        .flat_map(|s| s.into_iter().enumerate().map(|(k, l)| (l, k == 0)));
+    for (i, ((phase, cause), fresh)) in labels.enumerate() {
         let t = track.t[i];
         match spans.last_mut() {
-            Some(last) if last.phase == phase => last.end = t,
+            Some(last) if last.phase == phase && !fresh => last.end = t,
             last => {
                 if let Some(last) = last {
                     last.end = t;
@@ -260,6 +267,18 @@ fn cause(track: &Track, trigger: Trigger, i: usize, threshold: f64) -> Cause {
         value,
         threshold,
         basis,
+    }
+}
+
+/// Every point's phase with its cause, labelled stretch by stretch between
+/// the sim's breaks, each as a recording of its own: no phase runs across a
+/// slew or teleport.
+fn segments(track: &Track, cfg: &PhaseConfig) -> Vec<Vec<(Phase, Cause)>> {
+    match track.breaks.is_empty() {
+        true => vec![Labels::of(track, cfg)],
+        false => (track.segments().into_iter())
+            .map(|r| Labels::of(&track.slice(r), cfg))
+            .collect(),
     }
 }
 
@@ -328,13 +347,16 @@ impl<'a> Labels<'a> {
             .rev()
             .take_while(|&i| t.on_ground[i] && taxiing(self.label[i].0));
         let roll = a - roll_len(before.map(|i| t.gs_kt[i]), cfg.roll_kt);
+        // Airborne at the first point (the recording, or the stretch after a
+        // break, starts in the air): no takeoff or initial climb.
+        let took_off = a > 0;
         let mut i = a;
-        while i < b && runway_height(t, i).0 < TAKEOFF_END_FT {
+        while took_off && i < b && runway_height(t, i).0 < TAKEOFF_END_FT {
             i += 1;
         }
         self.set(roll..i, Takeoff, Trigger::Roll, cfg.roll_kt);
         let mut j = i;
-        while j < b && j <= leg.peak && aal[j] < cfg.climb_end_ft {
+        while took_off && j < b && j <= leg.peak && aal[j] < cfg.climb_end_ft {
             j += 1;
         }
         self.set(i..j, InitialClimb, Trigger::Liftoff, TAKEOFF_END_FT);
@@ -558,6 +580,41 @@ mod tests {
         air.splice(16..17, [1440.0, 1440.0]);
         let spans = phases(&circuit(&air), &HIGH_PATTERN);
         assert_eq!(sequence(&spans), seq);
+    }
+
+    /// Down to 300 ft, then teleported to 900 ft and down to a landing:
+    /// the climb is the sim's, no go-around; the break and the stretch
+    /// after it start afresh, in the air.
+    #[test]
+    fn no_phase_runs_across_a_break() {
+        use Phase::*;
+        let mut air = up_and_down(1500)[..28].to_vec();
+        let k = 10 + air.len();
+        air.extend(up_and_down(900)[9..].iter().copied());
+        let mut t = circuit(&air);
+        assert!(phase_labels(&t, &T).contains(&GoAround));
+        t.breaks.push(k..k + 2);
+        let spans = phases(&t, &T);
+        let seq = [
+            Takeoff,
+            InitialClimb,
+            EnRoute,
+            Approach,
+            EnRoute,
+            Approach,
+            EnRoute,
+            Approach,
+            Landing,
+            Taxi,
+        ];
+        assert_eq!(sequence(&spans), seq);
+        assert_eq!((spans[4].start, spans[6].start), (t.t[k], t.t[k + 2]));
+        assert!(
+            [4, 6]
+                .iter()
+                .all(|&s| spans[s].cause.trigger == Trigger::Airborne)
+        );
+        assert_eq!(phase_labels(&t, &T).len(), t.len());
     }
 
     #[test]

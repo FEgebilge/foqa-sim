@@ -185,7 +185,7 @@ interface LandingFacts {
   t_s: number;               // first touchdown
   full_stop: boolean;        // false: touch-and-go
   icao?: string; runway?: string;          // matched runway
-  score?: number; grade?: "good" | "fair" | "poor"; confidence?: "full" | "partial";   // landing-2; none when unscored
+  score?: number; grade?: "good" | "fair" | "poor"; confidence?: "full" | "partial";   // landing-3; none when unscored
   domains: Record<"stability" | "energy" | "point" | "lateral" | "contact" | "rollout", number | null>;   // level 0-3, null: n/a; empty when unscored
   sink_fpm: number; peak_g: number;        // first contact
   along_m?: number; cross_m?: number;      // past the threshold; right of the centreline positive
@@ -195,7 +195,7 @@ interface LandingFacts {
   bounces: number;
 }
 
-// The flight graded as a whole, as the flight list shows it: by landing-2
+// The flight graded as a whole, as the flight list shows it: by landing-3
 // (docs/scoring.md) when a landing was scored, else by the points method.
 // `points` and `findings` are the points method's, kept for one release:
 // each rule the flight broke counts once, at its worst level, high 4
@@ -205,7 +205,7 @@ interface Assessment {
   grade: "good" | "fair" | "poor";
   points: number;
   findings: number;       // rules broken at low or above
-  method: "landing-2" | "points";
+  method: "landing-3" | "points";
   score?: number;         // 0-100, to 0.1, with a scored landing
   confidence?: "full" | "partial";
 }
@@ -216,7 +216,7 @@ interface Assessment {
 // findings outside every landing (one: at most Fair, two: Poor). Without a
 // scored landing, `method` is "points" and the parts and bands grade it.
 interface AssessmentDetail {
-  method: "landing-2" | "points";
+  method: "landing-3" | "points";
   score: number | null;
   grade: "good" | "fair" | "poor";
   confidence: "full" | "partial" | null;
@@ -228,7 +228,7 @@ interface AssessmentDetail {
   legacy_findings: number;
   parts: AssessmentPart[];   // points method: most points first, then by rule name; advisories (0 points) last
   bands: GradeBand[];        // points method's scale, low to high: good up to 1, fair up to 5, poor above
-  grades: { good: number; fair: number };   // landing-2's edges: Good from 85, Fair from 60
+  grades: { good: number; fair: number };   // landing-3's edges: Good from 85, Fair from 60
 }
 
 interface CapNote {
@@ -291,7 +291,7 @@ interface DomainAssessment {
 }
 
 interface CriterionAssessment {
-  id: string;                // A1…F2 (scoring/landing-2.yaml)
+  id: string;                // A1…F2 (scoring/landing-3.yaml)
   title: string;
   height: "all" | "above" | "below";   // the half of the approach window (split 500 ft, light 300 ft)
   value: number;             // its worst value, in `unit`; offsets (A1, B1, B2, C1) signed

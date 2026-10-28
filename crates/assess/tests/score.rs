@@ -1,4 +1,4 @@
-//! The landing-2 score from given measures: the worked examples of
+//! The landing-3 score from given measures: the worked examples of
 //! docs/scoring.md §6 as golden tests, the caps, the Data4Safety unstable
 //! rule, n/a redistribution and the flight grade.
 
@@ -8,7 +8,7 @@ use rules::{Domain, Level, RefSpeeds, ScoringClass};
 const FT_PER_M: f64 = 1.0 / 0.3048;
 
 fn method() -> Method {
-    Method::landing_2().unwrap_or_else(|e| panic!("{e}"))
+    Method::landing_3().unwrap_or_else(|e| panic!("{e}"))
 }
 
 fn scalar(id: &str, height: Height, x: f64) -> (String, Value) {
@@ -389,7 +389,7 @@ fn reference_speeds_follow_the_vref_sources() {
 #[test]
 fn a_method_is_checked_when_loaded() {
     let rules = rules::load(include_str!("../../../rules/core.yaml")).unwrap();
-    let yaml = include_str!("../../../scoring/landing-2.yaml");
+    let yaml = include_str!("../../../scoring/landing-3.yaml");
     let err = |from: &str, to: &str| {
         Method::load(&yaml.replace(from, to), &rules)
             .unwrap_err()

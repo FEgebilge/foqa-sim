@@ -284,9 +284,9 @@ function build(id, opts = {}) {
   const parts = Object.values(worstOf).sort((a, b) => (a.rule < b.rule ? -1 : a.rule > b.rule ? 1 : 0)).sort((a, b) => b.points - a.points)
   const points = parts.reduce((a, p) => a + p.points, 0)
   const legacy = { grade: points <= 1 ? "good" : points <= 5 ? "fair" : "poor", points, findings: parts.filter((p) => p.points > 0).length }
-  const scored = landing2({ touchdowns, events: ordered, samples, phases, lastT, cls: opts.class, legacy })
+  const scored = landing3({ touchdowns, events: ordered, samples, phases, lastT, cls: opts.class, legacy })
   const assessment = { ...legacy, method: scored.method, score: scored.score ?? undefined, confidence: scored.confidence ?? undefined }
-  if (scored.method === "landing-2") assessment.grade = scored.grade
+  if (scored.method === "landing-3") assessment.grade = scored.grade
   const assessment_detail = { ...scored, legacy_points: points, legacy_findings: legacy.findings, parts, bands: [{ grade: "good", up_to: 1 }, { grade: "fair", up_to: 5 }, { grade: "poor" }], grades: { good: 85, fair: 60 } }
   const summary = {
     id, started_utc: opts.started, duration_s: r1(lastT), aircraft: opts.aircraft,
@@ -305,10 +305,10 @@ function build(id, opts = {}) {
   return { summary, debrief }
 }
 
-// landing-2 (docs/scoring.md) for the light class, approximated in JS for these synthetic flights only: the scalar criteria
+// landing-3 (docs/scoring.md) for the light class, approximated in JS for these synthetic flights only: the scalar criteria
 // at touchdown, the approach criteria as their worst sample in the window (no sustain), the findings by their rule's domain,
 // the material and undershoot caps and Decision 3's flight grade. Real debriefs come from crates/assess.
-const SCORING = readFileSync(join(import.meta.dirname, "../../scoring/landing-2.yaml"), "utf8").replace(/\r/g, "")
+const SCORING = readFileSync(join(import.meta.dirname, "../../scoring/landing-3.yaml"), "utf8").replace(/\r/g, "")
 const CRITERIA = Object.fromEntries([...SCORING.matchAll(/- id: (\w+)\n\s+title: (.*)\n(?:.*\n)*?\s+source: "(.*)"/g)].map(([, id, title, source]) => [id, { title, source }]))
 const RULE_DOMAIN = Object.fromEntries(readFileSync(join(import.meta.dirname, "../../rules/core.yaml"), "utf8").replace(/\r/g, "").split(/^---$/m)
   .map((doc) => [doc.match(/^rule: (.*)$/m)?.[1], doc.match(/^domain: (\w+)$/m)?.[1]]))
@@ -347,7 +347,7 @@ const ceiling = (score) => (score <= 0 ? "at zero" : score >= 85 ? `at ${score.t
 const itemText = (c) => `${[c.title, c.unit ? c.value_text : null, c.height_text].filter(Boolean).join(" ")} (level ${c.level})`
 const CAUSE = new WeakMap()
 
-function landing2({ touchdowns, events, samples, phases, lastT, cls, legacy }) {
+function landing3({ touchdowns, events, samples, phases, lastT, cls, legacy }) {
   const VREF = 60, VAPP = 65, TRACK_FT = 8.2, M = 1 / FT
   const firsts = touchdowns.filter((td) => !td.bounce)
   const counted = new Set()
@@ -433,7 +433,7 @@ function landing2({ touchdowns, events, samples, phases, lastT, cls, legacy }) {
   const limit = highs === 1 ? 84.9 : highs > 1 ? 59.9 : 100
   if (limit < score) { score = limit; reasons.push(`${highs === 1 ? "A high-severity finding outside the landings holds" : `${highs} high-severity findings outside the landings hold`} the flight ${ceiling(limit)}.`) }
   caps.push(...reasons.map((reason) => ({ kind: "flight", score, title: "The flight grade is held below the landing's score", reason, source: "docs/scoring.md Decision 3: flight grade" })))
-  return { method: "landing-2", score, grade: score >= 85 ? "good" : score >= 60 ? "fair" : "poor", confidence: "full", caps, partial_note: null, graded_by, landings, other_findings }
+  return { method: "landing-3", score, grade: score >= 85 ? "good" : score >= 60 ? "fair" : "poor", confidence: "full", caps, partial_note: null, graded_by, landings, other_findings }
 }
 
 const c172 = { aircraft: { icao: "C172", title: "Cessna Skyhawk G1000 Asobo" }, profile: "C172 profile", class: "light",
