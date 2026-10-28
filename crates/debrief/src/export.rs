@@ -66,11 +66,22 @@ pub fn existing_extra(format: Format, path: &Path) -> Option<PathBuf> {
 
 /// Long-format Parquet of the recorded samples, and the events beside it
 /// (`events_path`). Needs no analysis, so any readable flight exports.
+#[cfg(feature = "parquet")]
 pub fn parquet(flight: &Flight, options: Options, path: &Path) -> Result<Vec<PathBuf>, Error> {
     let events = events_path(path);
     analyzer::export::write_samples(flight, path)?;
     analyzer::export::write_events(flight, &events, options.identity)?;
     Ok(vec![path.to_owned(), events])
+}
+
+/// This build has no Parquet writer (the `parquet` feature).
+#[cfg(not(feature = "parquet"))]
+pub fn parquet(_: &Flight, _: Options, _: &Path) -> Result<Vec<PathBuf>, Error> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "this build has no Parquet export",
+    )
+    .into())
 }
 
 /// Writes the logbook to `path`; how many flights it holds.

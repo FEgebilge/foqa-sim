@@ -8,6 +8,7 @@
 #![forbid(unsafe_code)]
 
 mod approach;
+#[cfg(feature = "parquet")]
 pub mod export;
 mod flight;
 mod landing;

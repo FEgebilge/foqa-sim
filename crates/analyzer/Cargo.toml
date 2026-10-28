@@ -7,11 +7,16 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[features]
+# `export`: Parquet files. Arrow and Parquet are most of this crate's compile
+# time, and only `fdm export` and the app write them.
+parquet = ["dep:arrow-array", "dep:arrow-schema", "dep:parquet"]
+
 [dependencies]
-arrow-array = "60.0.0"
-arrow-schema = "60.0.0"
+arrow-array = { version = "60.0.0", optional = true }
+arrow-schema = { version = "60.0.0", optional = true }
 fdm-core = { path = "../fdm-core" }
-parquet = { version = "60.0.0", default-features = false, features = ["arrow", "snap"] }
+parquet = { version = "60.0.0", default-features = false, features = ["arrow", "snap"], optional = true }
 recorder = { path = "../recorder" }
 
 [dev-dependencies]
