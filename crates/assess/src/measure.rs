@@ -129,6 +129,14 @@ impl Method {
         })
     }
 
+    /// The top and bottom of the landing's approach window, ft above the
+    /// runway: its class's, the top lowered to a challenge gate.
+    pub fn window_ft(&self, l: &Landing) -> (f64, f64) {
+        let window = self.windows[&scoring_class(l.selection)];
+        let top = l.gate_ft.map_or(window.top_ft, |g| g.min(window.top_ft));
+        (top, window.bottom_ft.unwrap_or(l.selection.phases.flare_ft))
+    }
+
     /// The measures of the landing, its speeds and whether it was a full
     /// stop; the missing required data otherwise.
     #[allow(clippy::type_complexity)]
@@ -139,9 +147,7 @@ impl Method {
         let (flight, track) = (l.flight, l.track);
         let td = &l.touchdowns[l.index];
         let class = scoring_class(l.selection);
-        let window = self.windows[&class];
-        let top = l.gate_ft.map_or(window.top_ft, |g| g.min(window.top_ft));
-        let bottom = window.bottom_ft.unwrap_or(l.selection.phases.flare_ft);
+        let (top, bottom) = self.window_ft(l);
         let a = Approach::of(flight, track, td, top, bottom);
         // Slowed to taxi speed on the ground, or still rolling where the
         // recording ends; a liftoff first is a touch-and-go.
@@ -267,7 +273,10 @@ impl Method {
         }
         let tail = profile_value(rules::ProfileField::TailLandingPitch);
         let scalars = [
-            ("A6", configuration(&a, light, window.split_ft, retractable)),
+            (
+                "A6",
+                configuration(&a, light, self.windows[&class].split_ft, retractable),
+            ),
             ("B1", crossing.map(|c| c.height_ft - TCH_FT)),
             ("B2", td.ias_kt.zip(reference).map(|(ias, r)| ias - r)),
             ("B3", a.float_s),

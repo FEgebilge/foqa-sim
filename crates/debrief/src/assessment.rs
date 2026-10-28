@@ -3,16 +3,18 @@
 //! flight graded by its last full-stop landing (Decision 3) and the rest of
 //! the flight. A flight without a scored landing keeps the points method.
 
+use analyzer::Window;
 use assess::{
     CapKind, Height, Landing, LandingScore, Measures, Method, SpeedSource, Speeds, height_text,
     item_text, number,
 };
 pub use assess::{reading_text, value_text};
+use fdm_core::SimTime;
 use rules::{Domain, Level, ScoringClass};
 
 use crate::wire::{
-    Assessment, AssessmentDetail, CapNote, Confidence, CriterionAssessment, DomainAssessment,
-    Event, FindingAssessment, Grade, LandingAssessment, ScoreBands, SideBands,
+    ApproachProfile, Assessment, AssessmentDetail, CapNote, Confidence, CriterionAssessment,
+    DomainAssessment, Event, FindingAssessment, Grade, LandingAssessment, ScoreBands, SideBands,
 };
 use crate::{Analysis, PILOT_REPORT, secs};
 
@@ -127,18 +129,26 @@ impl Analysis<'_> {
             gate_ft: None,
             target_m: None,
         };
-        let t_s = secs(self.touchdowns[k].t);
-        match method.measures(&l) {
+        let td = &self.touchdowns[k];
+        let t_s = secs(td.t);
+        let (top, bottom) = method.window_ft(&l);
+        // The window the score grades, point for point.
+        let w = Window::of(&self.flight, &self.track, td.t, top, bottom);
+        let profile = (td.runway.as_ref())
+            .and_then(|fix| ApproachProfile::of(&self.flight, fix, &w, top, bottom));
+        let (mut wire, score) = match method.measures(&l) {
             Err(missing) => (LandingAssessment::insufficient(t_s, missing), None),
             Ok((m, speeds, full_stop)) => {
                 let score = method.score(&m);
                 let split_ft = method.windows[&m.class].split_ft;
-                let domains = domains(method, &m, &score, split_ft, wire);
+                let domains = domains(method, &m, &score, split_ft, wire, &w.t);
                 let mut wire = LandingAssessment::scored(t_s, &score, speeds, full_stop, domains);
                 wire.split_ft = Some(split_ft);
                 (wire, Some(score))
             }
-        }
+        };
+        wire.profile = profile;
+        (wire, score)
     }
 }
 
@@ -150,7 +160,9 @@ fn domains(
     score: &LandingScore,
     split_ft: f64,
     wire: &impl Fn(usize) -> Option<usize>,
+    window_t: &[SimTime],
 ) -> Vec<DomainAssessment> {
+    let at = |i: Option<usize>| i.and_then(|i| window_t.get(i)).map(|&t| secs(t));
     let available: f64 = score
         .domains
         .iter()
@@ -203,6 +215,8 @@ fn domains(
                         },
                         bands,
                         standard: def.source.clone(),
+                        first_out_s: at(c.first_out),
+                        worst_s: at(c.worst),
                     }
                 })
                 .collect();
@@ -379,6 +393,7 @@ impl LandingAssessment {
             split_ft: None,
             speeds: None,
             domains: Vec::new(),
+            profile: None,
         }
     }
 
@@ -407,6 +422,7 @@ impl LandingAssessment {
             split_ft: None,
             speeds,
             domains,
+            profile: None,
         }
     }
 }

@@ -302,6 +302,16 @@ fn a_series_is_graded_by_its_sustained_worst_and_gives_the_stable_height() {
         .collect();
     assert_eq!(a2, [(Height::Above, 1300.0), (Height::Below, 800.0)]);
     assert_eq!(s.stable_from_ft, Some(600.0));
+    // Where it left the band and where it was worst, as window points: the
+    // lower half never left it.
+    let at: Vec<_> = domain(&s, Domain::Stability)
+        .criteria
+        .iter()
+        .map(|c| (c.level, c.first_out, c.worst))
+        .collect();
+    assert_eq!(at[0].1, Some(1));
+    assert!(at[0].0 >= 1);
+    assert_eq!(at[1], (0, None, Some(3)));
 }
 
 #[test]

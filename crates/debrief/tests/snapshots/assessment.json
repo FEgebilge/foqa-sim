@@ -72,7 +72,8 @@
               "title": "IAS off the approach speed",
               "unit": "kt",
               "value": 5.0,
-              "value_text": "+5 kt"
+              "value_text": "+5 kt",
+              "worst_s": 80.0
             },
             {
               "bands": {
@@ -118,7 +119,8 @@
               "title": "IAS off the approach speed",
               "unit": "kt",
               "value": 5.0,
-              "value_text": "+5 kt"
+              "value_text": "+5 kt",
+              "worst_s": 117.5
             },
             {
               "bands": {
@@ -164,7 +166,8 @@
               "title": "Descent rate",
               "unit": "fpm",
               "value": 750.0504,
-              "value_text": "750 fpm"
+              "value_text": "750 fpm",
+              "worst_s": 45.0
             },
             {
               "bands": {
@@ -210,7 +213,8 @@
               "title": "Descent rate",
               "unit": "fpm",
               "value": 750.0,
-              "value_text": "750 fpm"
+              "value_text": "750 fpm",
+              "worst_s": 112.0
             },
             {
               "bands": {
@@ -256,7 +260,8 @@
               "title": "Bank",
               "unit": "deg",
               "value": 0.0,
-              "value_text": "0°"
+              "value_text": "0°",
+              "worst_s": 80.0
             },
             {
               "bands": {
@@ -302,7 +307,8 @@
               "title": "Bank",
               "unit": "deg",
               "value": 0.0,
-              "value_text": "0°"
+              "value_text": "0°",
+              "worst_s": 117.5
             },
             {
               "bands": {
@@ -348,7 +354,8 @@
               "title": "Pitch",
               "unit": "deg",
               "value": 3.0,
-              "value_text": "3°"
+              "value_text": "3°",
+              "worst_s": 80.0
             },
             {
               "bands": {
@@ -394,7 +401,8 @@
               "title": "Pitch",
               "unit": "deg",
               "value": 3.0,
-              "value_text": "3°"
+              "value_text": "3°",
+              "worst_s": 117.5
             },
             {
               "bands": {

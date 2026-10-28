@@ -159,7 +159,7 @@ impl Approach {
     /// `bottom_ft` above the runway.
     pub fn of(flight: &Flight, track: &Track, td: &Touchdown, top_ft: f64, bottom_ft: f64) -> Self {
         let fix = td.runway.as_ref();
-        let window = window(flight, track, td.t, top_ft, bottom_ft);
+        let window = Window::of(flight, track, td.t, top_ft, bottom_ft);
         let mut config_changes: Vec<_> = window
             .t
             .first()
@@ -249,39 +249,41 @@ fn liftoff(track: &Track, from: usize) -> Option<usize> {
     }
 }
 
-/// The window before the contact at `td`: from just below the last point
-/// above `top_ft` to the first point under `bottom_ft`.
-fn window(flight: &Flight, track: &Track, td: SimTime, top_ft: f64, bottom_ft: f64) -> Window {
-    let leg = before_contact(track, td);
-    let start = leg
-        .clone()
-        .rev()
-        .find(|&i| height(track, i) > top_ft)
-        .map_or(leg.start, |i| i + 1);
-    let end = (start..leg.end)
-        .find(|&i| height(track, i) < bottom_ft)
-        .unwrap_or(leg.end);
-    let range = start..end;
-    let of = |v: &[f64]| v[range.clone()].to_vec();
-    let at = |name| {
-        range
+impl Window {
+    /// The window before the contact at `td`: from just below the last point
+    /// above `top_ft` to the first point under `bottom_ft`.
+    pub fn of(flight: &Flight, track: &Track, td: SimTime, top_ft: f64, bottom_ft: f64) -> Self {
+        let leg = before_contact(track, td);
+        let start = leg
             .clone()
-            .map(|i| flight.at(name, track.t[i]).unwrap_or(f64::NAN))
-            .collect()
-    };
-    Window {
-        t: track.t[range.clone()].to_vec(),
-        height_ft: range.clone().map(|i| height(track, i)).collect(),
-        ias_kt: of(&track.ias_kt),
-        gs_kt: of(&track.gs_kt),
-        sink_fpm: track.vs_fpm[range.clone()].iter().map(|v| -v).collect(),
-        roll_deg: of(&track.roll_deg),
-        pitch_deg: of(&track.pitch_deg),
-        gs_dev_dot: at("nav.gs_dev"),
-        loc_dev_dot: at("nav.loc_dev"),
-        flap_deg: at("flap.te_angle"),
-        gear_pct: at("gear.extended"),
-        range,
+            .rev()
+            .find(|&i| height(track, i) > top_ft)
+            .map_or(leg.start, |i| i + 1);
+        let end = (start..leg.end)
+            .find(|&i| height(track, i) < bottom_ft)
+            .unwrap_or(leg.end);
+        let range = start..end;
+        let of = |v: &[f64]| v[range.clone()].to_vec();
+        let at = |name| {
+            range
+                .clone()
+                .map(|i| flight.at(name, track.t[i]).unwrap_or(f64::NAN))
+                .collect()
+        };
+        Self {
+            t: track.t[range.clone()].to_vec(),
+            height_ft: range.clone().map(|i| height(track, i)).collect(),
+            ias_kt: of(&track.ias_kt),
+            gs_kt: of(&track.gs_kt),
+            sink_fpm: track.vs_fpm[range.clone()].iter().map(|v| -v).collect(),
+            roll_deg: of(&track.roll_deg),
+            pitch_deg: of(&track.pitch_deg),
+            gs_dev_dot: at("nav.gs_dev"),
+            loc_dev_dot: at("nav.loc_dev"),
+            flap_deg: at("flap.te_angle"),
+            gear_pct: at("gear.extended"),
+            range,
+        }
     }
 }
 

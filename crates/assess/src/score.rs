@@ -107,6 +107,12 @@ pub struct CriterionScore {
     pub ell: f64,
     pub level: u8,
     pub loss: f64,
+    /// For a series, the window points (`Measures::heights_ft`) where it
+    /// first left the tolerance band (`ell` past 0.5, persistence held, as
+    /// the stable height reads it) and where it was worst; `None` for one
+    /// value.
+    pub first_out: Option<usize>,
+    pub worst: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -238,7 +244,7 @@ impl Method {
         split: f64,
         ok: &mut [bool],
     ) -> Vec<(Domain, CriterionScore)> {
-        let score = |height, value: f64, ell: f64| {
+        let score = |height, value: f64, ell: f64, at: Option<(Option<usize>, usize)>| {
             let s = CriterionScore {
                 id: c.id.clone(),
                 height,
@@ -246,6 +252,8 @@ impl Method {
                 ell,
                 level: level(ell),
                 loss: self.loss(ell),
+                first_out: at.and_then(|a| a.0),
+                worst: at.map(|a| a.1),
             };
             (c.domain, s)
         };
@@ -254,7 +262,7 @@ impl Method {
                 let (Some(x), Some(band)) = (x, c.band(m.class, *height)) else {
                     return Vec::new();
                 };
-                vec![score(*height, *x, ell(band, &m.context, *x, *x))]
+                vec![score(*height, *x, ell(band, &m.context, *x, *x), None)]
             }
             Value::Series { high, low } => [Height::Above, Height::Below]
                 .into_iter()
@@ -283,7 +291,8 @@ impl Method {
                     } else {
                         high[worst]
                     };
-                    Some(score(height, x, above.max(below)))
+                    let first_out = points.iter().copied().find(|&i| point_ell(i) > 0.5);
+                    Some(score(height, x, above.max(below), Some((first_out, worst))))
                 })
                 .collect(),
         }

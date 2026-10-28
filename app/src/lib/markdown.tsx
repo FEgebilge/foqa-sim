@@ -1,6 +1,7 @@
 import { Fragment, type ReactNode } from "react";
 
-/* A deliberately small Markdown subset for our own bundled devlog text: ## / ### headings, "- " lists, paragraphs,
+/* A deliberately small Markdown subset for our own bundled devlog text: ## / ### headings, "- " lists (one nested level,
+   indented two spaces or more), paragraphs,
    **bold**, `code` and [links](http...). It builds React elements (no HTML strings, no dangerouslySetInnerHTML), so
    nothing in a file can inject markup, and we avoid a dependency for ~40 lines. */
 const INLINE = /\*\*(.+?)\*\*|`([^`]+)`|\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g;
@@ -22,24 +23,35 @@ function inline(text: string): ReactNode[] {
 
 export function Markdown({ source }: { source: string }) {
   const blocks: ReactNode[] = [];
-  let list: string[] = [];
+  let list: { text: string; children: string[] }[] = [];
   let para: string[] = [];
   const flush = () => {
     const key = blocks.length;
-    if (list.length) blocks.push(<ul key={key} className="flex list-disc flex-col gap-1.5 pl-5 marker:text-fg-3">{list.map((item, i) => <li key={i}>{inline(item)}</li>)}</ul>);
+    if (list.length) blocks.push(
+      <ul key={key} className="flex list-disc flex-col gap-1.5 pl-5 marker:text-fg-3">
+        {list.map((item, i) => (
+          <li key={i}>
+            {inline(item.text)}
+            {item.children.length ? <ul className="mt-1.5 flex list-[circle] flex-col gap-1 pl-5">{item.children.map((c, j) => <li key={j}>{inline(c)}</li>)}</ul> : null}
+          </li>
+        ))}
+      </ul>,
+    );
     if (para.length) blocks.push(<p key={key}>{inline(para.join(" "))}</p>);
     list = [];
     para = [];
   };
   for (const line of source.split(/\r?\n/)) {
     const heading = /^(#{2,3})\s+(.*)$/.exec(line);
-    const item = /^[-*]\s+(.*)$/.exec(line);
+    const item = /^( *)[-*]\s+(.*)$/.exec(line);
     if (heading) {
       flush();
       blocks.push(<h3 key={blocks.length} className="mt-1 font-display text-[11px] font-semibold uppercase tracking-wider text-fg-3">{inline(heading[2]!)}</h3>);
     } else if (item) {
       if (para.length) flush();
-      list.push(item[1]!);
+      const parent = list.at(-1);
+      if (item[1]!.length >= 2 && parent) parent.children.push(item[2]!);
+      else list.push({ text: item[2]!, children: [] });
     } else if (line.trim()) {
       if (list.length) flush();
       para.push(line.trim());
