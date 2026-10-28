@@ -1,5 +1,5 @@
-import { useCallback, useEffect } from "react";
-import { Newspaper, PackageCheck, TrendingUp, TriangleAlert, Trophy } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { Newspaper, PackageCheck, Plane, TrendingUp, TriangleAlert, Trophy } from "lucide-react";
 import { Badge } from "@ui/components/badge/badge";
 import { Button } from "@ui/components/button/button";
 import { Tooltip } from "@ui/components/tooltip/tooltip";
@@ -16,9 +16,10 @@ import { RecorderStatusPill } from "./components/RecorderStatusPill";
 import { UpdateNotice } from "./components/UpdateNotice";
 import { SetupScreen } from "./components/setup/SetupScreen";
 import { TrendsScreen } from "./components/trends/TrendsScreen";
+import { appVersion } from "./lib/devlog";
 import { measured, number } from "./lib/format";
 import { LOGO } from "./lib/logo";
-import { CHALLENGES_HREF, challengeHref, DEVLOG_HREF, flightHref, openFlight, openSetup, SETUP_HREF, TRENDS_HREF, useRoute } from "./lib/route";
+import { CHALLENGES_HREF, challengeHref, DEVLOG_HREF, FLIGHTS_HREF, flightHref, openFlight, openSetup, SETUP_HREF, TRENDS_HREF, useRoute } from "./lib/route";
 import { useNotify, useTheme } from "./lib/context";
 import { useBackendEvent, useRecorderStatus, useSetup } from "./lib/use-backend";
 import { useUpdater } from "./lib/use-updater";
@@ -60,10 +61,13 @@ export default function App() {
     <div className="flex min-h-full flex-col">
       <header className="sticky top-0 z-40 border-b border-line bg-[color-mix(in_oklab,var(--background)_88%,transparent)] backdrop-blur">
         <div className="flex h-14 w-full items-center gap-3 px-4 sm:gap-4 sm:px-6 2xl:px-8">
-          <a href="#/" className="flex shrink-0 items-center gap-2.5 text-fg no-underline" aria-label="FOQA-Sim, all flights">
-            <Logo />
-            <span className="hidden font-display text-[15px] font-semibold tracking-tight whitespace-nowrap sm:inline">FOQA-Sim</span>
-          </a>
+          <div className="flex shrink-0 items-baseline gap-2">
+            <a href={FLIGHTS_HREF} className="flex items-center gap-2.5 self-center text-fg no-underline" aria-label="FOQA-Sim, all flights">
+              <Logo />
+              <span className="hidden font-display text-[15px] font-semibold tracking-tight whitespace-nowrap sm:inline">FOQA-Sim</span>
+            </a>
+            <AppVersion />
+          </div>
           {route.screen === "debrief" ? (
             <nav aria-label="Breadcrumb" className="hidden min-w-0 items-center gap-2 text-sm text-fg-3 md:flex">
               <span>/</span><a className="text-fg-2 no-underline hover:text-fg" href="#/">Flights</a><span>/</span>
@@ -93,6 +97,9 @@ export default function App() {
               </a>
             ) : null}
             <RecorderStatusPill status={recorder} />
+            <Button href={FLIGHTS_HREF} variant={route.screen === "flights" || route.screen === "debrief" ? "secondary" : "ghost"} size="sm" aria-label="Flights" aria-current={route.screen === "flights" ? "page" : undefined}>
+              <Plane size={16} aria-hidden="true" /><span className="hidden lg:inline">Flights</span>
+            </Button>
             <Button href={TRENDS_HREF} variant={route.screen === "trends" ? "secondary" : "ghost"} size="sm" aria-label="Trends" aria-current={route.screen === "trends" ? "page" : undefined}>
               <TrendingUp size={16} aria-hidden="true" /><span className="hidden lg:inline">Trends</span>
             </Button>
@@ -127,6 +134,18 @@ export default function App() {
 }
 
 const SETUP_SHOWN = "foqa-sim.setup-shown";
+
+/** The running version beside the name, as desktop apps show it; it opens the release notes. */
+function AppVersion() {
+  const [version, setVersion] = useState<string>();
+  useEffect(() => { appVersion().then(setVersion, () => undefined); }, []);
+  if (!version) return null;
+  return (
+    <Tooltip content="What's new in this version" side="bottom">
+      <a href={DEVLOG_HREF} className="readout hidden text-[11px] text-fg-3 no-underline hover:text-fg sm:inline">v{version}</a>
+    </Tooltip>
+  );
+}
 
 /** Attitude-indicator mark: horizon line and aircraft symbol in a ring. */
 const Logo = () => (

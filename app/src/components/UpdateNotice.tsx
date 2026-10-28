@@ -22,8 +22,8 @@ export function UpdateNotice({ updater }: { updater: Updater }) {
       {notes ? <div className="max-h-64 overflow-y-auto"><Markdown source={state.update.notes || "No release notes."} /></div> : null}
       {installing ? (
         <div className="text-xs text-fg-2" aria-live="polite">
-          <div className="h-1.5 overflow-hidden rounded-full bg-muted"><div className="h-full bg-accent transition-[width]" style={{ width: percent === null ? "100%" : `${percent}%`, opacity: percent === null ? 0.4 : 1 }} /></div>
-          <p className="mt-1">{percent === null ? "Downloading…" : `Downloading… ${percent}%`} The app restarts when it is done.</p>
+          <div className="h-1.5 overflow-hidden rounded-full bg-muted"><div className="h-full bg-accent transition-[width]" style={{ width: percent === null || state.finished ? "100%" : `${percent}%`, opacity: percent === null && !state.finished ? 0.4 : 1 }} /></div>
+          <p className="mt-1">{state.finished ? "Installing… FOQA-Sim will restart." : `${percent === null ? "Downloading…" : `Downloading… ${percent}%`} The app restarts when it is done.`}</p>
         </div>
       ) : (
         <>

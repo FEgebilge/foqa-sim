@@ -24,6 +24,7 @@ export function useRoute(): Route {
   return parse(hash);
 }
 
+export const FLIGHTS_HREF = "#/";
 export const SETUP_HREF = "#/setup";
 export const DEVLOG_HREF = "#/devlog";
 export const TRENDS_HREF = "#/trends";

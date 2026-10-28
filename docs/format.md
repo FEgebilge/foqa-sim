@@ -12,6 +12,7 @@ The raw capture is optional (`foqa-rec --raw`, `FOQA_RAW=1` for the app).
 The recorder compacts each journal when its flight closes, and the journals
 of earlier runs at start-up; `fdm compact` does it by hand. Readers accept
 both journal and compact flight.
+A recording that is not a flight is deleted when it closes instead (journal and raw capture, never listed): under 10 s of frames (the sim also streams them in its menus), or every position at the menu placeholder (lat 0, lon 90, within 0.01 deg). A ground-only session at a real position is kept. Constants in `crates/capture/src/discard.rs`.
 The ground station also keeps a [flight index](#flight-index), a cache of
 the flight list.
 

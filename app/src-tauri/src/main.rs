@@ -15,6 +15,7 @@ mod insim;
 mod library;
 mod links;
 mod setup;
+mod updated;
 
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver};
@@ -69,7 +70,8 @@ macro_rules! handler {
             commands::setup_pick_community,
             exports::export_flight,
             exports::export_logbook,
-            exports::save_image
+            exports::save_image,
+            updated::update_mark
             $(, $extra)*
         ]
     };
@@ -218,6 +220,10 @@ fn main() {
                 }
             })?;
             let tray = Tray::new(app.handle())?;
+            // The installer restarts the app like any start, hidden in the tray: after an update, show it.
+            if updated::take() {
+                show(app.handle(), None);
+            }
             let handle = app.handle().clone();
             thread::spawn(move || relay(&handle, &shared, &tray, rx));
             Ok(())

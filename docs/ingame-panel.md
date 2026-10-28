@@ -277,6 +277,10 @@ Flight history). The ack has `cmd`, `ok` and, on failure, `message`, e.g.
 - `end_flight`: answered once the flight is saved; it is then analysed and
   compacted as usual (`flight-saved` in the app). The next flight opens at
   the sim's next flight start, as after the main menu, or on `start_flight`.
+  If the recording is not a flight (under 10 s, or never left the menu
+  position) it is deleted instead, not saved: the ack is `ok: false` with
+  `message: "nothing to save: …"` and no `flight-saved` follows. A start
+  works as usual after it.
 - `discard_flight`: answered once the flight is closed and its `.fqj`,
   `.fqz` and `.raw.jsonl.gz` are deleted, nothing else.
 - After either, `Status` has `state: "connected"` and no `flight`.

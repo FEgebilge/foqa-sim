@@ -9,7 +9,7 @@ const DAY = 24 * 60 * 60 * 1000;
 export type UpdaterState =
   | { phase: "idle" | "checking" }
   | { phase: "available"; update: AppUpdate }
-  | { phase: "installing"; update: AppUpdate; done: number; total?: number };
+  | { phase: "installing"; update: AppUpdate; done: number; total?: number; finished?: boolean };
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
@@ -66,7 +66,7 @@ export function useUpdater(recording: boolean) {
     setError(undefined);
     setState({ phase: "installing", update, done: 0 });
     try {
-      await api.installUpdate((done, total) => setState({ phase: "installing", update, done, total }));
+      await api.installUpdate((done, total, finished) => setState({ phase: "installing", update, done, total, finished }));
       // The installer ends this process and starts the new version; nothing more to do here.
     } catch (e) {
       setState({ phase: "available", update });
