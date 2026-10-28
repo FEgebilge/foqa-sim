@@ -176,8 +176,9 @@ designator.
 - Packets carry their own time and are **not** in time order. The touchdown
   pre-trigger buffer is written when the touchdown is detected, after
   later regular samples. Readers sort by `t`.
-- The recorder flushes after every sim frame. A killed process leaves at
-  most one cut-off packet at the end. Readers stop at the first packet that
+- The recorder flushes about once a second, at once after an event, and
+  when the flight closes. A killed process loses at most about the last
+  second and leaves at most one cut-off packet at the end. Readers stop at the first packet that
   is short or fails its CRC and report its offset. Everything before it is
   intact.
 - A packet with a valid CRC but an unknown kind or unknown event code is
