@@ -1,5 +1,6 @@
-import type { CSSProperties, ReactNode } from "react";
+import { useState, type CSSProperties, type ReactNode } from "react";
 import { Activity, Fuel, Gauge, Info, Plane, Waves } from "lucide-react";
+import SegmentedControl from "@ui/components/segmented-control/segmented-control";
 import { Tooltip } from "@ui/components/tooltip/tooltip";
 import { duration, fuelUnit, fuelValue, number, phaseName } from "../../lib/format";
 import { BANK_LIMIT_DEG, RIDE_BANDS, ROTATION_RATE_DPS, percent, rideStepOf } from "../../lib/skills";
@@ -22,7 +23,7 @@ export function SkillsPanel({ skills }: { skills: Skills }) {
   if (!allNull(a.airborne_s, a.ap_s, a.at_s, a.ap_off_ft, a.manual_final_s) || a.by_phase.length)
     sections.push(<Section key="auto" icon={<Plane size={14} />} title="Automation" means="How much of the flight the autopilot and autothrottle flew, and where you took over on the approach." source="EASA EOFDM precursor guidance, LOC29: autopilot and autothrottle engagement, disconnect height, time to manual input."><AutomationBody a={a} /></Section>);
   if (!allNull(r.vertical_rms, r.lateral_rms, r.sideslip_rms_deg, r.rotation_rate_dps) || Object.keys(r.max_bank_deg).length)
-    sections.push(<Section key="ride" icon={<Waves size={14} />} title="Ride quality" means="How smooth the flight would feel in the cabin, and how gently it was banked and rotated." source="A band-limited comfort proxy, not ISO 2631 compliance: normal load is sampled at 8 Hz and lateral at 4 Hz, not the 0.5–80 Hz seat measurement. Bands: ISO 2631-1 Annex C. The 30° bank line is an estimate (common airline SOP). Rotation: Airbus, “What about rotation technique”, 2020."><RideBody r={r} /></Section>);
+    sections.push(<Section key="ride" icon={<Waves size={14} />} title="Ride quality" means="How smooth the flight would feel in the cabin, and how gently it was banked and rotated." source="A band-limited comfort proxy, not ISO 2631 compliance: normal load is sampled at 8 Hz and lateral at 4 Hz, not the 0.5–80 Hz seat measurement. Bands: ISO 2631-1 Annex C. The 30° bank line is an estimate (common airline SOP). Rotation: Airbus, “What about rotation technique”, 2020."><RideCard skills={skills} /></Section>);
   if (!allNull(f.fuel_used_kg, f.fuel_kg_h, f.fuel_kg_nm, f.taxi_fuel_kg, f.descent_level_s, f.descent_levels))
     sections.push(<Section key="fuel" icon={<Fuel size={14} />} title="Fuel and descent" means="What the flight burned, and how much of the descent was flown level instead of down." source="ICAO A39-WP/431 §4.6 for the recorded fuel figures (no plan is recorded, so nothing is compared with planned fuel). Level-offs: EUROCONTROL Vertical Flight Efficiency note §3.1, within ±300 fpm for 10 s or more."><FuelBody f={f} /></Section>);
   if (!allNull(c.manual_s, c.reversals_per_min?.pitch, c.reversals_per_min?.roll))
@@ -73,7 +74,7 @@ function AutomationBody({ a }: { a: Skills["automation"] }) {
       <Stats>
         <Stat label="Autopilot engaged" value={ap}>{percent(ap ?? 0)}</Stat>
         <Stat label="Autothrottle engaged" value={at}>{percent(at ?? 0)}</Stat>
-        <Stat label="Autopilot off at" value={a.autoland ? 0 : a.ap_off_ft} tip="not recorded, or the autopilot was not on in the final approach" unit={a.autoland ? undefined : <>ft <Term id="ra">RA</Term></>}>{a.autoland ? <Term id="autoland">autoland</Term> : number(a.ap_off_ft ?? 0)}</Stat>
+        <Stat label="Autopilot off at" value={a.autoland || a.hand_flown ? 0 : a.ap_off_ft} tip="not recorded" unit={a.autoland || a.hand_flown ? undefined : <>ft <Term id="ra">RA</Term></>}>{a.autoland ? <Term id="autoland">autoland</Term> : a.hand_flown ? "Hand-flown" : number(a.ap_off_ft ?? 0)}</Stat>
         <Stat label="Hand-flown final" value={a.manual_final_s}>{duration(a.manual_final_s ?? 0)}</Stat>
       </Stats>
       {a.by_phase.length ? (
@@ -107,7 +108,27 @@ function Track({ fill, color }: { fill: number | null; color: string }) {
   );
 }
 
-function RideBody({ r }: { r: Skills["ride"] }) {
+type RideView = "whole" | "ap" | "manual";
+const RIDE_VIEWS: Record<RideView, string> = { whole: "Whole flight", ap: "Autopilot", manual: "Hand-flown" };
+
+/** The ride body for the whole flight, or for the part flown on the autopilot or by hand when the flight has both. */
+function RideCard({ skills }: { skills: Skills }) {
+  const [view, setView] = useState<RideView>("whole");
+  const m = skills.by_mode ?? null;
+  if (!m) return <RideBody r={skills.ride} whole />;
+  const seconds = { whole: null, ap: m.ap_s, manual: m.manual_s };
+  const r = view === "whole" ? skills.ride : m[view];
+  const empty = view !== "whole" && allNull(r.vertical_rms, r.lateral_rms, r.sideslip_rms_deg) && !Object.keys(r.max_bank_deg).length;
+  return (
+    <>
+      <SegmentedControl label="Ride quality view" options={(Object.keys(RIDE_VIEWS) as RideView[]).map((v) => ({ value: v, label: RIDE_VIEWS[v], accessory: seconds[v] === null ? undefined : <span className="readout text-[10px] text-fg-3">{duration(seconds[v])}</span> }))} value={view} onValueChange={(next) => setView(next as RideView)} wrap />
+      {empty ? <p className="text-xs text-fg-3">Under a minute {view === "ap" ? "on the autopilot" : "hand-flown"}: too short to measure.</p> : null}
+      <RideBody r={r} whole={view === "whole"} />
+    </>
+  );
+}
+
+function RideBody({ r, whole }: { r: Skills["ride"]; whole?: boolean }) {
   const step = rideStepOf(r.ride_band);
   const banks = Object.entries(r.max_bank_deg);
   const bankMax = Math.max(45, ...banks.map(([, v]) => v * 1.1));
@@ -140,12 +161,12 @@ function RideBody({ r }: { r: Skills["ride"] }) {
           ? banks.map(([phase, deg]) => <RefBar key={phase} label={phaseName(phase)} swatch={dot(phase)} value={deg} max={bankMax} at={BANK_LIMIT_DEG} unit="°" over={deg > BANK_LIMIT_DEG} />)
           : <span className="text-sm"><Measure value={null}>{null}</Measure></span>}
       </div>
-      <div className="flex flex-col gap-1">
+      {whole ? <div className="flex flex-col gap-1">
         <div className="text-[11px] text-fg-3">Rotation rate · line at ~{ROTATION_RATE_DPS}°/s (transport class)</div>
         {r.rotation_rate_dps === null
           ? <span className="text-sm"><Measure value={null} missing="not recorded (measured on transport class only)">{null}</Measure></span>
           : <RefBar label="Peak, to 35 ft" value={r.rotation_rate_dps} max={6} at={ROTATION_RATE_DPS} unit="°/s" over={r.rotation_rate_dps > ROTATION_RATE_DPS * 1.5} />}
-      </div>
+      </div> : null}
     </>
   );
 }

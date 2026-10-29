@@ -4,7 +4,8 @@ import { clock, LEVEL_LABEL, phaseName } from "../../lib/format";
 import { contacts, groupLandings } from "../../lib/landings";
 import { levelVar } from "../../lib/palette";
 import { tickStep, useElementWidth, useHover, type TimeBus, type TimeRange } from "../../lib/time";
-import type { Debrief, FlightEvent, PhaseSpan, Touchdown } from "../../types";
+import { apSpans } from "../../lib/series";
+import type { Debrief, FlightEvent, PhaseSpan, Series, Touchdown } from "../../types";
 import { PhasesPanel } from "./PhasesPanel";
 
 const CODES: Record<string, string> = { Standing: "STD", Taxi: "TXI", Takeoff: "TOF", RejectedTakeoff: "RTO", InitialClimb: "ICL", EnRoute: "ENR", Approach: "APR", Landing: "LDG", GoAround: "GA" };
@@ -15,6 +16,8 @@ interface Props {
   phaseValues: Debrief["flight"]["phase_values"];
   events: FlightEvent[];
   touchdowns: Touchdown[];
+  /** For the autopilot lane; without autopilot data the lane is left out. */
+  series: Series;
   range: TimeRange;
   view: TimeRange | null;
   selected: number | null;
@@ -30,7 +33,7 @@ interface Props {
  * The flight at a glance: contiguous CICTT phases on one bar, events above it, touchdowns below.
  * Click the bar to put the cursor at a time; click a phase name to zoom the charts to it.
  */
-export function PhaseTimeline({ phases, phaseValues, events, touchdowns, range, view, selected, bus, onFocus, onZoom, onSelectEvent, controls }: Props) {
+export function PhaseTimeline({ phases, phaseValues, events, touchdowns, series, range, view, selected, bus, onFocus, onZoom, onSelectEvent, controls }: Props) {
   const [barRef, width] = useElementWidth<HTMLDivElement>();
   const hoverRef = useRef<HTMLDivElement>(null);
   const cursorRef = useRef<HTMLDivElement>(null);
@@ -67,13 +70,18 @@ export function PhaseTimeline({ phases, phaseValues, events, touchdowns, range, 
   const step = tickStep(span, Math.max(2, Math.floor(width / 90)));
   const ticks: number[] = [];
   for (let t = Math.ceil(t0 / step) * step; t <= t1; t += step) ticks.push(t);
+  const ap = apSpans(series);
+  // The last disconnect before the final touchdown; none if the autopilot stayed on through it (an earlier one is not it).
+  const landed = touchdowns.filter((td) => !td.bounce).at(-1)?.t_s;
+  const last = landed === undefined ? undefined : ap?.filter((s) => s.start < landed).at(-1);
+  const off = last && landed !== undefined && last.end <= landed ? last.end : undefined;
   const selectedEvent = selected === null ? null : events[selected];
 
   return (
     <section className="panel px-4 pt-3 pb-2" aria-labelledby="timeline-title">
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
         <h2 id="timeline-title" className="eyebrow">Phases and events</h2>
-        <p className="text-xs text-fg-3">Click the bar to place the cursor, a phase name to zoom to it.</p>
+        <p className="text-xs text-fg-3">Click the bar to place the cursor, a phase name to zoom to it.{ap ? <> The <span className="font-medium text-accent">strip</span> under it is the autopilot engaged.</> : null}</p>
         {controls}
       </div>
 
@@ -130,6 +138,25 @@ export function PhaseTimeline({ phases, phaseValues, events, touchdowns, range, 
         <div ref={hoverRef} className="pointer-events-none absolute inset-y-0 hidden w-px bg-[var(--foreground)] opacity-60" />
       </div>
 
+      {/* Autopilot lane */}
+      {ap ? (
+        <div
+          className="relative mt-1 h-2 cursor-crosshair rounded-sm bg-[var(--accent-subtle)]"
+          onClick={(event) => onFocus(timeAt(event))}
+          onMouseMove={(event) => bus.emit(timeAt(event))}
+          onMouseLeave={() => bus.emit(null)}
+          role="img"
+          aria-label={ap.length ? `AP engaged: ${ap.map((s) => `${clock(s.start)} to ${clock(s.end)}`).join("; ")}` : "AP never engaged"}
+        >
+          {ap.map((s, index) => <div key={index} className="pointer-events-none absolute inset-y-0 min-w-px rounded-sm bg-[var(--accent)]" style={{ left: pct(s.start), width: share(s.end - s.start) }} />)}
+          {off === undefined ? null : (
+            <Tooltip content={`Autopilot off · ${clock(off)}`}>
+              <span className="absolute -inset-y-0.5 w-0.5 -translate-x-1/2 bg-[var(--foreground)]" style={{ left: pct(off) }} aria-label={`Autopilot off at ${clock(off)}`} />
+            </Tooltip>
+          )}
+        </div>
+      ) : null}
+
       {/* Touchdowns and time axis */}
       <div className="relative h-9">
         {ticks.map((t) => (
@@ -143,11 +170,11 @@ export function PhaseTimeline({ phases, phaseValues, events, touchdowns, range, 
         ))}
       </div>
 
-      {/* Phase legend doubles as zoom buttons */}
-      <div className="flex flex-wrap items-center gap-1.5 border-t border-line-subtle pt-2">
+      {/* Phase legend doubles as zoom buttons; from xl one row that scrolls sideways, so the replay below keeps its height. */}
+      <div className="flex flex-wrap items-center gap-1.5 border-t border-line-subtle pt-2 xl:flex-nowrap xl:overflow-x-auto xl:pb-1">
         {phases.map((phase, index) => (
           <button key={index} type="button" onClick={() => onZoom([phase.start_s, phase.end_s])}
-            className="inline-flex items-center gap-1.5 rounded-full border border-line px-2 py-0.5 text-xs text-fg-2 hover:border-line-strong hover:text-fg"
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-line px-2 py-0.5 text-xs text-fg-2 hover:border-line-strong hover:text-fg"
             title={`Zoom the charts to ${phaseName(phase.phase)} (${clock(phase.start_s)}–${clock(phase.end_s)})`}>
             <span className="size-2 rounded-full" style={{ background: `var(--phase-${phase.phase}, var(--phase-unknown))` }} aria-hidden="true" />
             {phaseName(phase.phase)}{CODES[phase.phase] ? <span className="readout text-fg-3" aria-hidden="true">· {CODES[phase.phase]}</span> : null}

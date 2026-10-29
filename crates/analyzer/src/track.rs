@@ -209,9 +209,11 @@ impl Track {
     pub(crate) fn slice(&self, r: Range<usize>) -> Self {
         let cut = |v: &[f64]| v[r.clone()].to_vec();
         let alt_ft = cut(&self.alt_ft);
+        // Legs wholly outside `r` are dropped before the shift, which would
+        // otherwise underflow for a leg that ended before it.
         let legs = (self.legs.iter())
+            .filter(|l| l.airborne.start < r.end && r.start < l.airborne.end)
             .map(|l| l.airborne.start.max(r.start) - r.start..l.airborne.end.min(r.end) - r.start)
-            .filter(|a| !a.is_empty())
             .map(|a| Leg {
                 peak: peak(&alt_ft, a.clone()),
                 airborne: a,

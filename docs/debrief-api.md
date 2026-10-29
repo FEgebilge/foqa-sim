@@ -363,8 +363,9 @@ interface Skills {
     ap_s: number | null; at_s: number | null;   // engaged time within airborne_s
     by_phase: { phase: string; s: number; ap_s: number | null; at_s: number | null }[];   // phases with airborne time
     ap_off_ft: number | null;        // last autopilot disconnect of the final approach; null for an autoland
-    manual_final_s: number | null;   // hand-flown, from that disconnect to touchdown
+    manual_final_s: number | null;   // hand-flown, from that disconnect (or the approach start, hand_flown) to touchdown
     autoland: boolean;               // still engaged at contact
+    hand_flown: boolean;             // recorded off through the final approach
   };
   ride: {
     vertical_rms: number | null; ride_band: RideBand | null;
@@ -372,6 +373,10 @@ interface Skills {
     max_bank_deg: Record<string, number>;     // by phase name
     rotation_rate_dps: number | null;         // transport class only
   };
+  by_mode: {                       // null without autopilot data
+    ap_s: number; manual_s: number;  // airborne time on the autopilot / hand-flown
+    ap: Ride; manual: Ride;          // ride over each mode's points; all null under 60 s; no rotation rate
+  } | null;
   fuel: {
     fuel_used_kg: number | null;     // null if fuel rose in between
     fuel_kg_h: number | null; fuel_kg_nm: number | null; taxi_fuel_kg: number | null;

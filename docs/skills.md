@@ -24,7 +24,8 @@ disengagement to manual input.
 | `by_phase` | `[{phase, s, ap_s, at_s}]` for each phase with airborne time, in phase order (take-off and landing only their airborne part) |
 | `ap_off_ft` | Radio height (height above the aerodrome where the radio altimeter is invalid) of the last autopilot disconnect in the final landing's approach phase; `null` if the autopilot was never on in it or for an autoland |
 | `autoland` | The autopilot was still engaged at contact: no disconnect, no hand-flown final |
-| `manual_final_s` | Hand-flown time from that disconnect to touchdown |
+| `manual_final_s` | Hand-flown time from that disconnect to touchdown, or from the approach start when `hand_flown` |
+| `hand_flown` | The autopilot was recorded off through the whole final approach: no disconnect in it |
 
 ## Ride quality
 
@@ -39,6 +40,11 @@ A **band-limited comfort proxy**, not ISO 2631 compliance: the recorder samples 
 | `sideslip_rms_deg` | RMS sideslip, airborne below 10,000 ft above the aerodrome and at 40 kt or more (so out of the take-off and landing roll, where the vane means nothing) | descriptive |
 | `max_bank_deg` | `{phase: peak bank}`, airborne, for each phase with airborne time | 30° (*estimate*: common airline SOP; Boeing FCTM 3.35 limits 15° below V2+15) |
 | `rotation_rate_dps` | Peak pitch rate (over 0.5 s) from rotation, the pitch 1° above its value at the start of the take-off roll, to 35 ft; transport class only | about 3°/s (Airbus, "What about rotation technique", 2020) |
+
+`by_mode` holds the same measures (no rotation rate) over the airborne points flown on the
+autopilot (`ap`) and by hand (`manual`), with each mode's time (`ap_s`, `manual_s`). The
+load is detrended over each whole leg before it is split, so a short stretch is measured as
+it was flown. A mode flown under 60 s has no measures; `null` without autopilot data.
 
 ## Fuel and descent
 

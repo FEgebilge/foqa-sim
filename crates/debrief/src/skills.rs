@@ -47,8 +47,21 @@ const REVERSAL_PCT: f64 = 1.0;
 pub struct Skills {
     pub automation: Automation,
     pub ride: Ride,
+    /// The ride on the autopilot and hand-flown apart; `None` without
+    /// autopilot data.
+    pub by_mode: Option<RideByMode>,
     pub fuel: Fuel,
     pub control: Control,
+}
+
+/// `Ride` over the airborne points flown on the autopilot and by hand; a
+/// mode flown under `MIN_AIRBORNE_S` has no measures.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct RideByMode {
+    pub ap_s: f64,
+    pub manual_s: f64,
+    pub ap: Ride,
+    pub manual: Ride,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -65,6 +78,9 @@ pub struct Automation {
     pub manual_final_s: Option<f64>,
     /// The autopilot was still engaged at contact.
     pub autoland: bool,
+    /// The autopilot was recorded off through the whole final approach:
+    /// no disconnect, and `manual_final_s` is the approach.
+    pub hand_flown: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -202,6 +218,7 @@ impl<'a> Ctx<'a> {
             return Skills {
                 automation: self.automation(),
                 ride: Ride::default(),
+                by_mode: None,
                 fuel: Fuel::default(),
                 control: Control::default(),
             };
@@ -209,6 +226,7 @@ impl<'a> Ctx<'a> {
         Skills {
             automation: self.automation(),
             ride: self.ride(),
+            by_mode: self.by_mode(),
             fuel: self.fuel(),
             control: self.control(),
         }
@@ -259,7 +277,7 @@ impl<'a> Ctx<'a> {
     }
 
     fn automation(&self) -> Automation {
-        let (ap_off_ft, manual_final_s, autoland) = self.disconnect();
+        let (ap_off_ft, manual_final_s, autoland, hand_flown) = self.disconnect();
         Automation {
             airborne_s: r1(Self::s(self.air.len())),
             ap_s: Self::engaged_s(&self.ap, &self.air),
@@ -275,27 +293,30 @@ impl<'a> Ctx<'a> {
             ap_off_ft,
             manual_final_s,
             autoland,
+            hand_flown,
         }
     }
 
     /// The last autopilot disconnect of the final approach: its radio height
-    /// and the hand-flown time to touchdown, and whether it was an autoland
-    /// (no disconnect, no hand-flown time); `None` if the autopilot was not
-    /// on in the approach.
-    fn disconnect(&self) -> (Option<f64>, Option<f64>, bool) {
+    /// and the hand-flown time to touchdown, whether it was an autoland (no
+    /// disconnect, no hand-flown time), and whether the autopilot was
+    /// recorded off through the approach (hand-flown, the approach's time);
+    /// `None` without an approach or autopilot data in it.
+    fn disconnect(&self) -> (Option<f64>, Option<f64>, bool, bool) {
         let track = self.track;
         let Some((td, end)) = self.final_touchdown() else {
-            return (None, None, false);
+            return (None, None, false, false);
         };
         let approach = (self.spans.iter()).rfind(|s| s.phase == Phase::Approach && s.start <= td.t);
         let Some(from) = approach.map(|s| track.index_at(s.start)) else {
-            return (None, None, false);
+            return (None, None, false, false);
         };
         let Some(on) = (from..=end).rfind(|&i| self.ap[i] == Some(true)) else {
-            return (None, None, false);
+            let known = (from..=end).any(|i| self.ap[i].is_some());
+            return (None, known.then(|| r1(Self::s(end - from))), false, known);
         };
         if on == end {
-            return (None, Some(0.0), true);
+            return (None, Some(0.0), true, false);
         }
         let off = on + 1;
         let ft = [track.ra_ft[off], track.aal_ft[off]];
@@ -304,35 +325,68 @@ impl<'a> Ctx<'a> {
             ft.map(|h| r1(h.max(0.0))),
             Some(r1(Self::s(end - off))),
             false,
+            false,
         )
     }
 
     fn ride(&self) -> Ride {
+        Ride {
+            rotation_rate_dps: self.rotation_rate(),
+            ..self.ride_where(|_| true)
+        }
+    }
+
+    fn by_mode(&self) -> Option<RideByMode> {
+        let known = self.air.iter().any(|&i| self.ap[i].is_some());
+        let mode = |on: bool| {
+            let n = self.air.iter().filter(|&&i| self.ap[i] == Some(on)).count();
+            let ride =
+                (Self::s(n) >= MIN_AIRBORNE_S).then(|| self.ride_where(|i| self.ap[i] == Some(on)));
+            (r1(Self::s(n)), ride.unwrap_or_default())
+        };
+        known.then(|| {
+            let ((ap_s, ap), (manual_s, manual)) = (mode(true), mode(false));
+            RideByMode {
+                ap_s,
+                manual_s,
+                ap,
+                manual,
+            }
+        })
+    }
+
+    /// The ride over the airborne points `keep` takes; no rotation rate,
+    /// which is the takeoff's. The load is detrended over each whole leg, so
+    /// a mode's stretches are measured alike.
+    fn ride_where(&self, keep: impl Fn(usize) -> bool) -> Ride {
         let (nz, window) = (&self.track.nz_g, (MOVING_MEAN_S * TRACK_HZ) as usize);
-        let load: Vec<f64> = (self.track.legs.iter())
-            .flat_map(|l| detrended(&nz[l.airborne.clone()], window))
-            .collect();
+        let load = (self.track.legs.iter())
+            .flat_map(|l| detrended(nz, l.airborne.clone(), window))
+            .filter(|&(i, _)| keep(i))
+            .map(|(_, g)| g);
         let (lat, beta) = (self.param("accel.lat"), self.param("sideslip"));
         let aal = &self.track.aal_ft;
         let ias = &self.track.ias_kt;
-        let low = (self.air.iter())
-            .filter(|&&i| aal[i] < SIDESLIP_MAX_AAL_FT && ias[i] >= SIDESLIP_MIN_IAS_KT);
-        let vertical_rms = rms(load.into_iter()).map(|g| g * G_MS2);
+        let air = || self.air.iter().copied().filter(|&i| keep(i));
+        let low = air().filter(|&i| aal[i] < SIDESLIP_MAX_AAL_FT && ias[i] >= SIDESLIP_MIN_IAS_KT);
+        let vertical_rms = rms(load).map(|g| g * G_MS2);
         Ride {
             vertical_rms: vertical_rms.map(r2),
             ride_band: vertical_rms.map(ride_band),
-            lateral_rms: rms((self.air.iter())
-                .map(|&i| side_force(lat[i], self.track.roll_deg[i], self.track.pitch_deg[i])))
+            lateral_rms: rms(
+                air().map(|i| side_force(lat[i], self.track.roll_deg[i], self.track.pitch_deg[i]))
+            )
             .map(|g| r2(g * G_MS2)),
-            sideslip_rms_deg: rms(low.map(|&i| beta[i])).map(r2),
+            sideslip_rms_deg: rms(low.map(|i| beta[i])).map(r2),
             max_bank_deg: (self.air_by_phase().into_iter())
                 .filter_map(|(p, idx)| {
-                    let bank = idx.iter().map(|&i| self.track.roll_deg[i].abs());
+                    let kept = idx.into_iter().filter(|&i| keep(i));
+                    let bank = kept.map(|i| self.track.roll_deg[i].abs());
                     let peak = bank.filter(|b| b.is_finite()).max_by(f64::total_cmp);
                     Some((p.name(), r1(peak?)))
                 })
                 .collect(),
-            rotation_rate_dps: self.rotation_rate(),
+            rotation_rate_dps: None,
         }
     }
 
@@ -464,18 +518,25 @@ fn rms(v: impl Iterator<Item = f64>) -> Option<f64> {
     (!v.is_empty()).then(|| (v.iter().map(|x| x * x).sum::<f64>() / v.len() as f64).sqrt())
 }
 
-/// The finite values of `v` minus their moving mean over `window` points.
-fn detrended(v: &[f64], window: usize) -> Vec<f64> {
-    let v: Vec<f64> = v.iter().copied().filter(|x| x.is_finite()).collect();
+/// The finite points of `v` in `r`, each with its value minus the moving
+/// mean of those points over `window`.
+fn detrended(v: &[f64], r: Range<usize>, window: usize) -> Vec<(usize, f64)> {
+    let pts: Vec<(usize, f64)> = r
+        .map(|i| (i, v[i]))
+        .filter(|(_, x)| x.is_finite())
+        .collect();
     let mut sum = vec![0.0];
-    sum.extend(v.iter().scan(0.0, |acc, x| {
+    sum.extend(pts.iter().scan(0.0, |acc, (_, x)| {
         *acc += x;
         Some(*acc)
     }));
-    (0..v.len())
-        .map(|i| {
-            let (lo, hi) = (i.saturating_sub(window / 2), (i + window / 2).min(v.len()));
-            v[i] - (sum[hi] - sum[lo]) / (hi - lo) as f64
+    (0..pts.len())
+        .map(|k| {
+            let (lo, hi) = (
+                k.saturating_sub(window / 2),
+                (k + window / 2).min(pts.len()),
+            );
+            (pts[k].0, pts[k].1 - (sum[hi] - sum[lo]) / (hi - lo) as f64)
         })
         .collect()
 }
@@ -606,17 +667,19 @@ mod tests {
     fn autopilot_disconnect_height() {
         let off = |from: f64, to: f64| {
             let a = fly_skills(|t, p| p.ap = (from..to).contains(&t)).automation;
-            (a.ap_off_ft, a.manual_final_s, a.autoland)
+            (a.ap_off_ft, a.manual_final_s, a.autoland, a.hand_flown)
         };
         // 20 s before touchdown at 20 ft/s.
-        let (ft, manual, _) = off(60.0, 280.0);
+        let (ft, manual, _, hand_flown) = off(60.0, 280.0);
         near(ft, 400.0, 30.0);
         near(manual, 20.0, 1.0);
+        assert!(!hand_flown);
         // Still engaged at contact: an autoland.
-        let (ft, manual, autoland) = off(60.0, 320.0);
-        assert_eq!((ft, manual, autoland), (None, Some(0.0), true));
-        // Off before the approach began (250 s): never on in it.
-        assert_eq!(off(60.0, 200.0), (None, None, false));
+        assert_eq!(off(60.0, 320.0), (None, Some(0.0), true, false));
+        // Off before the approach began (250 s): the approach is hand-flown.
+        let (ft, manual, autoland, hand_flown) = off(60.0, 200.0);
+        assert_eq!((ft, autoland, hand_flown), (None, false, true));
+        near(manual, 50.0, 1.5);
         let a = fly_skills(|t, p| p.ap = (60.0..200.0).contains(&t)).automation;
         near(a.ap_s, 140.0, 1.0);
         assert_eq!(off(0.0, 0.0).0, None);
@@ -627,6 +690,12 @@ mod tests {
         let s = fly_skills(|_, p| p.lost = &["AUTOPILOT MASTER"]);
         assert_eq!((s.automation.ap_s, s.automation.at_s), (None, None));
         assert_eq!(s.automation.ap_off_ft, None);
+        assert_eq!(s.by_mode, None);
+        // No autopilot data is not a hand-flown approach.
+        assert_eq!(
+            (s.automation.manual_final_s, s.automation.hand_flown),
+            (None, false)
+        );
         assert_eq!(s.control.manual_s, None);
         assert_eq!(s.control.reversals_per_min.pitch, None);
         let f = &s.fuel;
@@ -669,9 +738,36 @@ mod tests {
     #[test]
     fn detrending_and_rms_ignore_missing_values() {
         let v = [1.0, f64::NAN, 3.0];
-        assert_eq!(detrended(&v, 16), [-1.0, 1.0]);
+        assert_eq!(detrended(&v, 0..3, 16), [(0, -1.0), (2, 1.0)]);
         assert_eq!(rms([3.0, f64::NAN, 4.0].into_iter()), Some(12.5_f64.sqrt()));
         assert_eq!(rms(std::iter::empty()), None);
+    }
+
+    #[test]
+    fn the_ride_is_measured_on_the_autopilot_and_by_hand_apart() {
+        // Smooth on the autopilot (60–180 s), a 0.1 g bump of 1 s by hand.
+        let s = fly_skills(|t, p| {
+            p.ap = (60.0..180.0).contains(&t);
+            if !p.ap {
+                p.g = 1.0 + 0.1 * (std::f64::consts::TAU * t).sin();
+            }
+        });
+        let m = s.by_mode.expect("autopilot data");
+        near(Some(m.ap_s), 120.0, 1.0);
+        near(Some(m.ap_s + m.manual_s), s.automation.airborne_s, 0.5);
+        near(m.manual.vertical_rms, 0.1 / 2.0_f64.sqrt() * G_MS2, 0.1);
+        assert!(m.ap.vertical_rms.unwrap() < 0.2);
+        assert!(m.ap.max_bank_deg.contains_key("EnRoute"));
+        assert_eq!(
+            (m.ap.rotation_rate_dps, m.manual.rotation_rate_dps),
+            (None, None)
+        );
+        // Under a minute on the autopilot: no measures for it.
+        let short = fly_skills(|t, p| p.ap = (100.0..130.0).contains(&t))
+            .by_mode
+            .unwrap();
+        assert_eq!(short.ap.vertical_rms, None);
+        assert!(short.manual.vertical_rms.is_some());
     }
 
     #[test]

@@ -508,6 +508,18 @@ impl Board {
                 {
                     self.next_events = None;
                 }
+                // A landing the flight's later analysis no longer finds (a
+                // takeoff hop, say) stops repeating, or the panel shows it
+                // between each empty LANDINGS.
+                let found = |n: &LandingNotice| {
+                    n.flight_id != s.summary.id
+                        || s.landings
+                            .iter()
+                            .any(|l| l.touchdown.t_s == n.touchdown.t_s)
+                };
+                if self.landing.as_ref().is_some_and(|(n, _)| !found(n)) {
+                    self.landing = None;
+                }
                 self.snapshot = Some(s.clone());
             }
             // Of a flight no longer recorded.
@@ -888,6 +900,19 @@ mod tests {
         board.take(&Happening::Landing(notice()).into(), later);
         assert_eq!(board.due(later).len(), 1);
         assert!(!board.sim_up());
+    }
+
+    #[test]
+    fn a_landing_the_analysis_no_longer_finds_stops_repeating() {
+        let (mut board, t0) = (Board::default(), Instant::now());
+        board.take(&recording(300.0), t0);
+        board.take(&Happening::Landing(notice()).into(), t0);
+        board.take(&Msg::Snapshot(snapshot(1)), t0);
+        assert!(board.landing.is_some());
+        board.take(&Msg::Snapshot(snapshot(0)), t0);
+        assert!(board.landing.is_none());
+        let due = parsed(&board.due(t0 + REPEAT_EVERY));
+        assert!(named(&due, LANDING).is_none());
     }
 
     #[test]

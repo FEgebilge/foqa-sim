@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { adjacentEvent, approachSpeedsAt, gearAt, indexAt, instrumentsAt, trackAt, valueAt } from "../src/lib/series.ts";
+import { adjacentEvent, apSpans, approachSpeedsAt, eventMode, gearAt, indexAt, instrumentsAt, modeAt, trackAt, valueAt } from "../src/lib/series.ts";
 import type { Debrief, FlightEvent, LandingAssessment, Series } from "../src/types.ts";
 
 const t_s = [0, 0.5, 1, 1.5];
@@ -93,4 +93,16 @@ test("event jumps go by peak time, in order, and stop at the ends", () => {
   assert.equal(adjacentEvent(events, 30, -1), 1);
   assert.equal(adjacentEvent(events, 50, 1), null);
   assert.equal(adjacentEvent(events, 10, -1), null);
+});
+
+test("autopilot stretches and each event's mode come from the engaged series", () => {
+  const series = { t_s: [0, 1, 2, 3, 4], ap_engaged: [0, 1, 1, 0, 1] } as unknown as Series;
+  assert.deepEqual(apSpans(series), [{ start: 1, end: 3 }, { start: 4, end: 4 }]);
+  assert.equal(modeAt(series, 1.5), "ap");
+  assert.equal(modeAt(series, 3.2), "manual");
+  assert.equal(eventMode(series, { start_s: 0.5 } as FlightEvent), "manual");
+  // Not recorded: no stretches and no mode, rather than "by hand".
+  const none = { t_s: [0, 1], ap_engaged: [null, null] } as unknown as Series;
+  assert.equal(apSpans(none), null);
+  assert.equal(modeAt(none, 0.5), null);
 });
