@@ -68,6 +68,10 @@ pub struct Track {
     pub aal_ft: Vec<f64>,
     /// Points where the sim moved the aircraft (`Flight::breaks`).
     pub breaks: Vec<Range<usize>>,
+    /// Distance to the centre of each runway of the recorded airports, m;
+    /// empty without a position. Tells an approach (closing on a runway)
+    /// from a descent away from one (`closing`).
+    pub runway_m: Vec<Vec<f64>>,
 }
 
 impl Track {
@@ -94,6 +98,7 @@ impl Track {
             legs: Vec::new(),
             aal_ft: nan,
             breaks: Vec::new(),
+            runway_m: vec![Vec::new(); n],
         }
     }
 
@@ -141,16 +146,28 @@ impl Track {
         );
         let legs = legs(&on_ground, &alt_ft);
         let airports = flight.airports();
+        let pos = |i: usize| {
+            let at = |name| flight.at(name, *t.get(i)?);
+            at("pos.lat").zip(at("pos.lon"))
+        };
         let near = |i: usize| {
-            let t = *t.get(i)?;
-            let at = |name| flight.at(name, t);
-            let pos = (at("pos.lat")?, at("pos.lon")?);
+            let pos = pos(i)?;
             let away = |a: &fdm_core::Airport| distance_m(pos, (a.lat_deg, a.lon_deg));
             let (k, a) = (airports.iter().enumerate())
                 .filter(|(_, a)| away(a) <= APPROACH_AIRPORT_M)
                 .min_by(|x, y| away(x.1).total_cmp(&away(y.1)))?;
             Some((k, a.elevation_m * FT_PER_M))
         };
+        let runways: Vec<_> = (airports.iter().flat_map(|a| &a.runways))
+            .map(|r| (r.lat_deg, r.lon_deg))
+            .collect();
+        let runway_m = (0..t.len())
+            .map(|i| {
+                pos(i).map_or(Vec::new(), |p| {
+                    runways.iter().map(|&r| distance_m(p, r)).collect()
+                })
+            })
+            .collect();
         let aal_ft = aal(&legs, &alt_ft, near);
         let index = |at: SimTime| t.partition_point(|&x| x < at);
         let breaks = (flight.breaks().into_iter())
@@ -171,6 +188,7 @@ impl Track {
             legs,
             aal_ft,
             breaks,
+            runway_m,
         })
     }
 
@@ -190,6 +208,18 @@ impl Track {
     /// Index of the last point at or before `t`.
     pub fn index_at(&self, t: SimTime) -> usize {
         self.t.partition_point(|&x| x <= t).saturating_sub(1)
+    }
+
+    /// Whether the aircraft came closer from point `from` to `to` to the
+    /// runway nearest `to`; `true` without positions or runways, as before
+    /// they were used.
+    pub(crate) fn closing(&self, from: usize, to: usize) -> bool {
+        let (a, b) = (&self.runway_m[from], &self.runway_m[to]);
+        let nearest = (b.iter().enumerate()).min_by(|x, y| x.1.total_cmp(y.1));
+        match nearest {
+            Some((k, m)) if a.len() == b.len() => *m < a[k],
+            _ => true,
+        }
     }
 
     /// The stretches the `breaks` cut the track into, in order and covering
@@ -230,6 +260,7 @@ impl Track {
             on_ground: self.on_ground[r.clone()].to_vec(),
             vs_fpm: cut(&self.vs_fpm),
             aal_ft: cut(&self.aal_ft),
+            runway_m: self.runway_m[r.clone()].to_vec(),
             alt_ft,
             legs,
             breaks: Vec::new(),
