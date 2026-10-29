@@ -582,6 +582,17 @@ mod tests {
         assert_eq!(sequence(&spans), seq);
     }
 
+    /// A circuit, then a break on the ground after it (a reload): the
+    /// stretch after the break has no leg, and slicing it does not panic.
+    #[test]
+    fn a_break_after_the_last_leg_is_a_stretch_without_a_leg() {
+        let mut t = circuit(&up_and_down(800));
+        let n = t.len();
+        t.breaks.push(n - 4..n - 2);
+        assert!(t.slice(n - 2..n).legs.is_empty());
+        assert!(!phases(&t, &T).is_empty());
+    }
+
     /// Down to 300 ft, then teleported to 900 ft and down to a landing:
     /// the climb is the sim's, no go-around; the break and the stretch
     /// after it start afresh, in the air.
