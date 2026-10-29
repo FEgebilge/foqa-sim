@@ -214,12 +214,7 @@ impl Track {
     /// runway nearest `to`; `true` without positions or runways, as before
     /// they were used.
     pub(crate) fn closing(&self, from: usize, to: usize) -> bool {
-        let (a, b) = (&self.runway_m[from], &self.runway_m[to]);
-        let nearest = (b.iter().enumerate()).min_by(|x, y| x.1.total_cmp(y.1));
-        match nearest {
-            Some((k, m)) if a.len() == b.len() => *m < a[k],
-            _ => true,
-        }
+        closer(&self.runway_m[from], &self.runway_m[to])
     }
 
     /// The stretches the `breaks` cut the track into, in order and covering
@@ -328,6 +323,15 @@ fn peak(alt_ft: &[f64], r: Range<usize>) -> usize {
         .filter(|&i| alt_ft[i].is_finite())
         .max_by(|&a, &b| alt_ft[a].total_cmp(&alt_ft[b]))
         .unwrap_or(r.start)
+}
+
+/// Whether the runway nearest at distances `to` (m, per runway) is nearer
+/// than at `from`; `true` when either is unknown or they differ in runways.
+pub(crate) fn closer(from: &[f64], to: &[f64]) -> bool {
+    match (to.iter().enumerate()).min_by(|x, y| x.1.total_cmp(y.1)) {
+        Some((k, m)) if from.len() == to.len() => *m < from[k],
+        _ => true,
+    }
 }
 
 /// Height above the aerodrome, split at every approach as an FDM ground

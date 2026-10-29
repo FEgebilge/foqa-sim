@@ -68,8 +68,11 @@ above `approach_ft` (a go-around from 800 ft or higher climbs through
 approach descended `go_around_rise_ft` to its lowest point, and that lies
 more than `go_around_drop_ft` under `approach_ft`: a levelling-off at the
 pattern height is no go-around. The phase still ends back above
-`approach_ft`. The live phases of the in-sim panel have no positions and
-keep the climb under `approach_ft`.
+`approach_ft`. Live, in the in-sim panel, such a go-around is known only
+once its climb has risen `go_around_rise_ft`, above `approach_ft`: it
+shows from there for another rise, or until the climb ends; the approach
+before it shows as one even when it then turns out to fly away from the
+runways.
 
 A rejected takeoff is a ground run no leg follows: it must start from
 under `roll_kt` (not a rollout already under way when the recording

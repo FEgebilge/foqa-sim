@@ -103,6 +103,7 @@ impl Monitor {
     pub fn record(&mut self, item: &Telemetry) {
         match item {
             Telemetry::Event(SimEvent::Aircraft(id)) => self.aircraft = Some(id.clone()),
+            Telemetry::Event(SimEvent::Airport(airport)) => self.track.airport(airport),
             Telemetry::Frame(raw) => {
                 if let Some(frame) = self.acquisition.condition(raw) {
                     self.step(frame);
@@ -128,6 +129,7 @@ impl Monitor {
                 nz_g: p("accel.normal"),
                 pitch_deg: p("pitch"),
                 roll_deg: p("roll"),
+                pos: param(&frame, "pos.lat").zip(param(&frame, "pos.lon")),
             },
             &phases,
         );
