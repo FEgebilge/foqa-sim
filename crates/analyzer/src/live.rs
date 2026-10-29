@@ -7,10 +7,11 @@
 //! bounce, the lowest speed of a touch-and-go) is decided here once it has
 //! happened, so the debrief can differ by a few seconds.
 
-use fdm_core::SimTime;
+use fdm_core::geo::distance_m;
+use fdm_core::{Airport, SimTime};
 
 use crate::phase::{STANDING_MAX_GS_KT, TAKEOFF_END_FT};
-use crate::track::{BOUNCE_MAX_US, RA_BIAS_MAX_GS_KT, RA_MAX_FT};
+use crate::track::{BOUNCE_MAX_US, RA_BIAS_MAX_GS_KT, RA_MAX_FT, closer};
 use crate::vs::Inertial;
 use crate::{Phase, PhaseConfig};
 
@@ -29,6 +30,8 @@ pub struct LiveInput {
     pub nz_g: f64,
     pub pitch_deg: f64,
     pub roll_deg: f64,
+    /// Latitude and longitude, deg.
+    pub pos: Option<(f64, f64)>,
 }
 
 /// The derived values at the latest frame; `NaN` where unknown.
@@ -58,6 +61,18 @@ pub struct LiveTrack {
     extreme_ft: f64,
     /// Lowest ground speed since the last touchdown.
     roll_min_kt: f64,
+    /// Centres of the runways of the airports recorded so far, by airport.
+    runways: Vec<(String, Vec<(f64, f64)>)>,
+    /// Distances to those runways (m) where the approach began and at its
+    /// lowest point: an approach closes on a runway (`Track::closing`).
+    entry_m: Vec<f64>,
+    bottom_m: Vec<f64>,
+    /// Highest point before the approach, and the highest since its lowest.
+    entry_top_ft: f64,
+    climb_high_ft: f64,
+    /// Where the go-around's climb ends it: the approach height, or for one
+    /// that rose enough only above it, another rise further.
+    go_around_end_ft: f64,
 }
 
 impl Default for LiveTrack {
@@ -71,6 +86,12 @@ impl Default for LiveTrack {
             touchdown: None,
             extreme_ft: f64::NAN,
             roll_min_kt: f64::NAN,
+            runways: Vec::new(),
+            entry_m: Vec::new(),
+            bottom_m: Vec::new(),
+            entry_top_ft: f64::NAN,
+            climb_high_ft: f64::NAN,
+            go_around_end_ft: f64::NAN,
         }
     }
 }
@@ -79,6 +100,15 @@ impl LiveTrack {
     /// The latest point, if a frame was stepped.
     pub fn last(&self) -> Option<LivePoint> {
         self.last
+    }
+
+    /// A recorded airport: its runways count for the approaches that follow.
+    pub fn airport(&mut self, airport: &Airport) {
+        let centres = (airport.runways.iter())
+            .map(|r| (r.lat_deg, r.lon_deg))
+            .collect();
+        self.runways.retain(|(icao, _)| *icao != airport.icao);
+        self.runways.push((airport.icao.clone(), centres));
     }
 
     /// Follows frame `x` with the boundaries of `cfg`, which may change
@@ -168,10 +198,27 @@ impl LiveTrack {
         // Calibrated RA where valid, else AAL, as `phase::runway_height`.
         let height = if ra.is_finite() { ra } else { aal };
         let (low, high) = (self.extreme_ft.min(aal), self.extreme_ft.max(aal));
+        let (rise, drop) = (cfg.go_around_rise_ft, cfg.go_around_drop_ft);
+        let away: Vec<f64> = match x.pos {
+            Some(pos) => (self.runways.iter().flat_map(|(_, c)| c))
+                .map(|&c| distance_m(pos, c))
+                .collect(),
+            None => Vec::new(),
+        };
+        if matches!(p, Approach | Landing) {
+            if aal < self.extreme_ft {
+                (self.bottom_m, self.climb_high_ft) = (away.clone(), aal);
+            }
+            self.climb_high_ft = self.climb_high_ft.max(aal);
+        }
+        let closing = closer(&self.entry_m, &self.bottom_m);
+        // A go-around climb may end above the approach height (docs/phases.md).
+        let deep = low <= self.entry_top_ft - rise && low < cfg.approach_ft - drop;
         let next = match p {
             Takeoff if height >= TAKEOFF_END_FT => InitialClimb,
             InitialClimb if aal >= cfg.climb_end_ft => EnRoute,
-            GoAround if aal >= cfg.approach_ft => EnRoute,
+            GoAround if aal >= self.go_around_end_ft => EnRoute,
+            GoAround if aal >= cfg.approach_ft && aal <= high - drop => EnRoute,
             // Entered from above only: a climb through it stays en route.
             EnRoute if aal < cfg.approach_ft && high >= cfg.approach_ft => Approach,
             // Past the top of a go-around under the approach height, or of a
@@ -188,13 +235,30 @@ impl LiveTrack {
             {
                 Approach
             }
-            Approach | Landing if aal >= low + cfg.go_around_rise_ft => GoAround,
-            Approach if aal >= cfg.approach_ft => EnRoute,
+            // A dip and climb away from every runway is no approach.
+            Approach | Landing if aal >= low + rise => match closing {
+                true => GoAround,
+                false => EnRoute,
+            },
+            Approach
+                if aal >= cfg.approach_ft
+                    && !(deep && closing && aal > self.climb_high_ft - drop) =>
+            {
+                EnRoute
+            }
             Approach if height < cfg.flare_ft => Landing,
             // Airborne with no liftoff seen: the flight started in the air.
             Standing | Taxi => EnRoute,
             _ => p,
         };
+        if next == Approach && p != Approach {
+            (self.entry_m, self.bottom_m) = (away.clone(), away);
+            (self.entry_top_ft, self.climb_high_ft) = (high, aal);
+        }
+        if next == GoAround && p != GoAround {
+            let above = aal >= cfg.approach_ft;
+            self.go_around_end_ft = if above { aal + rise } else { cfg.approach_ft };
+        }
         self.extreme_ft = match next {
             _ if next != p => aal,
             Approach | Landing => low,
@@ -230,6 +294,7 @@ mod tests {
                         nz_g: 1.0,
                         pitch_deg: 0.0,
                         roll_deg: 0.0,
+                        pos: None,
                     },
                     cfg,
                 )
@@ -391,6 +456,76 @@ mod tests {
             phases(&points),
             [Standing, Taxi, Takeoff, InitialClimb, Approach, GoAround]
         );
+    }
+
+    /// A climb from an aerodrome at 500 ft to 1300 ft above it, down to
+    /// `bottom` ft and back up to 1300 ft, at `pos(i)` for frame `i`, with
+    /// one runway at (0, 0).
+    fn high_go_around(bottom: f64, pos: impl Fn(usize) -> (f64, f64)) -> Vec<Phase> {
+        use fdm_core::{Designator, Runway, RunwayEnd};
+        let mut f = vec![(true, 500.0, 0.0); 4];
+        f.extend([(true, 500.0, 60.0); 4]);
+        f.extend((1..=26).map(|i| (false, 500.0 + 50.0 * f64::from(i), 70.0)));
+        let steps = ((1300.0 - bottom) / 25.0) as i32;
+        f.extend((1..=steps).map(|i| (false, 1800.0 - 25.0 * f64::from(i), 70.0)));
+        f.extend((1..=steps).map(|i| (false, 500.0 + bottom + 25.0 * f64::from(i), 70.0)));
+        let end = |number| RunwayEnd {
+            number,
+            designator: Designator::None,
+            displaced_m: 0.0,
+        };
+        let mut track = LiveTrack::default();
+        track.airport(&Airport {
+            icao: "XXXX".into(),
+            region: String::new(),
+            lat_deg: 0.0,
+            lon_deg: 0.0,
+            elevation_m: 0.0,
+            magvar_deg: 0.0,
+            runways: vec![Runway {
+                lat_deg: 0.0,
+                lon_deg: 0.0,
+                elevation_m: 0.0,
+                heading_deg: 0.0,
+                length_m: 1000.0,
+                width_m: 30.0,
+                primary: end(36),
+                secondary: end(18),
+            }],
+        });
+        let points: Vec<_> = (f.iter().enumerate())
+            .map(|(i, &(g, alt, gs))| {
+                let x = LiveInput {
+                    t: SimTime::from_micros(i as i64 * 125_000),
+                    on_ground: Some(g),
+                    alt_ft: alt,
+                    gs_kt: gs,
+                    ra_ft: f64::NAN,
+                    nz_g: 1.0,
+                    pitch_deg: 0.0,
+                    roll_deg: 0.0,
+                    pos: Some(pos(i)),
+                };
+                track.step(&x, &PhaseConfig::LIGHT)
+            })
+            .collect();
+        phases(&points)
+    }
+
+    #[test]
+    fn a_go_around_climbing_out_above_the_approach_height_is_one_live() {
+        use Phase::*;
+        let toward = |i: usize| (0.1 - 0.0005 * i as f64, 0.0);
+        let climb = [Standing, Takeoff, InitialClimb, EnRoute, Approach];
+        // From 805 ft: through 1000 ft before the climb of 200 ft.
+        let ga = [&climb[..], &[GoAround, EnRoute]].concat();
+        assert_eq!(high_go_around(805.0, toward), ga);
+        // A dip to 960 ft is a levelling-off.
+        let level = [&climb[..], &[EnRoute]].concat();
+        assert_eq!(high_go_around(960.0, toward), level);
+        // Away from the runway, a dip to 700 ft is no approach.
+        let away = |i: usize| (0.1 + 0.0005 * i as f64, 0.0);
+        assert_eq!(high_go_around(700.0, away), level);
     }
 
     #[test]

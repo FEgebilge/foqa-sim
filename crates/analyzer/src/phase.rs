@@ -372,7 +372,13 @@ impl<'a> Labels<'a> {
         // cruise up to the leg's top, and an approach once past it under
         // `climb_end_ft`: from the top of a climb under it, or descending
         // through it from a cruise under the pattern height (docs/phases.md).
+        let mut above = j;
         for low in runs(b, |k| k >= j && aal[k] < cfg.approach_ft) {
+            // The highest point since the last stretch: how far the descent came from.
+            let top = (above..low.start)
+                .map(|k| aal[k])
+                .fold(f64::NEG_INFINITY, f64::max);
+            above = low.end;
             let (start, entry) = match low.start == j {
                 true => (
                     (low.start.max(leg.peak + 1)..low.end)
@@ -386,7 +392,7 @@ impl<'a> Labels<'a> {
                 false => (low.start, (Trigger::Descent, cfg.approach_ft)),
             };
             if start < low.end {
-                self.low(start..low.end, low.end == b, entry);
+                self.low(start..low.end, b, top, entry);
             }
         }
 
@@ -406,11 +412,17 @@ impl<'a> Labels<'a> {
     }
 
     /// A stretch under `approach_ft` entered by `entry` (trigger and its
-    /// threshold): approaches, go-arounds and, if the leg `lands` in it, the
-    /// landing.
-    fn low(&mut self, low: Range<usize>, lands: bool, mut entry: (Trigger, f64)) {
+    /// threshold) after a descent from `top`, in a leg airborne up to `b`:
+    /// approaches, go-arounds and, if the leg lands in it, the landing. A
+    /// go-around climb may end above `approach_ft`, once the approach came
+    /// down by the rise to its lowest point and that lies more than
+    /// `go_around_drop_ft` under `approach_ft` (a levelling-off at the
+    /// pattern height is none). A dip and climb that did not close on the
+    /// runway nearest its lowest point is no approach: it stays en route.
+    fn low(&mut self, low: Range<usize>, b: usize, mut top: f64, mut entry: (Trigger, f64)) {
         let (t, cfg) = (self.track, self.cfg);
-        let aal = &t.aal_ft;
+        let (aal, rise) = (&t.aal_ft, cfg.go_around_rise_ft);
+        let lands = low.end == b;
         let mut start = low.start;
         while start < low.end {
             let mut bottom = start;
@@ -418,23 +430,38 @@ impl<'a> Labels<'a> {
                 if aal[i] < aal[bottom] {
                     bottom = i;
                 }
-                aal[i] >= aal[bottom] + cfg.go_around_rise_ft
+                aal[i] >= aal[bottom] + rise
+            });
+            // Out of the stretch, the climb from its lowest point while it lasts.
+            let climb = climb.or_else(|| {
+                let mut high = aal[bottom];
+                let deep = aal[bottom] <= top - rise
+                    && aal[bottom] < cfg.approach_ft - cfg.go_around_drop_ft;
+                (!lands && deep).then_some(())?;
+                (low.end..b)
+                    .take_while(|&i| {
+                        high = high.max(aal[i]);
+                        aal[i] > high - cfg.go_around_drop_ft
+                    })
+                    .find(|&i| aal[i] >= aal[bottom] + rise)
             });
             match climb {
-                Some(top) => {
-                    let mut peak = top;
-                    for i in top..low.end {
+                Some(climbed) => {
+                    let mut peak = climbed;
+                    for i in climbed..b {
                         if aal[i] > aal[peak] {
                             peak = i;
                         } else if aal[i] <= aal[peak] - cfg.go_around_drop_ft {
                             break;
                         }
                     }
-                    let rise = cfg.go_around_rise_ft;
-                    self.set(start..bottom, Phase::Approach, entry.0, entry.1);
-                    self.set(bottom..peak + 1, Phase::GoAround, Trigger::GoAround, rise);
-                    start = peak + 1;
-                    entry = (Trigger::TopOfClimb, cfg.approach_ft);
+                    if t.closing(start, bottom) {
+                        self.set(start..bottom, Phase::Approach, entry.0, entry.1);
+                        let end = (peak + 1).min(low.end);
+                        self.set(bottom..end, Phase::GoAround, Trigger::GoAround, rise);
+                        entry = (Trigger::TopOfClimb, cfg.approach_ft);
+                    }
+                    (start, top) = (peak + 1, aal[peak]);
                 }
                 None if lands => {
                     let flare = (start..low.end)
@@ -642,6 +669,42 @@ mod tests {
         assert_eq!(flare(&T).basis, Basis::Aal);
     }
 
+    /// A circuit with a go-around from `bottom` ft that climbs back to 1300
+    /// ft before the landing approach; the runway `away(i)` m from point `i`.
+    fn go_around_from(bottom: u32, away: impl Fn(usize) -> f64) -> Track {
+        let down = (0..=(1300 - bottom) / 100).map(|k| f64::from(1300 - k * 100));
+        let mut air: Vec<f64> = (0..=13).map(|k| f64::from(k * 100)).collect();
+        air.extend(down.clone().chain([f64::from(bottom)]));
+        air.extend(down.rev().chain([1300.0; 5]));
+        air.extend(up_and_down(1300).into_iter().skip(14));
+        let mut t = circuit(&air);
+        t.runway_m = (0..t.len()).map(|i| vec![away(i)]).collect();
+        t
+    }
+
+    #[test]
+    fn a_go_around_climbing_out_above_the_approach_height_is_one() {
+        use Phase::*;
+        let landing = [EnRoute, Approach, Landing, Taxi];
+        let seq = |t: &Track| sequence(&phases(t, &T));
+        let ga = |bottom| seq(&go_around_from(bottom, |i| 9000.0 - 10.0 * i as f64));
+        let expected = [Takeoff, InitialClimb, EnRoute, Approach, GoAround];
+        // From 805 ft, 195 ft under the approach height: it climbs through
+        // 1000 ft before it has risen 200 ft.
+        assert_eq!(ga(805), [&expected[..], &landing].concat());
+        // A dip to 960 ft is a levelling-off at the pattern height.
+        assert_eq!(
+            ga(960),
+            [Takeoff, InitialClimb, EnRoute, Approach, Landing, Taxi]
+        );
+        // Flying away from the airport, a dip and climb is no approach.
+        let away = go_around_from(700, |i| 1000.0 + 10.0 * i as f64);
+        assert_eq!(
+            seq(&away),
+            [Takeoff, InitialClimb, EnRoute, Approach, Landing, Taxi]
+        );
+    }
+
     #[test]
     fn a_dip_in_the_go_around_climb_does_not_end_it() {
         // Down to 100 ft, up through 300 ft (go-around), a 10 ft dip, then on
@@ -655,7 +718,7 @@ mod tests {
             cfg: &T,
             label: vec![(Phase::Approach, c); n],
         };
-        labels.low(0..n, true, (Trigger::Descent, T.approach_ft));
+        labels.low(0..n, n, T.approach_ft, (Trigger::Descent, T.approach_ft));
         let label: Vec<_> = labels.label.iter().map(|l| l.0).collect();
         assert_eq!(label[1], Phase::Approach);
         assert!(

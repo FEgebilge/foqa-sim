@@ -47,7 +47,7 @@ climb.
 | En route | ENR | End of the initial climb | Descending through `approach_ft`; for a leg topping under it, through `climb_end_ft` |
 | Approach | APR | Descending through `approach_ft` above the aerodrome, past the top of a climb that stayed under `climb_end_ft`, or descending through `climb_end_ft` from a top between the two | Flare: below `flare_ft` above the runway |
 | Landing | LDG | Below `flare_ft` | Under `roll_kt` after touchdown, or the lowest ground speed of a touch-and-go |
-| Go-around | APR subphase | The lowest point of an approach from which the aircraft climbs `go_around_rise_ft` without touching down | The climb ends (`go_around_drop_ft` below its peak), or back above `approach_ft` |
+| Go-around | APR subphase | The lowest point of an approach, closing on a runway, from which the aircraft climbs `go_around_rise_ft` without touching down | The climb ends (`go_around_drop_ft` below its peak), or back above `approach_ft` |
 
 An approach is entered from above only: a climb through `approach_ft`
 stays en route when `approach_ft` is above `climb_end_ft`, so it cannot be
@@ -56,6 +56,23 @@ taken for an approach or a go-around. A leg that tops out between the two
 from its height, so its approach starts at CICTT's other VFR mark,
 descending through `climb_end_ft` (1000 ft); until then a dip and climb in
 that cruise is en route, not an approach and a go-around.
+
+A go-around is an approach to a runway given up: the aircraft came closer
+to the runway nearest its lowest point (centre of each recorded runway)
+between the start of the approach and that point. A dive and climb flying
+away from every runway stays en route, as does one near an airport
+recorded without runways (a heliport). Without positions or runways it
+counts as closing, as before. The climb of `go_around_rise_ft` may end
+above `approach_ft` (a go-around from 800 ft or higher climbs through
+1000 ft first), as long as it lasts (no drop of `go_around_drop_ft`), the
+approach descended `go_around_rise_ft` to its lowest point, and that lies
+more than `go_around_drop_ft` under `approach_ft`: a levelling-off at the
+pattern height is no go-around. The phase still ends back above
+`approach_ft`. Live, in the in-sim panel, such a go-around is known only
+once its climb has risen `go_around_rise_ft`, above `approach_ft`: it
+shows from there for another rise, or until the climb ends; the approach
+before it shows as one even when it then turns out to fly away from the
+runways.
 
 A rejected takeoff is a ground run no leg follows: it must start from
 under `roll_kt` (not a rollout already under way when the recording
