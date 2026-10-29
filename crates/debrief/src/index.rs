@@ -11,6 +11,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::io;
 use std::num::NonZero;
+use std::panic::{self, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard, PoisonError};
@@ -217,10 +218,15 @@ fn analyse(
 }
 
 /// The flight's `Entry::summary`; `None` on an OS error (locked,
-/// cloud-only, gone), which may pass.
+/// cloud-only, gone), which may pass. A flight whose analysis panics is
+/// unreadable, not the end of the list: the cache is the analysis code's,
+/// so a fixed build analyses it again.
 fn summary(station: &Station, path: &Path) -> Option<Option<FlightSummary>> {
-    match station.open(path) {
-        Ok(a) => Some(Some(a.summary())),
+    let Some(analysed) = unpanicked(path, || station.open(path).map(|a| a.summary())) else {
+        return Some(None);
+    };
+    match analysed {
+        Ok(s) => Some(Some(s)),
         Err(e)
             if e.downcast_ref::<io::Error>()
                 .and_then(io::Error::raw_os_error)
@@ -231,6 +237,13 @@ fn summary(station: &Station, path: &Path) -> Option<Option<FlightSummary>> {
         }
         Err(_) => Some(None),
     }
+}
+
+/// `f()`, or `None` if it panics.
+fn unpanicked<T>(path: &Path, f: impl FnOnce() -> T) -> Option<T> {
+    let done = panic::catch_unwind(AssertUnwindSafe(f));
+    done.inspect_err(|_| eprintln!("{}: analysis panicked", path.display()))
+        .ok()
 }
 
 #[cfg(test)]
@@ -359,5 +372,15 @@ mod tests {
         let index = saved(dir);
         assert!(index["flights"]["bad.fqz"]["summary"].is_null());
         assert!(index["flights"].get("locked.fqz").is_none());
+    }
+
+    #[test]
+    fn a_panicking_analysis_is_caught() {
+        let path = Path::new("x.fqz");
+        assert_eq!(unpanicked(path, || 1), Some(1));
+        assert_eq!(
+            unpanicked(path, || -> i32 { panic!("index out of bounds") }),
+            None
+        );
     }
 }
