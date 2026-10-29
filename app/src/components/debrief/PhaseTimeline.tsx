@@ -71,9 +71,10 @@ export function PhaseTimeline({ phases, phaseValues, events, touchdowns, series,
   const ticks: number[] = [];
   for (let t = Math.ceil(t0 / step) * step; t <= t1; t += step) ticks.push(t);
   const ap = apSpans(series);
-  // The last disconnect before the final touchdown; none if the autopilot stayed on through it.
+  // The last disconnect before the final touchdown; none if the autopilot stayed on through it (an earlier one is not it).
   const landed = touchdowns.filter((td) => !td.bounce).at(-1)?.t_s;
-  const off = landed === undefined ? undefined : ap?.filter((s) => s.end <= landed).at(-1)?.end;
+  const last = landed === undefined ? undefined : ap?.filter((s) => s.start < landed).at(-1);
+  const off = last && landed !== undefined && last.end <= landed ? last.end : undefined;
   const selectedEvent = selected === null ? null : events[selected];
 
   return (
