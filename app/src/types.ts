@@ -272,6 +272,8 @@ export interface Skills {
     manual_final_s: number | null;
     /** Still engaged at contact. */
     autoland: boolean;
+    /** Recorded off through the final approach; manual_final_s is the approach. */
+    hand_flown: boolean;
   };
   ride: {
     vertical_rms: number | null;
@@ -281,6 +283,8 @@ export interface Skills {
     max_bank_deg: Record<string, number>;
     rotation_rate_dps: number | null;
   };
+  /** The ride on the autopilot and hand-flown apart; null without autopilot data. A mode flown under a minute has all-null measures. */
+  by_mode: { ap_s: number; manual_s: number; ap: Skills["ride"]; manual: Skills["ride"] } | null;
   fuel: {
     fuel_used_kg: number | null;
     fuel_kg_h: number | null;

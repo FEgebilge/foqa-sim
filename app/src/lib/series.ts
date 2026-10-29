@@ -146,3 +146,33 @@ export function adjacentEvent(events: FlightEvent[], t: number, direction: 1 | -
   const hit = direction > 0 ? order.find((e) => e.at > t + 0.05) : order.findLast((e) => e.at < t - 0.05);
   return hit?.i ?? null;
 }
+
+/** A stretch of the flight, s. */
+export interface Span { start: number; end: number }
+
+/** The autopilot's engaged stretches, in order; `null` without autopilot data. */
+export function apSpans(series: Series): Span[] | null {
+  const { t_s, ap_engaged } = series;
+  if (!ap_engaged.some((v) => v !== null)) return null;
+  const spans: Span[] = [];
+  let from: number | null = null;
+  t_s.forEach((t, i) => {
+    const on = flag(ap_engaged[i] ?? null) === true;
+    if (on && from === null) from = t;
+    else if (!on && from !== null) { spans.push({ start: from, end: t }); from = null; }
+  });
+  if (from !== null) spans.push({ start: from, end: t_s[t_s.length - 1]! });
+  return spans;
+}
+
+/** How the aircraft was flown: on the autopilot or by hand. */
+export type FlyingMode = "ap" | "manual";
+
+/** The mode at t; `null` where the autopilot was not recorded. */
+export function modeAt(series: Series, t: number): FlyingMode | null {
+  const on = flag(valueAt(series.t_s, series.ap_engaged, t, "hold"));
+  return on === null ? null : on ? "ap" : "manual";
+}
+
+/** An event's mode: the autopilot's state as it began. */
+export const eventMode = (series: Series, e: FlightEvent) => modeAt(series, e.start_s);

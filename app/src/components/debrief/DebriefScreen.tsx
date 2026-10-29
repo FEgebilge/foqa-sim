@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowLeft, Crosshair, Database, FileWarning, Globe, Image, Keyboard, MapPinOff, Pause, Play, PlaneLanding, Route, ScanSearch, ServerCrash, Sheet, UserRoundX, ZoomOut } from "lucide-react";
 import { Button } from "@ui/components/button/button";
+import SegmentedControl from "@ui/components/segmented-control/segmented-control";
 import { EmptyState } from "@ui/components/empty-state/empty-state";
 import { Tooltip } from "@ui/components/tooltip/tooltip";
 import { api, type ExportFormat } from "../../api";
@@ -32,6 +33,9 @@ import { LandingCard } from "./LandingCard";
 import { PhaseTimeline } from "./PhaseTimeline";
 import { ReplayPfd } from "./ReplayPfd";
 import { ShareCard } from "./ShareCard";
+
+/** What the replay's wide column shows. */
+type Pane = "parameters" | "events";
 
 // uPlot and MapLibre are the heavy parts; they load after the debrief itself.
 const Charts = lazy(() => import("./Charts"));
@@ -82,6 +86,7 @@ function DebriefView({ debrief, refreshing, onRefresh, onOpenFolder }: { debrief
   // Scored landings that carry the reference approach, with the index of their landing card.
   const profiled = useMemo(() => landings.flatMap((l, index) => { const a = landingAt(debrief, l.touchdown.t_s); return a?.status === "scored" && a.profile?.dist_nm.some((d) => d !== null) ? [{ landing: a, index }] : []; }), [landings, debrief]);
   const [selected, setSelected] = useState<number | null>(null);
+  const [pane, setPane] = useState<Pane>("parameters");
   const [view, setView] = useState<TimeRange | null>(flown);
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(4);
@@ -189,48 +194,45 @@ function DebriefView({ debrief, refreshing, onRefresh, onOpenFolder }: { debrief
       <AssessmentPanel debrief={debrief} onSelectEvent={selectEvent} />
       {debrief.skills ? <SkillsPanel skills={debrief.skills} /> : null}
 
-      {/* Replay workspace: on wide screens it fills the window. The timeline is the one slider; under it the events list
-          beside the map and the rebuilt flight display (side by side from xl, neither a tall column), the charts below. */}
+      {/* Replay workspace: on wide screens it fills the window. The timeline is the one slider, and the cursor drives the
+          flight display, the map and the charts together, so all three stay in view: from xl the display over the map in
+          a side column, the charts (or the events list) in the wide column, with the time axis it needs. */}
       <section id="replay" aria-label="Replay" className="flex scroll-mt-4 flex-col gap-3 xl:h-[calc(100dvh-4.5rem)] xl:min-h-[680px]">
-        <PhaseTimeline phases={phases} phaseValues={flight.phase_values ?? {}} events={events} touchdowns={touchdowns} range={range} view={view} selected={selected} bus={bus} onFocus={place} onZoom={setView} onSelectEvent={selectEvent} controls={controls} />
+        <PhaseTimeline phases={phases} phaseValues={flight.phase_values ?? {}} events={events} touchdowns={touchdowns} series={series} range={range} view={view} selected={selected} bus={bus} onFocus={place} onZoom={setView} onSelectEvent={selectEvent} controls={controls} />
 
-        <div className="grid min-h-0 flex-1 gap-4 min-[960px]:grid-cols-[minmax(260px,300px)_minmax(0,1fr)] xl:grid-cols-[minmax(290px,340px)_minmax(0,1fr)] 2xl:grid-cols-[minmax(320px,400px)_minmax(0,1fr)]">
-          {/* Beside the replay from the 960 px minimum: it scrolls on its own, so a long list never pushes the map away. */}
-          <aside aria-labelledby="events-title" className="flex min-h-0 flex-col gap-2 min-[960px]:sticky min-[960px]:top-4 min-[960px]:max-h-[calc(100dvh-2rem)] min-[960px]:self-start min-[960px]:overflow-y-auto min-[960px]:pr-1 xl:static xl:max-h-none xl:self-stretch">
-            <h2 id="events-title" className="eyebrow">Events <span className="readout">{events.length}</span></h2>
-            <LevelLegend />
-            <EventList events={events} phases={phases} selected={selected} onSelect={selectEvent} />
-          </aside>
+        <CursorReadout series={series} phases={phases} bus={bus} />
 
-          <div className="flex min-h-0 min-w-0 flex-col gap-3">
-            {/* From xl one row: the display's width follows the row height at its own aspect, the map takes the rest; the row
-                height also follows the window width, so the map stays landscape. Narrower, they stack, the map landscape. */}
-            <div className="grid gap-4 [--deck:clamp(300px,min(40dvh,28vw),480px)] xl:h-[var(--deck)] xl:grid-cols-[minmax(0,1fr)_calc(var(--deck)*1.12)]">
-              <section aria-labelledby="map-title" className="panel flex min-h-0 flex-col overflow-hidden">
-                <h2 id="map-title" className="eyebrow border-b border-line-subtle px-3 py-2">Track and runways</h2>
-                {/* Landscape when stacked; beside the display it takes the row's height and the width that is left. */}
-                <div className="aspect-[16/10] max-h-[55dvh] w-full xl:aspect-auto xl:max-h-none xl:min-h-0 xl:flex-1">
-                  {hasPosition(series) ? (
-                    <ErrorBoundary what="The map" size="sm">
-                      <Suspense fallback={<div className="h-full animate-pulse bg-muted" />}>
-                        <FlightMap debrief={debrief} theme={theme} selected={selectedEvent} bus={bus} onFocus={place} />
-                      </Suspense>
-                    </ErrorBoundary>
-                  ) : <EmptyState size="sm" icon={<MapPinOff size={18} />} title="No position recorded" description="This flight has no latitude/longitude samples to draw." />}
-                </div>
-              </section>
-              <div className="mx-auto aspect-[1.12] w-full max-w-[480px] xl:aspect-auto xl:h-full xl:max-w-none">
-                <ReplayPfd debrief={debrief} theme={theme} bus={bus} />
-              </div>
+        <div className="grid min-h-0 flex-1 gap-4 xl:grid-cols-[clamp(340px,30vw,520px)_minmax(0,1fr)]">
+          {/* Side by side when narrower; from xl the display over the map, sharing the column's height (both stay landscape). */}
+          <div className="grid min-h-0 gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,0.9fr)] xl:flex xl:flex-col">
+            <div className="mx-auto aspect-[1.12] w-full max-w-[480px] md:order-2 xl:order-none xl:aspect-auto xl:min-h-0 xl:max-w-none xl:flex-1">
+              <ReplayPfd debrief={debrief} theme={theme} bus={bus} />
             </div>
-            <CursorReadout series={series} phases={phases} bus={bus} />
+            <section aria-labelledby="map-title" className="panel flex min-h-0 flex-col overflow-hidden md:order-1 xl:order-none xl:flex-1">
+              <h2 id="map-title" className="eyebrow border-b border-line-subtle px-3 py-2">Track and runways</h2>
+              {/* Landscape when stacked; beside the display it fills the column's height, from xl the height under it. */}
+              <div className="aspect-[16/10] max-h-[55dvh] w-full md:aspect-auto md:min-h-[240px] md:flex-1 xl:max-h-none xl:min-h-0">
+                {hasPosition(series) ? (
+                  <ErrorBoundary what="The map" size="sm">
+                    <Suspense fallback={<div className="h-full animate-pulse bg-muted" />}>
+                      <FlightMap debrief={debrief} theme={theme} selected={selectedEvent} bus={bus} onFocus={place} />
+                    </Suspense>
+                  </ErrorBoundary>
+                ) : <EmptyState size="sm" icon={<MapPinOff size={18} />} title="No position recorded" description="This flight has no latitude/longitude samples to draw." />}
+              </div>
+            </section>
+          </div>
 
-            <div className="flex min-h-0 flex-col gap-4 xl:flex-1 xl:overflow-y-auto xl:pr-1">
+          <div className="flex min-h-0 min-w-0 flex-col gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <SegmentedControl label="Replay pane" value={pane} onValueChange={(v) => setPane(v as Pane)}
+                options={[{ value: "parameters", label: "Parameters" }, { value: "events", label: "Events", accessory: <span className="readout">{events.length}</span> }]} />
+              <span className="text-xs text-fg-3">{pane === "parameters" ? "Drag across a chart to zoom · click to place the cursor" : "Select an event to put the cursor on it"}</span>
+            </div>
+            {/* Both stay mounted, so the charts keep their size and zoom while the events list is open. */}
+            <div className="flex min-h-0 flex-col gap-4 xl:flex-1 xl:overflow-y-auto xl:pr-1" hidden={pane !== "parameters"}>
               <section className="panel px-3 pt-2 pb-1" aria-labelledby="charts-title">
-                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line-subtle pb-2">
-                  <h2 id="charts-title" className="eyebrow">Parameters</h2>
-                  <span className="text-xs text-fg-3">Drag across a chart to zoom · click to place the cursor</span>
-                </div>
+                <h2 id="charts-title" className="sr-only">Parameters</h2>
                 <ErrorBoundary what="The charts" size="sm">
                   <Suspense fallback={<ChartSkeleton />}>
                     <Charts debrief={debrief} theme={theme} view={view} selected={selectedEvent} bus={bus} onView={setView} onFocus={place} />
@@ -255,6 +257,10 @@ function DebriefView({ debrief, refreshing, onRefresh, onOpenFolder }: { debrief
                   {profiled.map(({ landing, index }) => <ApproachProfile key={landing.t_s} debrief={debrief} landing={landing} index={index} bus={bus} onFocus={place} />)}
                 </section>
               ) : null}
+            </div>
+            <div className="flex min-h-0 flex-col gap-2 xl:flex-1 xl:overflow-y-auto xl:pr-1" hidden={pane !== "events"}>
+              <LevelLegend />
+              <EventList events={events} phases={phases} series={series} selected={selected} onSelect={selectEvent} />
             </div>
           </div>
         </div>
