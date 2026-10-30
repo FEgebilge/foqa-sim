@@ -2,7 +2,8 @@
 //! joined to the app. Sites settings, challenges taken from a site, issue
 //! before placing, the background uploader, deep links from websites (B2),
 //! toasts on a site's verdict (B7) and its Tauri commands. The app builds
-//! and runs without this module.
+//! and runs without this module. It is where FOQA-Sim is tied to Pilot
+//! Aptitude: the protocol crate names no site.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -15,8 +16,9 @@ use ::connect::api::Error;
 use ::connect::copy::{self, Ctx};
 use ::connect::deeplink::{self, Consent, Gate, Link, Pending};
 use ::connect::http::Http;
+use ::connect::origin::Origin;
 use ::connect::sidecar::SiteState;
-use ::connect::sites::{Flow, SiteRecord, Sites};
+use ::connect::sites::{BuiltIn, Flow, Policy, SiteRecord, Sites};
 use ::connect::store::KeyringStore;
 use ::connect::uploader::{self, Uploader};
 use capture::SiteStrip;
@@ -30,6 +32,13 @@ use crate::commands::{AttemptHooks, Shared, lock};
 use crate::library::{Entry, sha256_hex};
 
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+/// The site FOQA-Sim ships with: in the Sites list from the start, never
+/// removed, the only one links may come from.
+const BUILT_IN: &str = "https://pilotaptitude.egebilge.com";
+const BUILT_IN_NAME: &str = "Pilot Aptitude";
+/// The developer switch: local sites (A1) and sites other than the
+/// built-in one, by address or by a link.
+const DEV_SITES: &str = "FOQA_ALLOW_LOCAL_SITES";
 /// The uploader looks at its queue at least this often.
 const IDLE: Duration = Duration::from_secs(60);
 
@@ -40,12 +49,12 @@ pub struct Connect {
     /// The device code shown while a device sign-in waits, per origin.
     device: Mutex<HashMap<String, Device>>,
     app: AppHandle,
-    /// "Allow local sites" (A1).
-    allow_local: bool,
+    /// The developer switch ([`DEV_SITES`]).
+    dev: bool,
     /// The deep links waiting for the user, and why the last one was
     /// refused, told once.
     links: Mutex<Gate>,
-    refused: Mutex<Option<&'static str>>,
+    refused: Mutex<Option<String>>,
     /// The global switches of Challenges → Sites (B3), and their file.
     settings: Mutex<SiteSettings>,
     settings_file: PathBuf,
@@ -79,7 +88,7 @@ pub struct LinkView {
     v: Option<u32>,
     signed_in: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    text: Option<&'static str>,
+    text: Option<String>,
 }
 
 /// The global settings of Challenges → Sites (B3), in the app's config
@@ -150,6 +159,11 @@ pub struct SiteView {
     pending: usize,
     device: Option<Device>,
     account_url: Option<String>,
+    /// The site FOQA-Sim ships with: no Remove.
+    built_in: bool,
+    /// Why its challenges can't be used yet (the built-in site before its
+    /// document could be fetched), shown in place of them.
+    closed: Option<String>,
 }
 
 /// A challenge a site publishes.
@@ -174,14 +188,13 @@ impl Connect {
         attempts: PathBuf,
         app: AppHandle,
     ) -> std::io::Result<Arc<Self>> {
-        // Developer setting "Allow local sites" (A1); off by default.
-        let allow_local = std::env::var_os("FOQA_ALLOW_LOCAL_SITES").is_some();
+        let dev = std::env::var_os(DEV_SITES).is_some();
         let http = Arc::new(Http::new(APP_VERSION));
         let sites = Arc::new(Sites::open(
             data.join("connect"),
             http,
             Arc::new(KeyringStore),
-            allow_local,
+            policy(dev),
         )?);
         let handle = app.clone();
         let (changed, verdicts) = mpsc::channel::<String>();
@@ -197,7 +210,7 @@ impl Connect {
             wake: Mutex::new(tx),
             device: Mutex::new(HashMap::new()),
             app,
-            allow_local,
+            dev,
             links: Mutex::new(Gate::default()),
             refused: Mutex::new(None),
             settings: Mutex::new(SiteSettings::load(&config.join(SiteSettings::FILE))),
@@ -261,7 +274,32 @@ impl Connect {
             pending: self.uploader.pending(origin),
             device: lock(&self.device).get(origin).cloned(),
             account_url: r.well_known.links.account.clone(),
+            built_in: self.sites.is_built_in(origin),
+            closed: None,
         }
+    }
+
+    /// The Sites list: the built-in site first, listed (with why it is
+    /// closed) before its document could be fetched.
+    fn views(&self) -> Vec<SiteView> {
+        let closed = self.sites.built_in_closed(false);
+        let mut views: Vec<SiteView> = self.sites.list().iter().map(|r| self.view(r)).collect();
+        if let (Some(why), Some(b)) = (closed, self.sites.built_in()) {
+            views.push(SiteView {
+                origin: b.origin.as_str().to_owned(),
+                host: b.origin.host().to_owned(),
+                name: b.name.clone(),
+                handle: None,
+                signed_in: false,
+                pending: 0,
+                device: None,
+                account_url: None,
+                built_in: true,
+                closed: Some(why),
+            });
+        }
+        views.sort_by_key(|v| !v.built_in);
+        views
     }
 
     fn site(&self, origin: &str) -> Result<SiteRecord, String> {
@@ -273,7 +311,8 @@ impl Connect {
     /// A link from a website (B2), forwarded or at a cold start, as the
     /// command line carried it: parsed strictly and logged, then the window
     /// comes up and is told to ask (`deep-link`). Nothing is fetched, kept
-    /// or placed here; with links off it is dropped unseen.
+    /// or placed here; with links off it is dropped unseen, and one from a
+    /// site other than the built-in one is refused (unless [`DEV_SITES`]).
     pub fn open_url(&self, raw: &str) {
         if !lock(&self.settings).links {
             self.sites.log(json!({
@@ -281,13 +320,19 @@ impl Connect {
             }));
             return;
         }
-        match deeplink::parse(raw, self.allow_local) {
-            Err(refused) => {
+        let parsed = deeplink::parse(raw, self.dev)
+            .map_err(|r| (r.0, r.text().to_owned()))
+            .and_then(|link| match foreign(&self.sites, &link) {
+                Some(why) => Err(("other_site", why)),
+                None => Ok(link),
+            });
+        match parsed {
+            Err((reason, text)) => {
                 self.sites.log(json!({
-                    "event": "deep_link", "accepted": false, "reason": refused.0, "bytes": raw.len(),
+                    "event": "deep_link", "accepted": false, "reason": reason, "bytes": raw.len(),
                 }));
                 // Told once, apart from the links waiting: it drops none.
-                *lock(&self.refused) = Some(refused.text());
+                *lock(&self.refused) = Some(text);
             }
             Ok(link) => {
                 let (kind, site) = (link.kind(), link.site().as_str().to_owned());
@@ -295,7 +340,7 @@ impl Connect {
                     Link::Challenge { id, version, .. } => (Some(id.clone()), *version),
                     Link::Connect { .. } => (None, None),
                 };
-                let known = self.sites.get(&site).is_some();
+                let known = self.sites.get(&site).is_some() || self.sites.is_built_in(&site);
                 let queued = lock(&self.links).offer(link, known, ::connect::now_ms());
                 self.sites.log(json!({
                     "event": "deep_link", "accepted": true, "kind": kind,
@@ -331,7 +376,15 @@ impl Connect {
         let Pending {
             seq, link, consent, ..
         } = lock(&self.links).hand(::connect::now_ms())?;
-        let site = self.sites.get(link.site().as_str());
+        let name = match self.sites.get(link.site().as_str()) {
+            Some(s) => s.well_known.name,
+            None => self
+                .sites
+                .built_in()
+                .filter(|b| &b.origin == link.site())
+                .map(|b| b.name.clone())
+                .unwrap_or_default(),
+        };
         let (id, v) = match &link {
             Link::Challenge { id, version, .. } => (Some(id.clone()), *version),
             Link::Connect { .. } => (None, None),
@@ -345,7 +398,7 @@ impl Connect {
             kind: Some(link.kind()),
             origin: Some(link.site().as_str().to_owned()),
             host: Some(link.site().host().to_owned()),
-            name: site.map(|s| s.well_known.name).filter(|n| !n.is_empty()),
+            name: Some(name).filter(|n| !n.is_empty()),
             id,
             v,
             signed_in: self.sites.signed_in(link.site().as_str()),
@@ -433,6 +486,27 @@ impl Connect {
             eprintln!("notification not shown: {e}");
         }
     }
+}
+
+/// The sites FOQA-Sim may have: the built-in one, others with the
+/// developer switch.
+fn policy(dev: bool) -> Policy {
+    let origin = Origin::parse(BUILT_IN, false).expect("the built-in origin is a site");
+    Policy {
+        built_in: Some(BuiltIn {
+            origin,
+            name: BUILT_IN_NAME.into(),
+        }),
+        others: dev,
+        allow_local: dev,
+    }
+}
+
+/// Why a link is refused before anything is asked: it comes from a site
+/// FOQA-Sim may not have.
+fn foreign(sites: &Sites, link: &Link) -> Option<String> {
+    (!sites.allows(link.site()))
+        .then(|| format!("FOQA-Sim opens challenge links from {BUILT_IN_NAME} only."))
 }
 
 /// Why a link's challenge version can't open: the site has another one.
@@ -627,13 +701,21 @@ pub fn site_settings_set(settings: SiteSettings, c: Connected<'_>) -> Result<Sit
     Ok(settings)
 }
 
+/// The Sites list; the built-in site's document is asked for again while
+/// it has none (at most once a minute).
 #[tauri::command]
 pub async fn sites_list(c: Connected<'_>) -> Result<Vec<SiteView>, String> {
     let c = Arc::clone(&c);
-    blocking(move || Ok(c.sites.list().iter().map(|r| c.view(r)).collect())).await
+    blocking(move || Ok(c.views())).await
 }
 
-/// Adds a site by the address the user typed.
+/// Whether the Sites list offers "Add site" (the developer switch).
+#[tauri::command]
+pub fn site_add_allowed(c: Connected<'_>) -> bool {
+    c.dev
+}
+
+/// Adds a site by the address the user typed (the developer switch).
 #[tauri::command]
 pub async fn site_add(origin: String, c: Connected<'_>) -> Result<SiteView, String> {
     let c = Arc::clone(&c);
@@ -803,6 +885,32 @@ mod tests {
             ahead.contains("version 4") && ahead.contains("yet"),
             "{ahead}"
         );
+    }
+
+    #[test]
+    fn links_from_other_sites_need_the_developer_switch() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sites = |dev| {
+            let store = Arc::new(::connect::store::MemoryStore::default());
+            let http = Arc::new(Http::new("0"));
+            Sites::open(tmp.path().join(format!("{dev}")), http, store, policy(dev)).unwrap()
+        };
+        let (off, on) = (sites(false), sites(true));
+        let link = |site: &str, dev| {
+            deeplink::parse(&format!("foqa-sim://challenge?site={site}&id=abc"), dev).unwrap()
+        };
+        let ours = link(BUILT_IN, false);
+        assert_eq!(foreign(&off, &ours), None);
+        assert!(off.is_built_in(BUILT_IN) && off.list().is_empty());
+        let other = link("https://other.example", false);
+        assert_eq!(
+            foreign(&off, &other).unwrap(),
+            "FOQA-Sim opens challenge links from Pilot Aptitude only."
+        );
+        assert_eq!(foreign(&on, &other), None);
+        let local = "http://localhost:3012";
+        assert!(deeplink::parse(&format!("foqa-sim://connect?site={local}"), false).is_err());
+        assert_eq!(foreign(&on, &link(local, true)), None);
     }
 
     #[test]

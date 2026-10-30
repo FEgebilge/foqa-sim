@@ -17,6 +17,10 @@ export interface SiteView {
   /** The code to enter on the site while a device sign-in waits. */
   device: { user_code: string; verification_uri: string } | null;
   account_url: string | null;
+  /** The site FOQA-Sim ships with (Pilot Aptitude): it can't be removed. */
+  built_in: boolean;
+  /** Why its challenges can't be used yet, e.g. "Challenges aren't open on Pilot Aptitude yet." */
+  closed: string | null;
 }
 
 export interface SiteChallenge {
@@ -83,7 +87,10 @@ export interface DeepLink {
 export interface SitesApi {
   /** Whether this build has the site client; false (or a missing command) hides every site part. */
   connectAvailable(): Promise<boolean>;
+  /** The built-in site first; its document is asked for again while it has none. */
   sitesList(): Promise<SiteView[]>;
+  /** Whether "Add site" is offered: the developer switch only. */
+  siteAddAllowed(): Promise<boolean>;
   siteAdd(origin: string): Promise<SiteView>;
   /** Browser sign-in, or a code to enter on the site (`device`). Resolves when signed in. */
   siteSignIn(origin: string, device: boolean): Promise<SiteView>;

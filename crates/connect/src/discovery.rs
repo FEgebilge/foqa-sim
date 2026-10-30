@@ -103,34 +103,55 @@ impl WellKnown {
     }
 }
 
+/// Why a site's document can't be used, in the app's words; `missing`:
+/// the site has none (404), so it doesn't publish challenges (yet).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Failed {
+    pub missing: bool,
+    pub text: String,
+}
+
+impl From<String> for Failed {
+    fn from(text: String) -> Self {
+        Self {
+            missing: false,
+            text,
+        }
+    }
+}
+
+impl From<Failed> for String {
+    fn from(f: Failed) -> Self {
+        f.text
+    }
+}
+
 /// Fetches and checks the document of `origin`.
-pub fn discover(http: &Http, origin: &Origin) -> Result<WellKnown, String> {
+pub fn discover(http: &Http, origin: &Origin) -> Result<WellKnown, Failed> {
     let host = origin.host();
     let url = format!("{origin}{PATH}");
     let r = http
         .get(&url, None, MAX_BYTES)
         .map_err(|e| format!("Can't reach {host}: {}", e.0))?;
     if r.status == 404 {
-        return Err(format!("{host} doesn't publish FOQA challenges."));
+        return Err(Failed {
+            missing: true,
+            text: format!("{host} doesn't publish FOQA challenges."),
+        });
     }
     if !r.ok() {
-        return Err(format!(
-            "{host} answered {} for its challenge list.",
-            r.status
-        ));
+        return Err(format!("{host} answered {} for its challenge list.", r.status).into());
     }
     if !r
         .content_type
         .as_deref()
         .is_some_and(|t| t.starts_with("application/json"))
     {
-        return Err(format!(
-            "{host} doesn't publish FOQA challenges (not JSON)."
-        ));
+        return Err(format!("{host} doesn't publish FOQA challenges (not JSON).").into());
     }
     let doc: WellKnown = serde_json::from_slice(&r.body)
         .map_err(|_| format!("{host} published a challenge document FOQA-Sim can't read."))?;
-    doc.check(origin)
+    Ok(doc.check(origin)?)
 }
 
 #[cfg(test)]
@@ -195,17 +216,11 @@ mod tests {
         assert!(discover(&Http::new("0"), &origin).is_err(), "over 8 KiB");
         let html = Mock::start(|_, _| Reply::raw(200, "text/html", b"<html>".to_vec()));
         let origin = Origin::parse(&html.base, true).unwrap();
-        assert!(
-            discover(&Http::new("0"), &origin)
-                .unwrap_err()
-                .contains("not JSON")
-        );
+        let not_json = discover(&Http::new("0"), &origin).unwrap_err();
+        assert!(not_json.text.contains("not JSON") && !not_json.missing);
         let none = Mock::start(|_, _| Reply::json(404, json!({})));
         let origin = Origin::parse(&none.base, true).unwrap();
-        assert!(
-            discover(&Http::new("0"), &origin)
-                .unwrap_err()
-                .contains("doesn't publish")
-        );
+        let missing = discover(&Http::new("0"), &origin).unwrap_err();
+        assert!(missing.text.contains("doesn't publish") && missing.missing);
     }
 }

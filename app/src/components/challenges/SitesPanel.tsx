@@ -13,9 +13,12 @@ import { ConfirmDialog } from "../ConfirmDialog";
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
-/** Challenges → Sites (docs/challenge-protocol.md B3): add a site by its address, sign in, take its challenges. */
+/** Challenges → Sites (docs/challenge-protocol.md B3): the built-in site (Pilot Aptitude), sign in, take its challenges.
+ * Adding a site by its address is the developer switch's only. */
 export function SitesPanel({ sites, onChanged }: { sites: SiteView[]; onChanged: () => void }) {
   const notify = useNotify();
+  const [addAllowed, setAddAllowed] = useState(false);
+  useEffect(() => { api.siteAddAllowed().then(setAddAllowed, () => setAddAllowed(false)); }, []);
   const [address, setAddress] = useState("");
   const [adding, setAdding] = useState(false);
   const [leaving, setLeaving] = useState<{ site: SiteView; remove: boolean } | null>(null);
@@ -44,20 +47,18 @@ export function SitesPanel({ sites, onChanged }: { sites: SiteView[]; onChanged:
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-3">
         <div>
           <h2 id="sites-title" className="font-display text-sm font-semibold">Sites</h2>
-          <p className="text-xs text-fg-3">Websites that publish challenges and rank your uploaded attempts. Without one, everything stays on this PC.</p>
+          <p className="text-xs text-fg-3">Where challenges come from and your uploaded attempts are ranked. Without signing in, everything stays on this PC.</p>
         </div>
-        <form className="flex items-center gap-2" onSubmit={add}>
+        {addAllowed ? <form className="flex items-center gap-2" onSubmit={add}>
           <label className="sr-only" htmlFor="site-address">Site address</label>
           <input id="site-address" type="url" inputMode="url" placeholder="https://example.org" value={address} onChange={(e) => setAddress(e.target.value)}
             className="readout w-64 rounded-md border border-line bg-surface px-3 py-1.5 text-sm text-fg placeholder:text-fg-3 focus-visible:outline-2 focus-visible:outline-[var(--accent)]" />
           <Button type="submit" variant="secondary" size="sm" loading={adding} disabled={!address.trim()}><Plus size={14} aria-hidden="true" />Add site</Button>
-        </form>
+        </form> : null}
       </div>
-      {sites.length ? (
-        <ul className="divide-y divide-line">
-          {sites.map((site) => <SiteRow key={site.origin} site={site} onChanged={onChanged} onLeave={(remove) => setLeaving({ site, remove })} />)}
-        </ul>
-      ) : <p className="px-4 py-3 text-sm text-fg-3">No sites. Add one by its address to fly its challenges ranked.</p>}
+      <ul className="divide-y divide-line">
+        {sites.map((site) => <SiteRow key={site.origin} site={site} onChanged={onChanged} onLeave={(remove) => setLeaving({ site, remove })} />)}
+      </ul>
       <Settings />
       <ConfirmDialog open={leaving !== null} busy={busy} title={leaving?.remove ? "Remove this site?" : "Sign out of this site?"}
         confirmLabel={leaving?.remove ? "Remove site" : "Sign out"} onConfirm={leave} onCancel={() => setLeaving(null)}>
@@ -118,7 +119,7 @@ function SiteRow({ site, onChanged, onLeave }: { site: SiteView; onChanged: () =
   return (
     <li>
       <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 px-4 py-3">
-        <button type="button" className="rounded p-1 text-fg-3 hover:bg-muted hover:text-fg" aria-expanded={open} aria-label={`${open ? "Hide" : "Show"} challenges of ${site.host}`} onClick={() => setOpen(!open)}>
+        <button type="button" className="rounded p-1 text-fg-3 hover:bg-muted hover:text-fg disabled:invisible" disabled={site.closed !== null} aria-expanded={open} aria-label={`${open ? "Hide" : "Show"} challenges of ${site.host}`} onClick={() => setOpen(!open)}>
           <ChevronRight size={15} className={`transition-transform ${open ? "rotate-90" : ""}`} aria-hidden="true" />
         </button>
         <div className="min-w-0">
@@ -129,6 +130,7 @@ function SiteRow({ site, onChanged, onLeave }: { site: SiteView; onChanged: () =
             {site.signed_in ? <Badge size="sm" tone="success">{site.handle ? `Signed in as ${site.handle}` : "Signed in"}</Badge> : <Badge size="sm" tone="neutral">Signed out</Badge>}
             {site.pending ? <span className="text-xs" style={{ color: "var(--warning)" }}>{site.pending} to upload</span> : null}
           </div>
+          {site.closed ? <p className="mt-1 text-xs text-fg-3">{site.closed} Sign in checks again.</p> : null}
           {site.device ? (
             <p className="mt-1.5 text-sm text-fg-2">
               Enter <span className="readout rounded bg-muted px-1.5 py-0.5 text-base font-semibold tracking-widest text-fg">{site.device.user_code}</span> at <span className="readout">{site.device.verification_uri}</span>
@@ -148,15 +150,17 @@ function SiteRow({ site, onChanged, onLeave }: { site: SiteView; onChanged: () =
               </Tooltip>
             </>
           )}
-          <Tooltip content="Remove this site" side="left">
-            <button type="button" className="rounded p-1.5 text-fg-3 hover:bg-muted hover:text-danger" aria-label={`Remove ${site.host}`} onClick={() => onLeave(true)}>
-              <Trash2 size={14} aria-hidden="true" />
-            </button>
-          </Tooltip>
+          {site.built_in ? null : (
+            <Tooltip content="Remove this site" side="left">
+              <button type="button" className="rounded p-1.5 text-fg-3 hover:bg-muted hover:text-danger" aria-label={`Remove ${site.host}`} onClick={() => onLeave(true)}>
+                <Trash2 size={14} aria-hidden="true" />
+              </button>
+            </Tooltip>
+          )}
         </div>
       </div>
       {signing === "browser" ? <p className="px-4 pb-3 pl-14 text-xs text-fg-3">Finish signing in in your browser; this waits up to 5 minutes.</p> : null}
-      {open ? <SiteChallenges key={site.origin} site={site} onTaken={onChanged} /> : null}
+      {open && !site.closed ? <SiteChallenges key={site.origin} site={site} onTaken={onChanged} /> : null}
     </li>
   );
 }
