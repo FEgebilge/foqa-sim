@@ -1,7 +1,8 @@
 //! Rule engine: event definitions in YAML with a unit-checked expression
 //! language (`expr`), loaded and validated up front (`rule`) and evaluated
 //! over an analysed flight (`engine`), with the limits of the aircraft type
-//! from its profile (`profile`). Every event names its rule and version, the
+//! from its profile (`profile`), and the ground-strike measure everything
+//! shares (`strike`). Every event names its rule and version, the
 //! threshold it crossed and the value that crossed it.
 
 #![forbid(unsafe_code)]
@@ -10,6 +11,7 @@ mod engine;
 pub mod expr;
 mod profile;
 mod rule;
+mod strike;
 
 pub use engine::{Event, aircraft, applies, evaluate};
 pub use profile::{
@@ -20,3 +22,4 @@ pub use profile::{
 pub use rule::{
     Aircraft, Domain, Level, Limits, LoadError, Rule, Scalar, Side, TdField, Trigger, Var, load,
 };
+pub use strike::{STRIKE_SUSTAIN_S, Strike, StrikeLimits, StrikeWatch, after_touchdown, strikes};

@@ -514,6 +514,31 @@ at: touchdown
 measure: td.bounce
 level: medium
 ---
+rule: ground-strike
+version: 1
+title: Wing or nose struck the ground
+domain: contact
+description: >
+  After the touchdown, before the next liftoff: bank or nose-down pitch on
+  the ground beyond what the gear allows, held 0.4 s, or a touchdown
+  already banked beyond the roll limit (light 12 deg, transport 8 deg;
+  nose-down below -5 deg). The limits and the measure are the ones the
+  live crash detection and the challenge check use (`rules::strike`, where
+  they are sourced). MSFS reports no crash to SimConnect, so the attitude
+  is the evidence.
+why_it_matters: >
+  A wingtip, an engine nacelle or a propeller on the runway is an accident:
+  the aircraft ground-looped, nosed over or touched down with a wing low,
+  and is damaged.
+advice: >
+  Keep the wings level and the nose on the centreline with rudder through
+  the landing roll; land on the main wheels with the nose up, and do not
+  brake hard with the nose wheel loaded. In a crosswind keep the aileron
+  into the wind as you slow.
+at: touchdown
+measure: td.ground_strike
+level: high
+---
 rule: long-landing
 version: 1
 title: Long landing

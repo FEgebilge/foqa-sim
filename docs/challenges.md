@@ -20,6 +20,7 @@ threads, BeatMyLanding, OnAir and others; sources are linked inline.
 |---|---|---|
 | Start on final, airborne | `SIMCONNECT_DATA_INITPOSITION` (lat, lon, alt, pitch, bank, heading, `OnGround = 0`, airspeed) on the user aircraft | Works; BeatMyLanding ships a teleport to the threshold. Complex add-ons may need their own configuration |
 | Gear, flaps, AP off | Key events (`GEAR_DOWN`, `FLAPS_SET`, `AP_MASTER`) | Default aircraft yes; add-ons with L-vars vary |
+| NAV1 on the runway's ILS | Facility database (runway `*_ILS_ICAO`, then the VOR's `FREQUENCY`), key event `NAV1_RADIO_SET_HZ` | Not yet verified live; add-on radios may ignore it |
 | Weather | No documented SimConnect setter in 2024; the old weather API is deprecated; custom wind had bugs (SU4) | **Cannot be relied on** |
 | Load a whole flight (`.FLT`) | `SimConnect_FlightLoad` | Reported to reset airborne starts to the ground ([DevSupport](https://devsupport.flightsimulator.com/t/loading-a-saved-flight-via-simconnect-is-not-working/11274)) |
 | Time of day | `ZULU_*_SET` events | Changes live weather; measure instead |
@@ -149,7 +150,8 @@ Local (always available):
    each with a one-line fix (protocol B8).
 2. **Start:** the app positions and configures the aircraft and writes an
    attempt marker into the recording; the attempt runs from the start to
-   the stop on the runway. **Fly again** abandons it and starts over.
+   the stop on the runway. **Fly again** abandons it and starts over
+   with a pristine aircraft ("Fly again: a clean start" below).
 3. **Grade (local):** conditions, rules and score evaluated on the
    recording; the pilot sees at once whether it counts, in the app, the
    toolbar panel strip and the EFB tab.
@@ -196,7 +198,18 @@ with the one its challenge names, so app updates never move a board.
 **`landing-2`** (0.10) is retired: a challenge naming it is graded with
 landing-3, and its attempts say `landing-3` ([scoring.md](scoring.md) §6).
 
-**`landing-3`** is the method for new challenges, specified in
+**Every attempt is graded with the debrief's current method**
+(`challenge::CURRENT`, today `landing-3`; decided 2026-10-30), whatever
+the definition's `scoring.version` names: a challenge and the debrief
+never grade one landing two ways. `scoring.version` must still be a known
+name (`landing-1`, `landing-2`, `landing-3`; an unknown one needs a newer
+app), and the attempt's `score.version` says which method graded it. A
+definition naming `landing-2` or `landing-3` must allow only types with a
+Vref source; one naming `landing-1` still loads without, and its attempts
+then fail the `data` check where no Vref is known. The app's briefing and
+the in-sim briefing show the method used.
+
+**`landing-3`** is that method, specified in
 [scoring.md](scoring.md): the same assessment the debrief shows (six
 domains, ideal and tolerance from the checkride standard, levels from the
 FDM thresholds, safety caps), run as a ranked attempt from the gate.
@@ -211,26 +224,15 @@ scoring class (light, turboprop, jet); the attempt does not carry the
 class yet, the site reads it from the type. The attempt also carries
 `assessment { method, score, grade, confidence, caps[{ kind, score,
 reason, source }] }`, the debrief's grade bands, `confidence` and safety
-caps for that landing, so a site does not rederive them from `parts`
-(absent for `landing-1`).
+caps for that landing, so a site does not rederive them from `parts`.
 
-**`landing-1`** (frozen, for the challenges that name it), 0 to 100, sum of
-smooth sub-scores (curves, not bands), per aircraft class:
+**`landing-1`** (retired 0.11.3) was the first challenge score: seven
+weighted parts on smooth curves per class (touchdown point, sink rate,
+centreline, stability, peak g, bounce, rollout). Its code is gone; old
+attempts keep the result they were graded with, and a definition naming
+it is graded with the current method.
 
-| Part | Weight | Full marks (transport / light) | Zero |
-|---|---|---|---|
-| Touchdown point | 25 | Within 8 % of the touchdown zone from the aiming point | Outside the zone |
-| Sink rate | 25 | 100–250 fpm / 60–180 fpm; softer loses points too (float) | 600 / 500 fpm |
-| Centreline | 15 | Within 1.5 m | 22.5 m |
-| Stability from the gate | 10 | No rule event (low 0.7, medium 0.3) | A high event |
-| Peak g | 10 | Up to 1.4 g / 1.6 g | 2.0 g / 2.5 g |
-| Bounce | 10 | None | Bounced |
-| Rollout | 5 | Within 3 m of the centreline | 22.5 m or off the runway |
-
-Each part is piecewise linear between those points (`crates/challenge/src/score.rs`).
-
-The formula is versioned (`scoring.version`): old attempts keep their score
-when it changes. Since conditions are fixed per challenge, no difficulty
+The method is versioned: old attempts keep their score when it changes. Since conditions are fixed per challenge, no difficulty
 multiplier is needed inside one board. For comparison: BeatMyLanding is
 penalty-based with a crosswind/tailwind multiplier capped at 1.45; OnAir
 grades sink rate in bands (very smooth < 200 fpm … hard > 500 fpm).
@@ -247,8 +249,10 @@ Leaderboards are the site's business, not part of the protocol.
 ## Decisions (Ege, 2026-10-27)
 
 1. **Start:** `teleport` by default, `self` as the fallback.
-2. **Scoring:** `landing-1` above; `landing-2` ([scoring.md](scoring.md))
-   for new challenges since 2026-10-27, `landing-3` since 0.11.
+2. **Scoring:** `landing-1` at first; `landing-2` ([scoring.md](scoring.md))
+   for new challenges since 2026-10-27, `landing-3` since 0.11. Since
+   2026-10-30 every challenge is graded with the debrief's current method
+   whatever it names (`challenge::CURRENT`).
 
 3. **Server analysis:** the Rust analysis on the home server:
    `fdm challenge <challenge.json> <flight.fqz>` prints the `Attempt`
@@ -275,23 +279,206 @@ before `Service::run`; it is `Clone + Send`:
 
 ```rust
 let sim = service.sim_requests();                    // capture::SimRequests
-let placed = sim.place(Start { pos, gear_down: true, flaps: Some(0.875) });
 let airport = sim.airport("LTFJ");                   // fdm_core::Airport with runways
+let ils = sim.ils("LTFJ", "24");                     // Option<capture::Ils>
+let placed = sim.place(Start { pos, gear_down: true, flaps: Some(0.875), nav1_hz });
 placed.recv_timeout(Duration::from_secs(5))??;       // Result<(), String>
 ```
 
 - `place` sets `InitPosition` (lat, lon, altitude ft MSL, pitch, bank, true
   heading, `on_ground`, airspeed kt; `sim_link::InitPosition`) on the user
-  aircraft, then sends `AUTOPILOT_OFF`, `GEAR_DOWN`/`GEAR_UP` and, if
-  `flaps` is set, `FLAPS_SET` (`flaps_set_data`: handle fraction × 16383,
-  the sim snaps to the closest detent). It runs at the next sim frame; `Ok`
-  means the calls went out, a rejection by the sim is only logged.
+  aircraft, then sends `AUTOPILOT_OFF`, `GEAR_DOWN`/`GEAR_UP`, if
+  `flaps` is set `FLAPS_SET` (`flaps_set_data`: handle fraction × 16383,
+  the sim snaps to the closest detent) and, if `nav1_hz` is set,
+  `NAV1_RADIO_SET_HZ` (active NAV1, Hz; standby untouched). It runs at the
+  next sim frame; a rejection by the sim is only logged.
+- **The placement splits the recording** like any teleport
+  (`Session::place`, 2026-10-30): the flight open closes where the
+  aircraft was (kept as a flight of its own, or dropped under
+  `MIN_FLIGHT_S` like any short recording), frames still at the old
+  position are dropped, and a new flight opens at the first frame after
+  the sim's `TELEPORT_DONE`, or `PLACE_SETTLE` (1 s) after the placement
+  when the sim reports no teleport (`InitPosition` applies at the next sim
+  frame; a second costs at most a second of the approach, never a frame of
+  where the aircraft was). The sim's teleport flows within `OWN_TELEPORT`
+  (10 s) are the app's own and split nothing more. `place` answers with
+  that new flight's id, or an error when none opened within 10 s; the app
+  binds the attempt to it (`Attempts::place` takes the flight from the
+  placement), waits until it records and writes the begin marker there.
+  So the attempt's flight, its debrief and its analysis begin exactly at
+  the challenge start: no phantom takeoff, no teleport in it.
+- `ils` (`sim_link::ils::IlsFetch`) asks the airport's runways for the
+  end's ILS: `PRIMARY_ILS_ICAO`/`_REGION`/`_TYPE` when the runway's primary
+  end (`PRIMARY_NUMBER`/`_DESIGNATOR`) is the asked one, else the
+  `SECONDARY_*` ones; a type other than `'V'` or an empty ICAO is no ILS.
+  Then it requests that VOR-type facility by ICAO and region for its
+  `FREQUENCY`, refused outside 108–118 MHz. Both stages share one 10 s
+  deadline. Fields: MSFS 2024 SDK, [`SimConnect_AddToFacilityDefinition`](https://docs.flightsimulator.com/msfs2024/retail/programming-apis/simconnect/api-reference/facilities/simconnect_addtofacilitydefinition/)
+  (RUNWAY, VOR); event: [Aircraft Radio Navigation Events](https://docs.flightsimulator.com/msfs2024/retail/programming-apis/key-events/aircraft-radio-navigation-events/).
+- The app (`place_challenge`) looks the ILS up before placing; without one,
+  or if the lookup fails, it places anyway. The attempt log's `placed`
+  start carries `nav1`: `NAV1 set to 110.30 (IZBA ILS 16L)`, `no ILS on
+  34R: NAV1 left as is`, or why the lookup failed.
 - `airport` answers from the facility database (thresholds:
   `analyzer::runway::thresholds`); it is also recorded like the airports
   captured for landings.
 - While the sim is not connected both answer `Err` at once; if the sim
   quits first, the receiver reports disconnection.
 
+Still to check live for the split: whether MSFS 2024 sends
+`TELEPORT_START`/`DONE` for `InitPosition` (the log line `flight started`
+right after the placement, and the old flight saved or discarded), that the
+new flight's first frame is at the start, and that the attempt's debrief
+starts on final.
+
 Not yet verified against a live sim: the placement itself, `Pitch` sign
 (SimConnect's usual positive nose-down assumed), whether key events sent
 right after the teleport stick, and add-on aircraft that ignore key events.
+For NAV1: that the runway `*_ILS_*` fields are filled (a [DevSupport thread](https://devsupport.flightsimulator.com/t/facility-data-airport-runway-missing-ils-info/13056)
+reports them empty in MSFS 2024; the fallback would be the ILS approach's
+recommended navaid), that an airport block with no values is answered,
+that the VOR `FREQUENCY` is in Hz, and that the tuned NAV1 holds after the
+teleport.
+
+## Fly again: a clean start (implemented, 2026-10-30)
+
+After a crash or damage, placing the same aircraft again would fly the
+next attempt damaged. Fly again therefore starts every attempt from a
+pristine aircraft, with no click in the sim:
+
+1. **Every placement not reloaded from a clean start** (the first Place,
+   and a Fly again with none saved for the loaded type) places as before,
+   then saves the flight with
+   `SimConnect_FlightSave` as the challenge's clean start:
+   `<app data>/challenge-snapshots/<challenge key>.FLT`, beside
+   `<challenge key>.json` with the ICAO type it was saved for. Each such
+   placement replaces it (the old one is deleted first, so a failed save
+   leaves none). The service saves it `SAVE_AFTER` (2 s) after the
+   placement, so it holds the start itself: at the start, gear, flaps
+   and NAV1 set. Log: `Clean start saved for Fly again (C172)`, or why
+   not (`the loaded aircraft's type is not known yet`).
+2. **Fly again** abandons the attempt (`replaced`), creates the next one
+   and, if a clean start is saved for the type loaded now, reloads it
+   (`SimRequests::reload`, `SimConnect_FlightLoad`), waits for the sim to
+   settle, places the start as usual (position, autopilot off, gear,
+   flaps, NAV1) and only then writes the begin marker. A clean start of
+   another type is never reloaded: a reload brings back the saved
+   aircraft, not the loaded one. Log: `Reloading the clean start (C172)`,
+   `Reloaded in 12.3 s`; or `No clean start (none saved yet): placed as
+   is`, `No clean start (the one saved is for a C172, a B738 is loaded):
+   placed as is`, `Clean start not reloaded: <why>; placed as is`.
+3. **The recording:** the load ends the recorded flight (flow
+   `FLIGHT_END`/`FLT_LOAD`, `Session`), and the sim's own sequence after it
+   opens and closes short flights of its own. The reload answers once the
+   sim settled and the recorder opened a flight after it; the placement
+   that follows splits that one too (a second or so on the runway, dropped
+   as too short), and the new attempt binds to the flight the placement
+   opened, as a first Place does: one split per attempt, never a flight
+   that starts on the runway. The attempt replaced keeps its own flight.
+
+**Bench, 2026-10-30** (MSFS 2024, C172, `foqa-reset-lab`): the sim showed
+its crash message after a ground impact but SimConnect sent nothing: no
+`Crashed` system event, no `PLANE_CRASH` flow, `CRASH FLAG` and `FLAP
+DAMAGE BY SPEED` stayed 0. Damage cannot be detected, so the clean start
+is reloaded at every Fly again. `SimConnect_FlightSave` works airborne
+(`FlightSaved` at once); `SimConnect_FlightLoad` reloads in about 1.7 s,
+airborne at the saved state with the saved fuel, visually intact. The
+sim's own Restart then also reloads the last flight saved this way.
+
+Flow after the load (`SIMCONNECT_FLOW_EVENT_ID`, SimConnect.h): `FLIGHT_END`
+(15), `FLT_LOAD`/`FLT_LOADED` (1/2) with the file, `TELEPORT_START`/`DONE`
+(3/4), `SimStop`/`SimStart`; about 10 s later the sim moves the aircraft
+to the runway: `FLIGHT_START` (14), `taxi.flt` loaded, `RTC_START` (10),
+about 2.5 s later a teleport, `runway.flt`, `RTC_END` (11). After
+`RTC_END` the aircraft sits on the runway (flaps back at the takeoff
+detent) and `InitPosition` puts it at the start correctly; placed before,
+the move undoes it. The reload is therefore settled at `RTC_END` after the
+load (`ReloadWait`, `crates/capture/src/place.rs`).
+
+**Fallback:** without that move (MSFS 2020 sends no flow events; another
+flow may not move the aircraft) the reload is settled 15 s after the last
+`SimStart` after the load (`QUIET_AFTER`; the move starts about 10 s
+after it), and the log says `Reloaded in … s, the sim did not move it to
+the runway`. Nothing loaded within `RELOAD_TIMEOUT` (30 s), a move that
+never ends, or a return to the main menu is a failed reload: the start is
+placed as is in the flight recording then, or fails if there is none.
+
+Still to check live: a full Fly again after a crash (the ~13 s wait, the
+start placed after `RTC_END`, the attempt graded from the new flight);
+that a save 2 s after the placement holds the configured start (flaps
+moving, NAV1); the sim's crash dialog left open during the reload; a
+clean start reloaded after the sim was restarted; the fallback on MSFS
+2020; add-on aircraft.
+
+**A crash flies again by itself.** MSFS 2024 showed its crash screen but
+sent SimConnect nothing (2026-10-30 bench: no `Crashed`, no flow
+`PLANE_CRASH`, `CRASH FLAG` 0), so the app reads the impact instead: a
+touchdown during an attempt at 4 g or more, or 2,000 fpm or more (that
+crash: 8.3 g, 10,400 fpm), ends the attempt (`crashed`, graded as it
+stands) and starts Fly again at once, about 12 s after the impact when the
+landing notice comes. Not yet verified: that `FlightLoad` works while the
+crash screen is shown.
+
+**Every attempt from the clean start, alone.** The first Place (and a Fly
+again with no clean start for the loaded type) places the aircraft, saves
+the clean start there and reloads it; Fly again reloads it. So every
+attempt starts from the same saved flight, undamaged, and without AI air
+traffic: the saved file gets `[AirTraffic] Status=0`, as the sim's own live
+events and mission templates have (not their `[TrafficManager] disable=True`:
+with it the sim never ended its move to the runway after a load, bench
+2026-10-31) (2026-10-30: an airliner crossed a final and its wake upset the
+approach). The first attempt takes the reload's 15 s too. A reload that
+does not settle within 60 s places nothing (the sim would move the aircraft
+back to the runway when it ends): the attempt asks for Fly again. Not yet verified
+in the sim: that these sections turn the traffic off.
+
+**Finished when stopped.** After a landing, the live frames tell when the
+aircraft has stopped: ground speed below 2 kt held 3 s (`Monitor`,
+`Happening::Stopped`). The attempt then finishes and is graded at once,
+instead of `ROLLOUT` (120 s) after the landing or a press of Finish; the
+120 s stay as the fallback. A stop that comes before the landing's analysis
+(about 12 s after the last touchdown) waits for it, up to 30 s.
+
+**Faster detection.** The crash is told from the live frames a second
+after contact (`Impact`: descent rate on the last airborne frame, peak load
+over the next second), not from the landing's analysis some 12 s later.
+
+**A wing, propeller or nose strike is a crash too** (2026-10-30). A C172
+landed fine on LTBJ 34L (247 fpm, 1.29 g), then ground-looped at 45 kt:
+roll -25° and pitch -17° for 5 s, then +25°, a wingtip and the propeller
+on the runway. MSFS's own challenges call that a crash; ours scored it
+70.5 and it counted. The attitude is the evidence (`rules::strike`, one
+measure for everything): after a touchdown, bank beyond the class's roll
+limit (light 12°, transport 8°) or pitch below -5° on the ground, held
+0.4 s (a single noisy frame never counts), or a touchdown frame already
+banked beyond the roll limit. The limits and their sources are in
+`crates/rules/src/strike.rs` (FOQA-Sim estimates from gear geometry and a
+737 wingtip incident at 8.5°; a tailwheel type gets the nosewheel
+value, the profiles cannot tell the gear layout).
+
+- **Live:** `Monitor` follows it frame by frame and the service reports
+  `Happening::Strike`; the app ends the attempts flown in that flight
+  `crashed`, logs `Ground strike: wing strike (roll -25°, pitch -17°),
+  ended as a crash` and starts Fly again, like a crash impact.
+- **Grade:** the check `ground_strike` fails (`struck the ground with a
+  wing or the nose: …`), so the attempt never counts; the landing-3
+  assessment is held at 0 by the excursion cap, titled "Crash or ground
+  strike"; the debrief shows the High event `ground-strike`.
+
+Regression: `fixtures/c172-ltbj-34l-ground-strike.fqz` (that landing, `fdm
+slice --from 150 --to 240`), `crates/challenge/tests/ground_strike.rs`:
+the strike at 201.5 s, the check failed for a definition naming
+landing-1 or landing-3, the score held at 0. Still to check live: that a real ground loop or
+nose-over is told within half a second, and that hard but normal crosswind
+landings (wing low at contact, up to 10° in a light aircraft) never are.
+
+**The reload still takes about 15 s** (bench 2026-10-30: 15.4 s), most of
+it the sim's own move to the runway: a saved free flight says
+`FirstFlightState=PREFLIGHT_HOLDSHORT`. Tried the same day by editing the
+saved file: `FLIGHT_DESCENT` (what the short-landing tutorial uses) loads
+the aircraft where it was saved, but about 9 s later starts the sim's
+`cruise.flt` intro (`FLIGHT_START`, `RTC_START`, no `RTC_END`), which waits
+for Ready to fly and resets the flaps; `FREEFLIGHT` loads in under a second
+with `RTC_END` at once and no later flow, but the aircraft stayed frozen
+(the sim may have been held on a screen the bench could not see). To
+verify with the screen in view before shortening the wait.

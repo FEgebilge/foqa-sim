@@ -16,7 +16,8 @@ use ::debrief::{
     TrendFilter, Trends,
 };
 use capture::{
-    ASK_TIMEOUT, InitPosition, PreflightLine, SimRequests, SiteStrip, Start, Stopper, Views,
+    ASK_TIMEOUT, Ils, Impact, InitPosition, PreflightLine, RELOAD_TIMEOUT, Settled, SimRequests,
+    SiteStrip, Start, Stopper, Strike, Views,
 };
 use challenge::{Attempt, Begin, Challenge, Mode, StartState};
 use recorder::{AttemptMarker, AttemptPhase};
@@ -25,7 +26,8 @@ use serde_json::json;
 use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
 
-use crate::attempts::{Attempts, Cut, Record, State as AttemptState, Uncut, View};
+use crate::attempts::{Attempts, Cut, Placement, Record, State as AttemptState, Uncut, View};
+use crate::clean_start::CleanStarts;
 use crate::diag;
 use crate::library::{Briefing, Entry, Library};
 use crate::setup::{Setup, SetupStatus};
@@ -48,6 +50,8 @@ pub struct Shared {
     /// Challenge files the user opened.
     pub(crate) library: Library,
     pub(crate) attempts: Attempts,
+    /// The challenges' clean starts, which Fly again reloads.
+    clean_starts: CleanStarts,
     /// What an optional module adds to an attempt (the site client).
     pub(crate) hooks: Option<Arc<dyn AttemptHooks>>,
     /// The in-sim views' challenge part (B9).
@@ -57,7 +61,17 @@ pub struct Shared {
     /// What the last analysis of the live journal found, so the gate watch
     /// and the pre-flight card don't re-read a journal that did not grow.
     gate_memo: Memo<Option<f64>>,
-    preflight_memo: Memo<(Line, Option<f64>)>,
+    preflight_memo: Memo<(Line, Option<f64>, Option<String>)>,
+}
+
+/// The flight being recorded, as a start sees it.
+#[derive(Debug, Clone)]
+struct Recording {
+    id: String,
+    /// The sim time it has reached, once it has data.
+    begin_s: Option<f64>,
+    /// The ICAO type flown, once known.
+    icao: Option<String>,
 }
 
 /// The size and modification time of a file: it changed if they did.
@@ -120,12 +134,14 @@ impl Shared {
         sim: SimRequests,
         library: Library,
         attempts: Attempts,
+        clean_starts: CleanStarts,
         views: Views,
     ) -> Self {
         Self {
             views,
             library,
             attempts,
+            clean_starts,
             sim,
             station,
             status: Mutex::new(RecorderStatus::WaitingForSim),
@@ -348,25 +364,38 @@ pub fn flight_meta_set(
     shared.store().set_meta(&id, meta)
 }
 
+/// Where a start put the aircraft, and NAV1 in words.
+#[derive(Debug, Serialize)]
+pub struct Placed {
+    #[serde(flatten)]
+    pub start: StartState,
+    pub nav1: String,
+}
+
 /// Places the aircraft at a landing challenge's start (docs/challenges.md):
-/// the airport from the sim, the start on its extended centreline.
+/// the airport from the sim, the start on its extended centreline, NAV1 on
+/// the runway's ILS.
 #[tauri::command]
 pub async fn place_challenge(
     definition: String,
     shared: State<'_, Arc<Shared>>,
-) -> Result<StartState, String> {
+) -> Result<Placed, String> {
     let shared = Arc::clone(&shared);
-    blocking(move || shared.place(&Challenge::parse(&definition)?)).await
+    blocking(move || Ok(shared.place(&Challenge::parse(&definition)?)?.0)).await
 }
 
 impl Shared {
-    fn place(&self, challenge: &Challenge) -> Result<StartState, String> {
+    /// Places the start; returns it with the id of the flight the
+    /// placement opened (the recording splits there, `SimRequests::place`).
+    fn place(&self, challenge: &Challenge) -> Result<(Placed, String), String> {
         if challenge.start.mode != Mode::Teleport {
             return Err("this challenge starts wherever you fly it from".into());
         }
         let airport = answer(self.sim.airport(&challenge.airport))?;
         let s = challenge::start_state(challenge, &airport)
             .ok_or_else(|| format!("{} has no runway {}", challenge.airport, challenge.runway))?;
+        // Without its ILS the start still goes ahead, NAV1 as the pilot left it.
+        let ils = answer(self.sim.ils(&challenge.airport, &challenge.runway));
         let pos = InitPosition {
             latitude_deg: s.lat_deg,
             longitude_deg: s.lon_deg,
@@ -381,14 +410,22 @@ impl Shared {
             pos,
             gear_down: challenge.start.gear_down,
             flaps: Some(challenge.start.flaps),
+            nav1_hz: ils
+                .as_ref()
+                .ok()
+                .and_then(|i| i.as_ref())
+                .map(|i| i.frequency_hz),
         };
-        answer(self.sim.place(start))?;
-        Ok(s)
+        let flight_id = answer(self.sim.place(start))?;
+        let placed = Placed {
+            start: s,
+            nav1: nav1_words(&challenge.runway, &ils),
+        };
+        Ok((placed, flight_id))
     }
 
-    /// The pre-flight card (protocol B8) and the flight being recorded,
-    /// with the sim time it has reached.
-    fn preflight(&self, key: &str, c: &Challenge) -> (Vec<Line>, Option<(String, Option<f64>)>) {
+    /// The pre-flight card (protocol B8) and the flight being recorded.
+    fn preflight(&self, key: &str, c: &Challenge) -> (Vec<Line>, Option<Recording>) {
         let status = lock(&self.status).clone();
         let load = if c.start.mode == Mode::Teleport {
             "Load a flight in MSFS 2024 at any airport; Place moves you to the start."
@@ -421,14 +458,22 @@ impl Shared {
                 None,
             ),
         };
-        let (aircraft, begin) = match flight.as_ref().map(|id| self.flight(id)) {
+        let (aircraft, begin_s, icao) = match flight.as_ref().map(|id| self.flight(id)) {
             Some(Ok(path)) => self.preflight_memo.get(key, &path, || {
                 let a = self.station.open(&path).map_err(|e| e.to_string());
                 let begin = a.as_ref().ok().and_then(|a| a.track.t.last());
-                (aircraft_line(c, Some(&a)), begin.map(|t| t.as_secs_f64()))
+                let icao = a
+                    .as_ref()
+                    .ok()
+                    .and_then(|a| a.flight.aircraft()?.icao_type());
+                (
+                    aircraft_line(c, Some(&a)),
+                    begin.map(|t| t.as_secs_f64()),
+                    icao,
+                )
             }),
-            Some(Err(e)) => (aircraft_line(c, Some(&Err(e))), None),
-            None => (aircraft_line(c, None), None),
+            Some(Err(e)) => (aircraft_line(c, Some(&Err(e))), None, None),
+            None => (aircraft_line(c, None), None, None),
         };
         let conditions = &c.conditions;
         let weather = if conditions.wind.is_none()
@@ -439,7 +484,7 @@ impl Shared {
         } else {
             Line::unknown(
                 "weather",
-                "Set by the challenge (pending in-flight verification).",
+                "Checked at touchdown against the challenge's wind limits; the app does not set the sim's weather.",
             )
         };
         let hooked = self.hooks.as_ref().and_then(|h| h.ranking(key));
@@ -447,10 +492,8 @@ impl Shared {
             Some((state, text, fix)) => Line::new("ranking", state, text, fix.as_deref()),
             None => Line::ok("ranking", "Local challenge file: graded here only."),
         };
-        (
-            vec![sim, aircraft, weather, ranking],
-            flight.map(|id| (id, begin)),
-        )
+        let recording = flight.map(|id| Recording { id, begin_s, icao });
+        (vec![sim, aircraft, weather, ranking], recording)
     }
 
     /// Grades an attempt from its whole flight: only a landing after its
@@ -470,17 +513,46 @@ impl Shared {
     }
 
     /// Creates an attempt at `definition` and places it; as `practice` no
-    /// site is asked for an attempt, so it is never uploaded.
+    /// site is asked for an attempt, so it is never uploaded. The first
+    /// placement saves the challenge's clean start.
     pub(crate) fn start_attempt(
         &self,
         key: &str,
         definition: &str,
         practice: bool,
     ) -> Result<Record, String> {
+        self.attempt(key, definition, practice, false)
+    }
+
+    /// `start_attempt`; `again` (Fly again) reloads the clean start first
+    /// instead of saving it. A teleport start splits the recording: the
+    /// attempt is bound to the flight the placement opened, which begins at
+    /// the start, and its begin marker lands there (docs/challenges.md).
+    fn attempt(
+        &self,
+        key: &str,
+        definition: &str,
+        practice: bool,
+        again: bool,
+    ) -> Result<Record, String> {
         let c = Challenge::parse(definition)?;
         let (lines, flight) = self.preflight(key, &c);
-        let (flight_id, begin_s) = flight.ok_or_else(|| lines[0].text.clone())?;
+        let flight = flight.ok_or_else(|| lines[0].text.clone())?;
         let record = self.attempts.create(key, definition)?;
+        let teleport = c.start.mode == Mode::Teleport;
+        // Every placed attempt is flown from the clean start: the first one
+        // (and a Fly again with none saved for this type) saves it first,
+        // so all attempts start alike, undamaged and without traffic.
+        if teleport && (!again || self.clean_starts.find(key, flight.icao.as_deref()).is_err()) {
+            let text = match self.prepare_clean_start(key, &c, flight.icao.as_deref()) {
+                Ok(icao) => format!("Clean start saved ({icao}), no traffic"),
+                Err(e) => format!("Clean start not saved: {e}"),
+            };
+            self.log_clean_start(&record.id, &text);
+        }
+        if teleport && let Err(e) = self.reload(key, &record.id, &flight) {
+            return self.attempts.cannot_place(&record.id, e);
+        }
         let marker_ref = self
             .hooks
             .as_ref()
@@ -492,18 +564,100 @@ impl Shared {
             .map(|l| (l.name.to_owned(), l.state.into()))
             .collect();
         let reference = marker_ref.as_deref();
-        self.attempts
-            .place(&record.id, &flight_id, begin_s, reference, |c| {
-                let start = match c.start.mode {
-                    Mode::Teleport => {
-                        serde_json::to_value(self.place(c)?).map_err(|e| e.to_string())?
-                    }
-                    Mode::SelfFlown => "self".into(),
-                };
-                let begin = marker(&c.id, c.version, AttemptPhase::Begin, reference, None);
-                self.sim.attempt_marker(begin);
-                Ok(json!({ "start": start, "preflight": checks }))
+        let placed = self.attempts.place(&record.id, reference, |c| {
+            let (start, flight_id, begin_s) = match c.start.mode {
+                Mode::Teleport => {
+                    let (placed, flight_id) = self.place(c)?;
+                    // The marker goes into the open flight: wait for it.
+                    self.await_recording(&flight_id);
+                    let start = serde_json::to_value(placed).map_err(|e| e.to_string())?;
+                    (start, flight_id, None)
+                }
+                Mode::SelfFlown => ("self".into(), flight.id.clone(), flight.begin_s),
+            };
+            let begin = marker(&c.id, c.version, AttemptPhase::Begin, reference, None);
+            self.sim.attempt_marker(begin);
+            Ok(Placement {
+                fields: json!({ "start": start, "preflight": checks }),
+                flight_id,
+                begin_s,
             })
+        })?;
+        Ok(placed)
+    }
+
+    /// Places the aircraft at the start and saves the flight there as
+    /// `key`'s clean start, `SAVE_AFTER` (capture) past the placement so
+    /// that it is the start itself: the aircraft as the pilot loaded it,
+    /// configured. The sim cannot tell a damaged aircraft
+    /// (docs/challenges.md), so every first placement saves it again; the
+    /// short flight it opens ends with the reload that follows. Returns the
+    /// type it is saved for.
+    fn prepare_clean_start<'a>(
+        &self,
+        key: &str,
+        c: &Challenge,
+        icao: Option<&'a str>,
+    ) -> Result<&'a str, String> {
+        let icao = icao.ok_or("the loaded aircraft's type is not known yet")?;
+        let path = self.clean_starts.path(key)?;
+        self.clean_starts.forget(&path);
+        self.place(c)?;
+        answer(self.sim.save(&path))?;
+        self.clean_starts.written(&path, SAVE_WRITTEN)?;
+        self.clean_starts.saved(&path, icao)?;
+        Ok(icao)
+    }
+
+    /// Before Fly again: reloads `key`'s clean start if one is saved for
+    /// the type loaded, logging to attempt `id` what it did, and returns
+    /// whether it was reloaded. The placement after it splits the
+    /// recording once more, so the attempt's flight begins at the start,
+    /// not on the runway the reload left it on. `Err` when the reload
+    /// failed: the start is not placed, as the sim may still move it.
+    fn reload(&self, key: &str, id: &str, flight: &Recording) -> Result<bool, String> {
+        let path = match self.clean_starts.find(key, flight.icao.as_deref()) {
+            Ok(path) => path,
+            Err(why) => {
+                self.log_clean_start(id, &format!("No clean start ({why}): placed as is"));
+                return Ok(false);
+            }
+        };
+        let icao = flight.icao.as_deref().unwrap_or_default();
+        self.log_clean_start(id, &format!("Reloading the clean start ({icao})"));
+        let started = Instant::now();
+        match answer_within(self.sim.reload(&path), RELOAD_TIMEOUT + ASK_TIMEOUT) {
+            Ok(reloaded) => {
+                let how = match reloaded.settled {
+                    Settled::RunwayMove => "",
+                    Settled::Quiet => ", the sim did not move it to the runway",
+                };
+                let took = started.elapsed().as_secs_f64();
+                self.log_clean_start(id, &format!("Reloaded in {took:.1} s{how}"));
+                Ok(true)
+            }
+            // Placed now, the start would be undone when the sim's load ends
+            // and moves the aircraft to the runway: no attempt, try again.
+            Err(e) => {
+                self.log_clean_start(id, &format!("Clean start not reloaded: {e}"));
+                Err(format!("{e}. Press Fly again."))
+            }
+        }
+    }
+
+    /// Waits, up to `ASK_TIMEOUT`, until the status says flight `id` is
+    /// recording: what the gate watch and the end marker go by.
+    fn await_recording(&self, id: &str) {
+        let until = Instant::now() + ASK_TIMEOUT;
+        while !self.recording(id) && Instant::now() < until {
+            thread::sleep(Duration::from_millis(100));
+        }
+    }
+
+    fn log_clean_start(&self, id: &str, text: &str) {
+        if let Err(e) = self.attempts.clean_start(id, text) {
+            eprintln!("attempt {id}: {e}");
+        }
     }
 
     /// Writes the end marker of an attempt still open, into its flight if
@@ -517,7 +671,7 @@ impl Shared {
             return;
         }
         let reason = match reason {
-            "finish" | "stopped" => "stopped",
+            "finish" | "stopped" | "crashed" => "stopped",
             "cancelled" => "abandoned",
             other => other,
         };
@@ -549,7 +703,7 @@ impl Shared {
         if record.state.can_become(AttemptState::Abandoned) {
             self.abandon(id, "replaced")?;
         }
-        self.start_attempt(&record.key, &self.attempts.definition(id)?, false)
+        self.attempt(&record.key, &self.attempts.definition(id)?, false, true)
     }
 
     /// The pre-flight card of library entry `key`, as the views show it.
@@ -625,14 +779,48 @@ impl Shared {
         }
     }
 
+    /// A ground contact as the live frames measured it, a second after it:
+    /// a crash ends the attempts flying in that flight at once and flies
+    /// them again from the clean start. The sim tells SimConnect nothing of
+    /// a crash (docs/challenges.md), so the impact itself is the sign; the
+    /// landing's analysis comes some 12 s later and finds them gone.
+    pub fn impact(self: &Arc<Self>, flight_id: &str, impact: &Impact) {
+        if crash(impact.peak_g, impact.sink_fpm) {
+            self.touched(flight_id, impact.t_s, impact.sink_fpm, impact.peak_g);
+        }
+    }
+
+    /// A wing, propeller or nose strike on the ground (`rules::strike`), as
+    /// the live frames measured it: MSFS crashes on it but tells SimConnect
+    /// nothing, so the attempts flown in that flight end crashed and fly
+    /// again from the clean start, the reason in their log.
+    pub fn strike(self: &Arc<Self>, flight_id: &str, strike: &Strike) {
+        let text = format!(
+            "Ground strike: {} (roll {:.0}°, pitch {:.0}°), ended as a crash",
+            strike.reason(),
+            strike.roll_deg,
+            strike.pitch_deg
+        );
+        for id in self.attempts.struck(flight_id, strike.t_s, &text) {
+            self.crashed(id);
+        }
+    }
+
     /// A landing in the recorded flight: attempts flying in it go to the
-    /// rollout and are finished `ROLLOUT` later unless finished sooner.
+    /// rollout and are finished `ROLLOUT` later unless finished sooner; a
+    /// crash the live impact missed is handled as `impact` does.
     pub fn landed(self: &Arc<Self>, notice: &LandingNotice) {
         let td = &notice.touchdown;
-        for id in self
-            .attempts
-            .landed(&notice.flight_id, td.t_s, td.sink_fpm, td.peak_g)
-        {
+        self.touched(&notice.flight_id, td.t_s, td.sink_fpm, td.peak_g);
+    }
+
+    fn touched(self: &Arc<Self>, flight_id: &str, t_s: f64, sink_fpm: f64, peak_g: f64) {
+        let crashed = crash(peak_g, sink_fpm);
+        for id in self.attempts.landed(flight_id, t_s, sink_fpm, peak_g) {
+            if crashed {
+                self.crashed(id);
+                continue;
+            }
             let shared = Arc::clone(self);
             thread::spawn(move || {
                 thread::sleep(ROLLOUT);
@@ -645,6 +833,40 @@ impl Shared {
                 }
             });
         }
+    }
+
+    /// The aircraft stopped after a landing: its attempts finish now, not
+    /// `ROLLOUT` after the landing. The landing's analysis may come after
+    /// the stop (it waits for the full-rate window), so an attempt not yet
+    /// rolling out is waited for, up to `STOP_WAIT`.
+    pub fn stopped(self: &Arc<Self>, flight_id: &str, t_s: f64) {
+        for id in self.attempts.landing_in(flight_id, t_s) {
+            let shared = Arc::clone(self);
+            thread::spawn(move || {
+                let until = Instant::now() + STOP_WAIT;
+                while Instant::now() < until {
+                    match shared.attempts.get(&id).map(|r| r.state) {
+                        Ok(AttemptState::Rollout) => {
+                            let _ = shared.finish(&id, "stopped");
+                            return;
+                        }
+                        Ok(AttemptState::Flying | AttemptState::Approach) => {
+                            thread::sleep(Duration::from_millis(500))
+                        }
+                        _ => return,
+                    }
+                }
+            });
+        }
+    }
+
+    /// Ends attempt `id` as crashed and flies it again, on a thread of its own.
+    fn crashed(self: &Arc<Self>, id: String) {
+        let shared = Arc::clone(self);
+        thread::spawn(move || {
+            let _ = shared.finish(&id, "crashed");
+            let _ = shared.fly_again(&id);
+        });
     }
 
     /// A flight closed: its attempts in the air are abandoned, those
@@ -712,6 +934,22 @@ impl Shared {
 /// After a landing, how long the rollout runs before the attempt is graded
 /// on its own (protocol B5).
 const ROLLOUT: Duration = Duration::from_secs(120);
+/// How long a stop waits for its landing's analysis to put the attempt on
+/// the rollout (about 12 s after the last touchdown).
+const STOP_WAIT: Duration = Duration::from_secs(30);
+/// How long a clean start may take to reach the disk after the sim answers
+/// its save.
+const SAVE_WRITTEN: Duration = Duration::from_secs(10);
+/// An impact no landing survives: well past every type's hard-landing
+/// inspection load (C172 2.6 g, transports about 2 g) and FAR 23.473's
+/// design sink (about 600 fpm at the gear). The 2026-10-30 crash: 8.3 g,
+/// 10,400 fpm.
+const CRASH_G: f64 = 4.0;
+const CRASH_SINK_FPM: f64 = 2000.0;
+
+fn crash(peak_g: f64, sink_fpm: f64) -> bool {
+    peak_g >= CRASH_G || sink_fpm >= CRASH_SINK_FPM
+}
 /// How long a slice waits for the recording to pass its end marker.
 const SLICE_WAIT: Duration = Duration::from_secs(15);
 /// A failed read of the flight is tried again this much later, doubling.
@@ -919,11 +1157,29 @@ pub async fn attempts_list(shared: State<'_, Arc<Shared>>) -> Result<Vec<View>, 
     .await
 }
 
+/// What a start did to NAV1, for the attempt log.
+fn nav1_words(runway: &str, ils: &Result<Option<Ils>, String>) -> String {
+    match ils {
+        Ok(Some(i)) => format!(
+            "NAV1 set to {:.2} ({} ILS {runway})",
+            f64::from(i.frequency_hz) / 1e6,
+            i.ident
+        ),
+        Ok(None) => format!("no ILS on {runway}: NAV1 left as is"),
+        Err(e) => format!("NAV1 left as is: {e}"),
+    }
+}
+
 /// The sim's answer to a request; an error without one in `ASK_TIMEOUT`,
 /// after which the service refuses the request too.
 fn answer<T>(answer: Receiver<Result<T, String>>) -> Result<T, String> {
-    let wait = answer.recv_timeout(ASK_TIMEOUT);
-    wait.map_err(|_| "no answer from the sim: is it running?".to_owned())?
+    answer_within(answer, ASK_TIMEOUT)
+}
+
+/// `answer`, waiting up to `wait`.
+fn answer_within<T>(answer: Receiver<Result<T, String>>, wait: Duration) -> Result<T, String> {
+    let answered = answer.recv_timeout(wait);
+    answered.map_err(|_| "no answer from the sim: is it running?".to_owned())?
 }
 
 #[tauri::command]
@@ -1034,6 +1290,27 @@ pub async fn setup_pick_community(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nav1_is_described_set_absent_or_failed() {
+        let ils = Ils {
+            ident: "IZBA".into(),
+            region: "LT".into(),
+            frequency_hz: 110_300_000,
+        };
+        assert_eq!(
+            nav1_words("16L", &Ok(Some(ils))),
+            "NAV1 set to 110.30 (IZBA ILS 16L)"
+        );
+        assert_eq!(
+            nav1_words("34R", &Ok(None)),
+            "no ILS on 34R: NAV1 left as is"
+        );
+        assert_eq!(
+            nav1_words("34R", &Err("timeout".into())),
+            "NAV1 left as is: timeout"
+        );
+    }
 
     #[test]
     fn a_memo_recomputes_only_for_another_key_or_a_changed_file() {

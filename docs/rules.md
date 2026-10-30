@@ -87,7 +87,10 @@ Operators: `and`, `or`, `not`, arithmetic, comparisons, parentheses.
 Functions: `abs(x)`, `min(a, b)`, `max(a, b)`. Literals: `true`, `false`.
 
 Missing or invalid data (e.g. no glideslope signal) makes an expression
-**unknown**, not false. A rule is only evaluated where `when` is known to be
+**unknown**, not false. `nav.loc_dev` and `nav.gs_dev` are also unknown
+off an approach to the runway the tuned localizer serves
+([format.md](format.md#ils-deviations-and-the-localizer-course)): another runway's ILS says
+nothing about the approach flown. A rule is only evaluated where `when` is known to be
 true. `and` / `or` still decide if one side settles it (`false and ?` is
 false).
 
@@ -106,6 +109,7 @@ false).
 | `td.pitch`, `td.roll` | deg | Attitude at contact |
 | `td.ias` | kt | Airspeed at contact |
 | `td.bounce` | condition | A touchdown after a short hop |
+| `td.ground_strike` | condition | A wing, propeller or nose strike on the ground after this touchdown, before the next liftoff: bank beyond the class's roll limit (light 12 deg, transport 8 deg) or pitch below -5 deg held 0.4 s, or a touchdown already banked beyond the roll limit (`rules::strike`, shared with the live crash detection and the challenge check `ground_strike`) |
 | `td.distance` | ft | Touchdown distance past the landing threshold; negative = before it |
 | `td.cross` | ft | Offset from the runway centreline, right positive (`abs(td.cross)` for a limit) |
 | `td.crosswind`, `td.tailwind` | kt | Wind at contact resolved on the runway heading: crosswind from either side; tailwind, negative for a headwind |

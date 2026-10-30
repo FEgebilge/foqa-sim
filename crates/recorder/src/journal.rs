@@ -36,6 +36,10 @@ const PILOT_REPORT: u8 = 7;
 const ATTEMPT: u8 = 8;
 /// No text. The recording's `gear.extended` is in percent (docs/format.md).
 const GEAR_SCALED_V1: u8 = 9;
+/// Retired: the tuned localizer's identity strings, written only by
+/// 0.11.3 development builds (docs/format.md). Skipped like an unknown code.
+#[cfg(test)]
+const RETIRED_LOCALIZER: u8 = 10;
 /// SSM wire codes are indexes into this table.
 const SSM_CODES: [Ssm; 3] = [Ssm::Normal, Ssm::NoComputedData, Ssm::Failure];
 /// Event code of flow event `n` is `FLOW_BASE + n`.
@@ -406,7 +410,12 @@ mod tests {
 
     #[test]
     fn unknown_event_codes_and_packet_kinds_are_skipped() {
-        for (kind, payload) in [(EVENT, event_payload(200, b"")), (99, vec![1, 2, 3])] {
+        let retired = event_payload(RETIRED_LOCALIZER, br#"{"airport":"LTBJ"}"#);
+        for (kind, payload) in [
+            (EVENT, event_payload(200, b"")),
+            (EVENT, retired),
+            (99, vec![1, 2, 3]),
+        ] {
             let (bytes, _) = around(kind, &payload);
             let (read, damaged) = read_all(&bytes);
             assert_eq!((read.len(), damaged), (2, None), "kind {kind}");

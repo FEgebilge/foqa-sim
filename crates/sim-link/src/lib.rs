@@ -3,11 +3,12 @@
 //! `ffi` mirrors the subset of `SimConnect.h` we use; `client` wraps it in a
 //! safe API. All `unsafe` lives in these two modules. `facility` turns
 //! facility-database replies into `fdm_core::Airport` and fetches them
-//! without blocking.
+//! without blocking; `ils` finds a runway end's ILS the same way.
 
 mod client;
 pub mod facility;
 mod ffi;
+pub mod ils;
 
 pub use client::{AirportListEntry, Error, Facility, FacilityData, Recv, SimConnect};
 pub use ffi::InitPosition;

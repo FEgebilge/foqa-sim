@@ -51,6 +51,8 @@ Gzip-compressed UTF-8 JSON lines.
 
 Replay matches columns to the current wiring by SimVar and unit. A column
 missing from an older capture yields no value for the parameters it feeds.
+A `{"event":"Localizer",...}` line, written only by 0.11.3 development
+builds (journal code `10` below), is skipped.
 
 ## Journal v1
 
@@ -87,7 +89,7 @@ Appended one after another until the end of the file:
 | Field | Type | |
 |---|---|---|
 | t | i64 | Sim time of the last frame before the event, µs |
-| code | u8 | `1` sim start, `2` sim stop, `3` crashed, `4` flight loaded, `5` airport snapshot, `6` aircraft identity, `7` pilot report, `8` attempt marker, `9` gear scaled (v1), `32 + n` MSFS flow event `n` (`SIMCONNECT_FLOW_EVENT`) |
+| code | u8 | `1` sim start, `2` sim stop, `3` crashed, `4` flight loaded, `5` airport snapshot, `6` aircraft identity, `7` pilot report, `8` attempt marker, `9` gear scaled (v1), `10` retired (see below), `32 + n` MSFS flow event `n` (`SIMCONNECT_FLOW_EVENT`) |
 | text | UTF-8, rest of payload | Flight file for code `4`, airport snapshot JSON for code `5`, aircraft identity JSON for code `6`, the pilot's note for code `7` (may be empty), attempt marker JSON for code `8`, else empty |
 
 A **gear-scaled marker** (code `9`, no text) is written once at the start of
@@ -182,6 +184,38 @@ recordings have none, and readers treat a missing key as unknown):
 | `engines` | `NUMBER OF ENGINES` | 0–4 |
 | `retractable`, `floats`, `skids` | `IS GEAR RETRACTABLE`, `IS GEAR FLOATS`, `IS GEAR SKIDS` | true / false |
 | `max_gross_lb` | `MAX GROSS WEIGHT` | lb, whole |
+
+### ILS deviations and the localizer course
+
+`nav.loc_dev` and `nav.gs_dev` guide to the one runway end whose ILS NAV1
+is tuned to; on any other approach the needles still move, often to full
+scale, and say nothing about the approach flown. The ground segment reads
+them only on the way to a landing whose runway that ILS serves: from the
+climb (takeoff or go-around) before the landing to its touchdown.
+
+Which ILS was tuned is told from its physics, `nav.loc_course` (`NAV
+LOCALIZER:1`, the localizer's course, recorded since 0.11.3, gated by `NAV
+HAS LOCALIZER:1` like `nav.loc_dev`):
+
+- the course at or just before the touchdown is within 10° of the landing
+  runway's heading, magnetic or true (the SDK does not say which it
+  reports). This rejects the opposite end and crossing runways;
+- the localizer needle reads within 1 dot of the middle at the touchdown.
+  Landing on the centreline puts the runway's own localizer there; a
+  parallel runway's, with the same course, sits near full scale.
+
+Before the touchdown a deviation counts only while the course in force is
+aligned too, so after a retune on the way only the part flown on the
+landing runway's localizer counts. Everywhere else, on a go-around's
+approach (no touchdown names its runway) and throughout a recording
+without `nav.loc_course` (all made before 0.11.3) the deviations read as
+no computed data: unknown, never graded on a guess.
+
+Event code `10` is retired: 0.11.3 development builds wrote the tuned
+localizer's identity strings (`NAV LOC AIRPORT IDENT:1`, `NAV LOC RUNWAY
+NUMBER:1`, `NAV LOC RUNWAY DESIGNATOR:1`) as JSON under it, but MSFS 2024
+returns them empty or holding another request's text, so nothing writes
+it any more and readers skip it like an unknown code.
 
 ### Ordering and integrity
 

@@ -181,8 +181,13 @@ fn the_profile_follows_the_threshold_and_the_path() {
 
 #[test]
 fn the_profile_carries_the_ils_deviation_and_needs_a_runway() {
+    // NAV1 on the ILS of the runway landed on (`runway_behind_touchdown`):
+    // its course along the runway, the localizer needle centred.
     let p = profile_of(&airport(), |t| Pt {
         set: vec![
+            ("NAV HAS LOCALIZER:1", 1.0),
+            ("NAV LOCALIZER:1", TRACK_DEG),
+            ("NAV CDI:1", 0.0),
             ("NAV HAS GLIDE SLOPE:1", 1.0),
             ("NAV GSI:1", 1.5 * 119.0 / 2.0),
         ],
@@ -194,6 +199,6 @@ fn the_profile_carries_the_ils_deviation_and_needs_a_runway() {
         "{:?}",
         p.gs_dot
     );
-    assert!(p.loc_dot.iter().all(|x| x.is_nan()));
+    assert!(p.loc_dot.iter().all(|x| x.abs() < 0.01), "{:?}", p.loc_dot);
     assert_eq!(profile_of(&[identity("B738")], on_path), None);
 }

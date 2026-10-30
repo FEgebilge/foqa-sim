@@ -358,7 +358,14 @@ pub fn briefing_lines(c: &Challenge, source: &str) -> Vec<String> {
     if let Some(window) = &c.window {
         lines.push(format!("Open: {} to {}.", window.from, window.to));
     }
-    lines.push(format!("Scoring: {}. Source: {source}.", c.scoring.version));
+    // Every challenge is graded with the current method, whatever it names.
+    let named = &c.scoring.version;
+    let scoring = if named == challenge::CURRENT {
+        challenge::CURRENT.to_owned()
+    } else {
+        format!("{} (the challenge names {named})", challenge::CURRENT)
+    };
+    lines.push(format!("Scoring: {scoring}. Source: {source}."));
     lines
 }
 
@@ -537,6 +544,9 @@ mod tests {
                 .iter()
                 .any(|l| l.contains("autopilot off below 500 ft"))
         );
-        assert_eq!(lines.last().unwrap(), "Scoring: landing-1. Source: File.");
+        assert_eq!(
+            lines.last().unwrap(),
+            "Scoring: landing-3 (the challenge names landing-1). Source: File."
+        );
     }
 }

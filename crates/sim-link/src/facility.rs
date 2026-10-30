@@ -19,7 +19,7 @@ use crate::{AirportListEntry, Error, Facility, FacilityData};
 const LIST_TIMEOUT: Duration = Duration::from_secs(5);
 /// The bubble's list can be empty right after a flight loads; ask once more.
 const LIST_RETRY_DELAY: Duration = Duration::from_secs(2);
-const DATA_TIMEOUT: Duration = Duration::from_secs(10);
+pub(crate) const DATA_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Wire type of a facility field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -120,8 +120,10 @@ pub enum DecodeError {
         expected: usize,
         got: usize,
     },
-    /// No airport node, e.g. an unknown ICAO.
-    NoAirport,
+    /// No node of this block, e.g. an unknown ICAO.
+    Missing(&'static str),
+    /// No runway end of this name.
+    NoRunway(String),
     /// A node that `FIELDS` does not account for, or whose parent is missing.
     Unexpected {
         data_type: u32,
@@ -147,7 +149,8 @@ impl fmt::Display for DecodeError {
                 f,
                 "{block} payload is {got} bytes, layout expects {expected}"
             ),
-            Self::NoAirport => write!(f, "no AIRPORT node in the reply"),
+            Self::Missing(block) => write!(f, "no {block} node in the reply"),
+            Self::NoRunway(name) => write!(f, "no runway {name}"),
             Self::Unexpected {
                 data_type,
                 unique_id,
@@ -189,7 +192,12 @@ impl Collector {
 
     /// Assembles a request whose `Facility::End` has arrived.
     pub fn finish(&mut self, request_id: u32) -> Result<Airport, DecodeError> {
-        assemble(&self.pending.remove(&request_id).unwrap_or_default())
+        assemble(&self.take(request_id))
+    }
+
+    /// The nodes of a request, in arrival order.
+    pub(crate) fn take(&mut self, request_id: u32) -> Vec<FacilityData> {
+        self.pending.remove(&request_id).unwrap_or_default()
     }
 
     /// Drops the nodes of an abandoned request.
@@ -269,12 +277,13 @@ struct Search {
 }
 
 /// Request ids are never reused, so a late reply to a request dropped by
-/// `AirportFetch::reset` cannot be taken for a new one.
+/// `AirportFetch::reset` cannot be taken for a new one. Each fetch on a
+/// connection counts from its own base: replies carry only the request id.
 #[derive(Debug, Default)]
-struct RequestIds(u32);
+pub(crate) struct RequestIds(pub(crate) u32);
 
 impl RequestIds {
-    fn next(&mut self) -> u32 {
+    pub(crate) fn next(&mut self) -> u32 {
         self.0 += 1;
         self.0
     }
@@ -498,7 +507,7 @@ fn assemble(nodes: &[FacilityData]) -> Result<Airport, DecodeError> {
     let root = nodes
         .iter()
         .find(|n| n.data_type == facility_type::AIRPORT)
-        .ok_or(DecodeError::NoAirport)?;
+        .ok_or(DecodeError::Missing("AIRPORT"))?;
     let runway_nodes: Vec<_> = children(root, facility_type::RUNWAY).collect();
     let known = |n: &FacilityData| {
         n.unique_id == root.unique_id
@@ -521,7 +530,7 @@ fn assemble(nodes: &[FacilityData]) -> Result<Airport, DecodeError> {
             runway(rw, &thresholds)
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let v = decode("AIRPORT", root)?;
+    let v = decode(FIELDS, "AIRPORT", root)?;
     let declared = v.int("N_RUNWAYS");
     if usize::try_from(declared) != Ok(runways.len()) {
         return Err(DecodeError::RunwayCount {
@@ -559,7 +568,7 @@ const SECONDARY: EndFields = EndFields {
 };
 
 fn runway(node: &FacilityData, thresholds: &[&FacilityData]) -> Result<Runway, DecodeError> {
-    let v = decode("RUNWAY", node)?;
+    let v = decode(FIELDS, "RUNWAY", node)?;
     let [primary, secondary] = assign_thresholds(node, thresholds)?;
     Ok(Runway {
         lat_deg: v.float("LATITUDE"),
@@ -612,7 +621,7 @@ fn runway_end(
             field: end.designator,
             value: designator,
         })?,
-        displaced_m: decode(end.threshold, threshold)?.float("LENGTH"),
+        displaced_m: decode(FIELDS, end.threshold, threshold)?.float("LENGTH"),
     })
 }
 
@@ -624,25 +633,25 @@ enum Value {
 }
 
 /// A decoded node: its block's fields by name.
-struct Values(HashMap<&'static str, Value>);
+pub(crate) struct Values(HashMap<&'static str, Value>);
 
 impl Values {
-    // Names and kinds come from `FIELDS`, so a miss is a bug in this module.
-    fn float(&self, name: &str) -> f64 {
+    // Names and kinds come from the definition, so a miss is a bug in its module.
+    pub(crate) fn float(&self, name: &str) -> f64 {
         match self.0.get(name) {
             Some(Value::Float(x)) => *x,
             other => unreachable!("{name} is not a float field: {other:?}"),
         }
     }
 
-    fn int(&self, name: &str) -> i32 {
+    pub(crate) fn int(&self, name: &str) -> i32 {
         match self.0.get(name) {
             Some(Value::Int(x)) => *x,
             other => unreachable!("{name} is not an int field: {other:?}"),
         }
     }
 
-    fn text(&self, name: &str) -> String {
+    pub(crate) fn text(&self, name: &str) -> String {
         match self.0.get(name) {
             Some(Value::Text(x)) => x.clone(),
             other => unreachable!("{name} is not a text field: {other:?}"),
@@ -650,9 +659,14 @@ impl Values {
     }
 }
 
-/// Decodes a node as `block`, rejecting a payload of any other length.
-fn decode(block: &'static str, node: &FacilityData) -> Result<Values, DecodeError> {
-    let fields = block_fields(block);
+/// Decodes a node as `block` of definition `fields`, rejecting a payload of
+/// any other length.
+pub(crate) fn decode(
+    fields: &[Field],
+    block: &'static str,
+    node: &FacilityData,
+) -> Result<Values, DecodeError> {
+    let fields = block_fields(fields, block);
     let expected = fields.iter().map(|(_, kind)| kind.size()).sum();
     if node.payload.len() != expected {
         return Err(DecodeError::Length {
@@ -674,22 +688,22 @@ fn decode(block: &'static str, node: &FacilityData) -> Result<Values, DecodeErro
     ))
 }
 
-/// The value fields directly inside `block`, in order; nested blocks are
-/// separate nodes and skipped.
-fn block_fields(block: &str) -> Vec<(&'static str, Kind)> {
+/// The value fields directly inside `block` of definition `fields`, in
+/// order; nested blocks are separate nodes and skipped.
+pub(crate) fn block_fields(fields: &[Field], block: &str) -> Vec<(&'static str, Kind)> {
     let mut depth = None;
-    let mut fields = Vec::new();
-    for &field in FIELDS {
+    let mut values = Vec::new();
+    for &field in fields {
         match (field, depth) {
             (Field::Open(b), None) if b == block => depth = Some(0),
             (Field::Open(_), Some(d)) => depth = Some(d + 1),
             (Field::Close(_), Some(0)) => break,
             (Field::Close(_), Some(d)) => depth = Some(d - 1),
-            (Field::Value(name, kind), Some(0)) => fields.push((name, kind)),
+            (Field::Value(name, kind), Some(0)) => values.push((name, kind)),
             _ => {}
         }
     }
-    fields
+    values
 }
 
 fn array<const N: usize>(bytes: &[u8]) -> [u8; N] {
@@ -697,18 +711,24 @@ fn array<const N: usize>(bytes: &[u8]) -> [u8; N] {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
-    enum V {
+    pub(crate) enum V {
         F(f64),
         I(i32),
         S(&'static str),
     }
 
-    /// Encodes values in `block`'s layout, the inverse of `decode`.
+    /// Encodes values in the layout of `block` of `FIELDS`, the inverse of
+    /// `decode`.
     fn payload(block: &str, values: &[V]) -> Vec<u8> {
-        let fields = block_fields(block);
+        encode(FIELDS, block, values)
+    }
+
+    /// Encodes values in the layout of `block` of definition `fields`.
+    pub(crate) fn encode(fields: &[Field], block: &str, values: &[V]) -> Vec<u8> {
+        let fields = block_fields(fields, block);
         assert_eq!(fields.len(), values.len(), "{block}");
         let mut out = Vec::new();
         for ((_, kind), v) in fields.into_iter().zip(values) {
@@ -727,7 +747,7 @@ mod tests {
         out
     }
 
-    fn node(
+    pub(crate) fn node(
         request_id: u32,
         unique_id: u32,
         parent_id: u32,
@@ -817,7 +837,7 @@ mod tests {
     #[test]
     fn layouts_follow_the_field_list() {
         let size = |block| {
-            block_fields(block)
+            block_fields(FIELDS, block)
                 .iter()
                 .map(|(_, k)| k.size())
                 .sum::<usize>()
@@ -885,7 +905,7 @@ mod tests {
         ]);
         assert_eq!(c.finish(2).unwrap().runways.len(), 2);
         assert_eq!(c.finish(1).unwrap().icao, "LTBJ");
-        assert_eq!(c.finish(1), Err(DecodeError::NoAirport));
+        assert_eq!(c.finish(1), Err(DecodeError::Missing("AIRPORT")));
     }
 
     #[test]
@@ -944,9 +964,9 @@ mod tests {
 
     /// Stands in for the simulator: records the requests made.
     #[derive(Default)]
-    struct FakeSim {
+    pub(crate) struct FakeSim {
         lists: Vec<u32>,
-        data: Vec<(u32, String)>,
+        pub(crate) data: Vec<(u32, String)>,
         sends: u32,
     }
 
@@ -967,9 +987,14 @@ mod tests {
             _: u32,
             request_id: u32,
             icao: &str,
-            _: &str,
+            region: &str,
         ) -> Result<u32, Error> {
-            self.data.push((request_id, icao.to_owned()));
+            let what = if region.is_empty() {
+                icao.to_owned()
+            } else {
+                format!("{icao}/{region}")
+            };
+            self.data.push((request_id, what));
             Ok(self.send())
         }
 
@@ -1051,7 +1076,7 @@ mod tests {
             f.poll(&mut sim, t0).unwrap(),
             Some(Fetched::Failed {
                 icao: "LTXX".into(),
-                reason: Failure::Decode(DecodeError::NoAirport)
+                reason: Failure::Decode(DecodeError::Missing("AIRPORT"))
             })
         );
         let Some(Fetched::Airport(airport)) = f.poll(&mut sim, t0).unwrap() else {
