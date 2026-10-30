@@ -6,7 +6,7 @@
 
 use std::io;
 use std::ops::ControlFlow;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
@@ -16,11 +16,12 @@ use std::time::{Duration, Instant};
 use debrief::{Analysis, FlightSummary, Index, LandingNotice, RecorderStatus, Station, flight_id};
 use fdm_core::{Airport, Lfl};
 use recorder::{Acquisition, AttemptMarker, TOUCHDOWN_WINDOW_US, Telemetry};
+use rules::Strike;
 
 use crate::history::History;
-use crate::monitor::Monitor;
+use crate::monitor::{Impact, Monitor};
 use crate::panel::{self, Ack, Msg, Snapshot, Tee, ViewCommand};
-use crate::place::{Ask, Start};
+use crate::place::{Ask, Ils, IlsQuery, Reloaded, Start};
 use crate::views::{AppCommand, Views};
 use crate::{Command, LiveSource, Progress, Reply, record};
 
@@ -52,8 +53,20 @@ pub enum Happening {
     Status(RecorderStatus),
     /// A flight closed and was analysed.
     FlightSaved(FlightSummary),
+    /// Flight `.0` closed with nothing worth keeping (too short, never
+    /// placed) and was deleted: what was bound to it ends too.
+    FlightDiscarded(String),
     /// A landing, analysed from the journal as recorded so far.
     Landing(LandingNotice),
+    /// A ground contact of flight `.0` as the live frames measured it, a
+    /// second after it: what tells a crash without waiting for the analysis.
+    Impact(String, Impact),
+    /// A wing, propeller or nose strike on the ground in flight `.0`, as
+    /// the live frames measured it (`rules::strike`): a crash too.
+    Strike(String, Strike),
+    /// The aircraft of flight `.0` came to a stop after a landing, at sim
+    /// time `.1` (`Impact::t_s`): what finishes a challenge attempt.
+    Stopped(String, f64),
 }
 
 /// Asks a running `Service` to close any open flight and return.
@@ -84,9 +97,11 @@ pub struct SimRequests(Sender<Command>);
 
 impl SimRequests {
     /// Puts the user aircraft at `start` and configures it, at the next sim
-    /// frame. `Ok` means the calls went out; a rejection by the sim is only
-    /// logged. Into an open flight the jump is recorded like any other.
-    pub fn place(&self, start: Start) -> Receiver<Result<(), String>> {
+    /// frame; a rejection by the sim is only logged. Like any jump it splits
+    /// the recording: the flight open closes where the aircraft was, and the
+    /// answer is the id of the flight opened once the placement took (the
+    /// sim's `TeleportDone`, else `PLACE_SETTLE`), which begins at the start.
+    pub fn place(&self, start: Start) -> Receiver<Result<String, String>> {
         let (ask, answer) = Ask::new(start);
         self.send(Command::Place(ask));
         answer
@@ -98,6 +113,36 @@ impl SimRequests {
     pub fn airport(&self, icao: &str) -> Receiver<Result<Airport, String>> {
         let (ask, answer) = Ask::new(icao.to_owned());
         self.send(Command::Airport(ask));
+        answer
+    }
+
+    /// The ILS of `runway` (as painted, `34L`) at airport `icao` from the
+    /// sim's facility database; `None` when that end has none.
+    pub fn ils(&self, icao: &str, runway: &str) -> Receiver<Result<Option<Ils>, String>> {
+        let (ask, answer) = Ask::new(IlsQuery {
+            airport: icao.trim().to_ascii_uppercase(),
+            runway: runway.trim().to_ascii_uppercase(),
+        });
+        self.send(Command::Ils(ask));
+        answer
+    }
+
+    /// Saves the flight to `path` (no extension: the sim adds `.FLT`), as
+    /// the sim's own save does, `SAVE_AFTER` past the last placement so
+    /// that it is the start. `Ok` means the call went out.
+    pub fn save(&self, path: &Path) -> Receiver<Result<(), String>> {
+        let (ask, answer) = Ask::new(path.to_owned());
+        self.send(Command::Save(ask));
+        answer
+    }
+
+    /// Loads the flight saved at `path` and waits, up to `RELOAD_TIMEOUT`,
+    /// for the sim to settle (`Settled`) and the recorder to open a flight
+    /// after it: the answer names that flight, where the start is to be
+    /// placed. The load itself ends the recorded flight.
+    pub fn reload(&self, path: &Path) -> Receiver<Result<Reloaded, String>> {
+        let (ask, answer) = Ask::new(path.to_owned());
+        self.send(Command::Reload(ask));
         answer
     }
 
@@ -127,7 +172,8 @@ pub struct Service {
     /// A view showed lately that it is open (`panel::tee`).
     watched: Arc<AtomicBool>,
     requests: Sender<Command>,
-    /// The app's requests (`SimRequests`): `Place`, `Airport` and `Attempt`.
+    /// The app's requests (`SimRequests`): `Place`, `Save`, `Reload`,
+    /// `Airport`, `Ils` and `Attempt`.
     requested: Receiver<Command>,
     /// What the in-sim views show, from the recorder and the app (`Views`).
     feed: Sender<Msg>,
@@ -297,6 +343,21 @@ impl Service {
                     return ControlFlow::Break(());
                 };
                 flight.monitor.record(item);
+                if let Some(impact) = flight.monitor.take_impact() {
+                    let _ = link
+                        .feed
+                        .send(Happening::Impact(flight.id.clone(), impact).into());
+                }
+                if let Some(strike) = flight.monitor.take_strike() {
+                    let _ = link
+                        .feed
+                        .send(Happening::Strike(flight.id.clone(), strike).into());
+                }
+                if let Some(t_s) = flight.monitor.take_stopped() {
+                    let _ = link
+                        .feed
+                        .send(Happening::Stopped(flight.id.clone(), t_s).into());
+                }
                 if let Telemetry::Frame(frame) = item {
                     // Column 0 is always SIMULATION TIME (raw capture format).
                     let sim_time_s = frame[0];
@@ -343,9 +404,11 @@ impl Service {
                     }
                 }
             }
-            Progress::Discarded(_, why) => {
+            Progress::Discarded(journal, why) => {
                 // Nothing was saved, so nothing is analysed or listed.
                 watch.touchdown_s = None;
+                let discarded = Happening::FlightDiscarded(flight_id(journal));
+                let _ = link.feed.send(discarded.into());
                 let closing = watch.flight.take().and_then(|f| f.closing);
                 match closing {
                     // Deleting is what was asked for.

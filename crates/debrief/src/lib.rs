@@ -19,7 +19,9 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use std::io::{self, BufReader};
 use std::path::{Path, PathBuf};
 
-use analyzer::{Basis, Cause, Flight, Phase, Span, Track, phases, thresholds, touchdowns};
+use analyzer::{
+    Basis, Cause, Flight, Phase, Span, Track, mask_ils, phases, thresholds, touchdowns,
+};
 use assess::Method;
 use fdm_core::geo::distance_m;
 use fdm_core::{Lfl, SimTime};
@@ -222,15 +224,20 @@ impl Station {
     }
 
     /// `None` when the flight has no air/ground data to analyse. The type
-    /// profile's unreliable signals are read as no data throughout.
+    /// profile's unreliable signals are read as no data throughout, ILS
+    /// deviations off an approach to the tuned localizer's runway too
+    /// (`mask_ils`); the track and the phases use neither.
     pub fn analyse(&self, id: String, mut flight: Flight) -> Option<Analysis<'_>> {
         let selection = self.profiles.select(&flight);
         selection.mask(&mut flight);
         let track = Track::new(&flight)?;
+        let touchdowns = touchdowns(&flight, &track);
+        let phases = phases(&track, &selection.phases);
+        mask_ils(&mut flight, &phases, &touchdowns);
         Some(Analysis {
             events: rules::evaluate(&self.rules, &selection, &flight, &track),
-            touchdowns: touchdowns(&flight, &track),
-            phases: phases(&track, &selection.phases),
+            touchdowns,
+            phases,
             id,
             rules: &self.rules,
             method: &self.method,

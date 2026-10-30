@@ -110,6 +110,10 @@ click.
    opens the system browser (never an embedded webview, RFC 8252 §8.12)
    at `auth.authorize` with query
    `client_id=foqa-sim&redirect_uri=http://127.0.0.1:<port>/callback&state=<state>&code_challenge=<S256>&code_challenge_method=S256&client_name=FOQA-Sim%200.1.2`.
+   When `auth.authorize` has a fragment (a single-page site routing in it,
+   `https://site/#/foqa/authorize`), the query goes at the end of the
+   fragment (`#/foqa/authorize?client_id=…`), so no server or proxy log
+   sees it; otherwise in the URL's query.
 2. The site signs the user in if needed and shows "Allow FOQA-Sim on this
    PC to fly challenges as **<handle>**?" On Allow it redirects to
    `redirect_uri?code=<code>&state=<state>`; on Deny,
@@ -192,23 +196,26 @@ can open it):
   literal, no path/query/fragment, no trailing dot; `localhost` and names
   under it only with the developer setting, like loopback).
 - `id`: `^[a-z0-9][a-z0-9-]{2,63}$`; `v`: integer 1–100000.
-- A link **never acts by itself**: no fetch, no library write, no
-  navigation and no placing before a click in the app. It only brings the
-  window up with a question. If `site` is not a connected site, the app
-  shows "Connect to **<origin in ASCII>**?" and fetches nothing from it
-  before the user confirms; Connect adds the site, starts the sign-in and
-  then opens **the clicked challenge's briefing** (the pending link is
-  kept in memory for 10 minutes, never on disk). A connected site that is
-  signed out asks "Sign in to <host>?" ("Sign in and open"); a signed-in
-  one asks "Open <id> from <host>?" and fetches that challenge (A4) only
-  on Open. Before the click the question shows only what the link says
-  (host, id, version); the title comes from the site after it. Placing
-  the aircraft and uploading still need the user.
+- A link from a **signed-in site** of the pilot's flies at once: "Fly
+  this challenge" on that site was the pilot's click and consent
+  (2026-10-30, Ege). The app fetches the challenge (A4), takes the site's
+  copy into the library (replacing a local copy of the same id and
+  version; its attempts stay), opens its briefing and, when the
+  pre-flight check has nothing red, places the aircraft and starts the
+  ranked attempt; with something red, the briefing says what to fix.
+- Any other link **never acts by itself**: no fetch, no library write, no
+  navigation and no placing before a click in the app. If `site` is not a
+  connected site, the app shows "Connect to **<origin in ASCII>**?" and
+  fetches nothing from it before the user confirms; Connect adds the
+  site, starts the sign-in and then flies the clicked challenge as above
+  (the pending link is kept in memory for 10 minutes, never on disk). A
+  connected site that is signed out asks "Sign in to <host>?" ("Sign in
+  and fly"). Before the click the question shows only what the link says
+  (host, id, version); the title comes from the site after it. Uploading
+  still needs nothing more than the landing.
 - A link with `v` opens only that version: when the site has another, the
   app says so ("<host> has a newer version of this challenge…") and takes
-  nothing. A challenge already in the library under the same id and
-  version with other bytes is never overwritten silently: the app asks
-  "Replace your copy of “<title>”?" (Keep mine opens the copy kept).
+  nothing.
 - One link is asked about at a time: a link arriving meanwhile waits (the
   newest one only) and is asked about after this one is closed; the same
   link arriving again while it waits is not queued twice. A link is given
@@ -248,7 +255,7 @@ Types:
 { "id": "ltfj-06-gusty-2026w44", "version": 1, "title": "…",
   "state": "open" | "upcoming" | "closed",
   "opens_at": "…" | null, "closes_at": "…" | null,
-  "definition_sha256": "hex",   // of the exact definition bytes below
+  "definition_sha256": "hex",   // of the exact definition bytes below: the JSON value, no whitespace around it
   "definition": { /* the challenge JSON of challenges.md, byte for byte
                      what the server scores against */ } }
 
@@ -865,8 +872,11 @@ Each slice keeps the app fully usable with no site configured.
   `poor`; `Confidence`: `full`, `partial`; `caps`: `CapNote`
   `{ kind, score, reason, source }`, `kind` one of `material`, `unstable`,
   `inspection`, `undershoot`, `excursion`). `score` equals `score.total`
-  and `caps[].score` is the limit the cap sets. Absent for `landing-1`
-  and for an attempt without a score. A site no longer derives grade,
+  and `caps[].score` is the limit the cap sets. Absent for an attempt
+  without a score (and for attempts graded with `landing-1` before
+  0.11.3). Since 0.11.3 every attempt is graded with the current method
+  (`landing-3`) whatever `scoring.version` names; `score.version` says
+  which one graded it. A site no longer derives grade,
   confidence or caps from `score.parts`.
 - **`landing-3` (0.11):** the assessment's measures changed, so it is a
   new `scoring.version`. `landing-2` cannot be reproduced and is retired:

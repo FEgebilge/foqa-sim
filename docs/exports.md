@@ -131,6 +131,7 @@ rate, use Parquet.
 | `sim.paused` | 0/1 | 1 Hz |
 | `heading.true` | deg | 1 Hz |
 | `mach` | M | 1 Hz |
+| `nav.loc_course` | deg | 1 Hz |
 
 `0/1` is a discrete (1 = on, on ground, armed, engaged…), `index` a handle position, `M` a Mach number. `sim.*`
 are the simulator's own values, kept outside the recorder frame

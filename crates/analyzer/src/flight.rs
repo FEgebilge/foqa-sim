@@ -8,8 +8,9 @@ use recorder::{FlightRecords, FlowEvent, Record, SimEvent, read_records};
 /// Parameters whose value wraps around, as (name, lowest value, period).
 /// Interpolating across the wrap-around must take the short way round
 /// (359 deg to 1 deg passes through 0, not 180).
-const WRAPPING: [(&str, f64, f64); 5] = [
+const WRAPPING: [(&str, f64, f64); 6] = [
     ("heading.mag", 0.0, 360.0),
+    ("nav.loc_course", 0.0, 360.0),
     ("heading.true", 0.0, 360.0),
     ("sel.heading", 0.0, 360.0),
     ("wind.dir", 0.0, 360.0),
@@ -104,6 +105,18 @@ impl Flight {
     pub fn invalidate(&mut self, id: SignalId) {
         if let Some(s) = self.series.get_mut(usize::from(id.0)) {
             s.iter_mut().for_each(|s| s.ssm = Ssm::Failure);
+        }
+    }
+
+    /// Marks the valid samples of `name` taken where `meaningful` is false as
+    /// no computed data: the source is fine, but what it measures has no
+    /// meaning there (an ILS deviation from another runway's localizer).
+    pub(crate) fn withhold(&mut self, name: &str, meaningful: impl Fn(SimTime) -> bool) {
+        let id = self.def(name).id;
+        for s in &mut self.series[usize::from(id.0)] {
+            if s.is_valid() && !meaningful(s.t) {
+                s.ssm = Ssm::NoComputedData;
+            }
         }
     }
 

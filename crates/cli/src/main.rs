@@ -210,6 +210,16 @@ fn analyze(path: &Path, rules_path: Option<&Path>) -> Result<(), Box<dyn Error>>
     for e in &a.events {
         println!("  {}", describe(e));
     }
+    // The sim's own events (flow, pauses, loads): what explains a split,
+    // a reload or a jump in the flight. Without the identity.
+    println!(
+        "
+Sim events"
+    );
+    for (t, e) in &a.flight.events {
+        let (name, text) = analyzer::export::describe(e, false);
+        println!("  {:>7.1} s  {name:<16} {text}", t.as_secs_f64());
+    }
     Ok(())
 }
 

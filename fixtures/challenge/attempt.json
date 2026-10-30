@@ -48,6 +48,11 @@
       "detail": "continuous"
     },
     {
+      "name": "ground_strike",
+      "ok": true,
+      "detail": "no wing, propeller or nose strike"
+    },
+    {
       "name": "go_around",
       "ok": true,
       "detail": "no go-around"

@@ -1019,7 +1019,7 @@ fn core_rules_map_to_the_scoring_domains() {
     );
     assert_eq!(
         ids(Contact),
-        "bounced-landing hard-landing hard-landing-inspection hard-landing-light \
+        "bounced-landing ground-strike hard-landing hard-landing-inspection hard-landing-light \
          high-sink-touchdown high-sink-touchdown-light tailstrike-risk-landing"
     );
     assert_eq!(ids(Rollout), "tailwind-landing-limit");

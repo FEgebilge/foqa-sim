@@ -29,7 +29,13 @@ use recorder::{Acquisition, AttemptMarker, Column, RawWriter, Recorder, SimEvent
 use discard::Usage;
 pub use discard::{Discard, MENU_POSITION, MENU_TOLERANCE_DEG, MIN_FLIGHT_S, backlog, recover};
 pub use live::LiveSource;
-pub use place::{ASK_TIMEOUT, Ask, InitPosition, Start, flaps_set_data};
+pub use monitor::Impact;
+pub use place::{
+    ASK_TIMEOUT, Ask, Ils, IlsQuery, InitPosition, RELOAD_TIMEOUT, Reloaded, Settled, Start,
+    flaps_set_data,
+};
+use place::{ReloadWait, SAVE_AFTER};
+pub use rules::Strike;
 pub use service::{Happening, Service, SimRequests, Stopper};
 use session::{Action, Session};
 pub use views::{
@@ -77,11 +83,20 @@ pub enum Command {
     /// Open a flight at the next frame, as a flight start does: to fly on
     /// after ending or discarding one without leaving to the menu.
     Start,
-    /// Put the user aircraft at a start and configure it; answered once
-    /// the calls are sent.
-    Place(Ask<Start, ()>),
+    /// Put the user aircraft at a start and configure it. The flight open
+    /// closes there and a new one opens once the placement took
+    /// (`Session::place`); answered with that flight's id.
+    Place(Ask<Start, String>),
     /// Fetch an airport by ICAO; answered when it arrives or fails.
     Airport(Ask<String, Airport>),
+    /// Find a runway end's ILS; answered when found or failed.
+    Ils(Ask<IlsQuery, Option<Ils>>),
+    /// Save the flight to this path (no extension: the sim adds `.FLT`),
+    /// `SAVE_AFTER` past the last placement; answered once the call is sent.
+    Save(Ask<PathBuf, ()>),
+    /// Load the flight saved at this path and wait for the sim to settle
+    /// (`ReloadWait`); answered once it has and a flight is open.
+    Reload(Ask<PathBuf, Reloaded>),
 }
 
 impl Command {
@@ -90,6 +105,9 @@ impl Command {
         match self {
             Self::Place(ask) => ask.answer(Err(reason.into())),
             Self::Airport(ask) => ask.answer(Err(reason.into())),
+            Self::Ils(ask) => ask.answer(Err(reason.into())),
+            Self::Save(ask) => ask.answer(Err(reason.into())),
+            Self::Reload(ask) => ask.answer(Err(reason.into())),
             Self::Close | Self::Mark(_) | Self::Attempt(_) | Self::Start => {}
         }
     }
@@ -116,6 +134,11 @@ pub(crate) trait Sim {
     fn poll(&mut self) -> Polled;
     fn place(&mut self, start: &Start) -> Result<(), String>;
     fn want_airport(&mut self, ask: Ask<String, Airport>);
+    fn want_ils(&mut self, ask: Ask<IlsQuery, Option<Ils>>);
+    /// Saves the flight to `path`; `Ok` once the call is sent.
+    fn save(&mut self, path: &Path) -> Result<(), String>;
+    /// Loads the flight saved at `path`; `Ok` once the call is sent.
+    fn load(&mut self, path: &Path) -> Result<(), String>;
     /// Follows the session's routing of `item`; true for a touchdown frame.
     fn track(&mut self, item: Option<&Telemetry>, action: Action) -> bool;
 }
@@ -126,8 +149,15 @@ pub(crate) trait Sim {
 const WRITE_RETRY_MIN: Duration = Duration::from_secs(10);
 const WRITE_RETRY_MAX: Duration = Duration::from_secs(5 * 60);
 /// How long after the app places the aircraft a teleport is its own; the
-/// sim reports one within a frame or two, if at all.
+/// sim reports one within a frame or two, if at all. A placement that has
+/// opened no flight by then is answered with an error.
 const OWN_TELEPORT: Duration = Duration::from_secs(10);
+/// Without the sim's `TeleportDone`, the placement is taken to have taken
+/// this long after it: `InitPosition` applies at the next sim frame, and a
+/// second drains the frames of the old position already on their way.
+/// It costs at most this much of the approach's start, never a frame of
+/// where the aircraft was.
+const PLACE_SETTLE: Duration = Duration::from_secs(1);
 /// How often the open flight's journal is flushed to its file, about what
 /// a killed process loses (the raw capture makes the same trade, `raw.rs`):
 /// one write a second instead of one each frame. Events are flushed at
@@ -173,15 +203,53 @@ fn run(
         misframed: false,
     };
     let mut placed: Option<Instant> = None;
+    let mut placing: Option<Ask<Start, String>> = None;
+    let mut saving: Option<Ask<PathBuf, ()>> = None;
+    let mut reloading: Option<(Ask<PathBuf, Reloaded>, ReloadWait)> = None;
     while !r.replies.stop {
         let now = Instant::now();
         if r.retry.over(now) {
             r.session.resume();
         }
+        if placed.is_some_and(|t| now - t >= PLACE_SETTLE) {
+            r.session.settled();
+        }
         if placed.is_some_and(|t| now - t > OWN_TELEPORT) {
             placed = None;
-            r.session.placing(false);
+            r.session.own_teleport_over();
         }
+        // The flight opened after the placement is where the attempt goes.
+        placing = placing.and_then(|ask| {
+            match (&r.flight, placed) {
+                (Some(f), _) if !r.session.is_placing() => {
+                    ask.answer(Ok(debrief::flight_id(&f.journal)))
+                }
+                (_, None) => ask.answer(Err("no flight opened after the placement".into())),
+                _ => return Some(ask),
+            }
+            None
+        });
+        if placed.is_none_or(|t| now - t >= SAVE_AFTER)
+            && let Some(ask) = saving.take()
+        {
+            let result = source.save(&ask.query);
+            ask.answer(result);
+        }
+        reloading = reloading.and_then(|(ask, wait)| {
+            // Settled, it waits for a flight to open: the start goes there.
+            let open = r.flight.as_ref().map(|f| debrief::flight_id(&f.journal));
+            match (wait.state(now), open) {
+                (Some(Ok(_)), None) if wait.expired(now) => {
+                    ask.answer(Err("no flight opened after the reload".into()))
+                }
+                (None, _) | (Some(Ok(_)), None) => return Some((ask, wait)),
+                (Some(Ok(settled)), Some(flight_id)) => {
+                    ask.answer(Ok(Reloaded { flight_id, settled }))
+                }
+                (Some(Err(e)), _) => ask.answer(Err(e)),
+            }
+            None
+        });
         // A command goes through the session like the sim's own items.
         let item = match r.replies.commands.pop_front() {
             Some(Command::Close) => None,
@@ -196,18 +264,49 @@ fn run(
             Some(Command::Attempt(_)) => continue,
             Some(Command::Place(ask)) => {
                 // Queued behind a long flight close: the app may have given up.
-                if let Some(ask) = ask.live(now) {
-                    let result = source.place(&ask.query);
-                    if result.is_ok() {
-                        placed = Some(now);
-                        r.session.placing(true);
-                    }
-                    ask.answer(result);
+                let Some(ask) = ask.live(now) else { continue };
+                if let Err(e) = source.place(&ask.query) {
+                    ask.answer(Err(e));
+                    continue;
+                }
+                placed = Some(now);
+                if let Some(older) = placing.replace(ask) {
+                    older.answer(Err("another placement replaced it".into()));
+                }
+                // The flight so far ends where the aircraft was.
+                let action = r.session.place();
+                source.track(None, action);
+                if let Err(e) = r.write(action, None, false) {
+                    r.failed(&e, now);
                 }
                 continue;
             }
             Some(Command::Airport(ask)) => {
                 source.want_airport(ask);
+                continue;
+            }
+            Some(Command::Ils(ask)) => {
+                source.want_ils(ask);
+                continue;
+            }
+            Some(Command::Save(ask)) => {
+                if let Some(ask) = ask.live(now)
+                    && let Some(older) = saving.replace(ask)
+                {
+                    older.answer(Err("another save replaced it".into()));
+                }
+                continue;
+            }
+            Some(Command::Reload(ask)) => {
+                let Some(ask) = ask.live(now) else { continue };
+                if reloading.is_some() {
+                    ask.answer(Err("a reload is already under way".into()));
+                } else {
+                    match source.load(&ask.query) {
+                        Ok(()) => reloading = Some((ask, ReloadWait::new(now))),
+                        Err(e) => ask.answer(Err(e)),
+                    }
+                }
                 continue;
             }
             None => match source.poll() {
@@ -231,6 +330,9 @@ fn run(
                 Polled::Ended => break,
             },
         };
+        if let (Some((_, wait)), Some(item)) = (&mut reloading, &item) {
+            wait.see(item, now);
+        }
         let action = match &item {
             Some(item) => r.session.route(item),
             None => r.session.end(),
@@ -565,6 +667,13 @@ mod tests {
             Ok(())
         }
         fn want_airport(&mut self, _: Ask<String, Airport>) {}
+        fn want_ils(&mut self, _: Ask<IlsQuery, Option<Ils>>) {}
+        fn save(&mut self, _: &Path) -> Result<(), String> {
+            Ok(())
+        }
+        fn load(&mut self, _: &Path) -> Result<(), String> {
+            Ok(())
+        }
         fn track(&mut self, _: Option<&Telemetry>, _: Action) -> bool {
             false
         }
@@ -737,6 +846,107 @@ mod tests {
             })
             .collect();
         assert_eq!(notes, ["opened", "recorded"]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_reload_answers_with_the_flight_opened_after_the_sim_settled() {
+        use recorder::FlowEvent::*;
+        let dir = temp("reload");
+        let flow = |f| Polled::Item(Telemetry::Event(SimEvent::Flow(f)));
+        let sim_start = Polled::Item(Telemetry::Event(SimEvent::SimStart));
+        // The bench's sequence: the load, ~10 s airborne, the sim's own
+        // move to the runway, then the runway.
+        let polls = frames(0, 30, IZMIR)
+            .chain([flow(FlightEnd), flow(FltLoad), flow(FltLoaded)])
+            .chain([flow(TeleportStart), flow(TeleportDone), sim_start])
+            .chain(frames(31, 40, IZMIR))
+            .chain([flow(FlightStart), flow(FltLoad), flow(FltLoaded)])
+            .chain([flow(RtcStart), flow(TeleportStart), flow(TeleportDone)])
+            .chain(frames(41, 42, IZMIR))
+            .chain([flow(RtcEnd)])
+            .chain(frames(43, 60, IZMIR));
+        let (mut opened, mut answer, mut asked) = (Vec::new(), None, false);
+        script(&dir, polls, |p| {
+            if let Progress::Opened(journal) = p {
+                opened.push(debrief::flight_id(journal));
+            }
+            if asked {
+                return ControlFlow::Continue(None);
+            }
+            asked = true;
+            let (ask, rx) = Ask::new(dir.join("clean"));
+            answer = Some(rx);
+            ControlFlow::Continue(Some(Command::Reload(ask)))
+        });
+        let reloaded = answer.unwrap().try_recv().unwrap().unwrap();
+        assert_eq!(opened.len(), 3, "{opened:?}");
+        // Not the flight it was asked in, nor the one before the move.
+        assert_eq!(reloaded.flight_id, opened[2]);
+        assert_eq!(reloaded.settled, Settled::RunwayMove);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_placement_answers_with_the_flight_opened_after_its_teleport() {
+        use recorder::FlowEvent::*;
+        let dir = temp("place");
+        let flow = |f| Polled::Item(Telemetry::Event(SimEvent::Flow(f)));
+        const PLACED: (f64, f64) = (38.4, 27.1);
+        let start = Start {
+            pos: InitPosition {
+                latitude_deg: PLACED.0,
+                longitude_deg: PLACED.1,
+                altitude_ft: 1500.0,
+                pitch_deg: 0.0,
+                bank_deg: 0.0,
+                heading_deg: 340.0,
+                on_ground: 0,
+                airspeed_kt: 70,
+            },
+            gear_down: true,
+            flaps: None,
+            nav1_hz: None,
+        };
+        // On the runway for 30 s, placed, a frame of the old position still
+        // on its way, the sim's teleport, then the start.
+        let polls = frames(0, 31, IZMIR)
+            .chain([flow(TeleportStart), flow(TeleportDone)])
+            .chain(frames(32, 60, PLACED));
+        let (mut opened, mut saved, mut answer, mut recorded) = (vec![], vec![], None, 0);
+        script(&dir, polls, |p| {
+            match p {
+                Progress::Opened(journal) => opened.push(debrief::flight_id(journal)),
+                Progress::Saved(journal) => saved.push(debrief::flight_id(journal)),
+                Progress::Recorded { .. } => recorded += 1,
+                _ => {}
+            }
+            if recorded != 31 || answer.is_some() {
+                return ControlFlow::Continue(None);
+            }
+            let (ask, rx) = Ask::new(start);
+            answer = Some(rx);
+            ControlFlow::Continue(Some(Command::Place(ask)))
+        });
+        let placed_in = answer.unwrap().try_recv().unwrap().unwrap();
+        assert_eq!(opened.len(), 2, "{opened:?}");
+        assert_eq!(placed_in, opened[1]);
+        // The part before is a flight of its own; the new one holds only
+        // the start, not a frame of where the aircraft was.
+        assert_eq!(saved, opened);
+        let file = File::open(dir.join(format!("{placed_in}.fqj"))).unwrap();
+        let lat = Lfl::V1.by_name("pos.lat").unwrap().id;
+        let lats: Vec<f64> = JournalReader::new(file)
+            .unwrap()
+            .filter_map(|r| match r.unwrap() {
+                Record::Sample(s) if s.signal == lat => Some(s.value),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            !lats.is_empty() && lats.iter().all(|&l| l == PLACED.0),
+            "{lats:?}"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

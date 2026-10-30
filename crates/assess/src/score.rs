@@ -42,6 +42,9 @@ pub struct Outcome {
     pub undershoot: bool,
     /// Left the runway or crashed, in words ("Left the side of the runway").
     pub excursion: Option<String>,
+    /// The excursion is a crash: the sim reported one, or a wing or the
+    /// nose struck the ground (`rules::strike`).
+    pub crashed: bool,
 }
 
 /// Everything a landing is scored from.
@@ -425,10 +428,15 @@ impl Method {
         }
         if let Some(cause) = &m.outcome.excursion {
             let why = format!("{cause}, which holds this landing");
+            let title = if m.outcome.crashed {
+                "Crash or ground strike"
+            } else {
+                "Runway excursion"
+            };
             cap(
                 CapKind::Excursion,
                 &self.caps.excursion,
-                "Runway excursion",
+                title,
                 cause.clone(),
                 why,
             );

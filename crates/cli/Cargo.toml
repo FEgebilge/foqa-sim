@@ -18,6 +18,12 @@ name = "foqa-airports"
 path = "src/bin/foqa-airports.rs"
 required-features = ["sim"]
 
+# Bench test of the resets a challenge's "Fly again" could use (live sim).
+[[bin]]
+name = "foqa-reset-lab"
+path = "src/bin/foqa-reset-lab.rs"
+required-features = ["sim"]
+
 [features]
 default = ["sim"]
 sim = ["dep:sim-link"]

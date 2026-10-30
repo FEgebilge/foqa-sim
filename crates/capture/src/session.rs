@@ -22,8 +22,10 @@ pub enum Action {
 /// return to the main menu, when a flight file loads, and before a jump
 /// (teleport, time skip, back on track), so no flight spans two runs or a
 /// jump; the next one opens when the load or jump is done. An aircraft swap
-/// splits it too: one flight, one type. Replay frames are dropped: a
-/// recorder does not live the same flight twice.
+/// splits it too: one flight, one type. The app's own placement (`place`)
+/// splits it like a teleport, so a challenge flight starts at its start.
+/// Replay frames are dropped: a recorder does not live the same flight
+/// twice.
 #[derive(Debug, Default)]
 pub struct Session {
     open: bool,
@@ -34,9 +36,12 @@ pub struct Session {
     replaying: bool,
     /// No flight opens until `resume`: its files could not be written.
     blocked: bool,
-    /// The app is placing the aircraft (`placing`): its teleport is a
-    /// challenge start within the flight, recorded, not split.
+    /// The app placed the aircraft (`place`): no flight opens until the
+    /// placement took, at the sim's `TeleportDone` or `settled`.
     placing: bool,
+    /// The sim's next teleport is the app's placement: it neither ends the
+    /// flight opened after it nor waits in the menu state.
+    own_teleport: bool,
     /// The sim sends flow events (MSFS 2024). MSFS 2020 has none, so there
     /// a flight file loaded mid-flight is what splits it.
     flows: bool,
@@ -56,7 +61,8 @@ impl Session {
             }
             Telemetry::Event(SimEvent::FlightLoaded(_)) => self.split_if(!self.flows),
             Telemetry::Frame(_)
-                if self.replaying || (!self.open && (self.in_menu || self.blocked)) =>
+                if self.replaying
+                    || (!self.open && (self.placing || self.in_menu || self.blocked)) =>
             {
                 Action::Skip
             }
@@ -72,8 +78,10 @@ impl Session {
         use FlowEvent::*;
         self.flows = true;
         match flow {
-            TeleportStart | TeleportDone if self.placing => {
-                self.placing = flow == TeleportStart;
+            TeleportStart | TeleportDone if self.own_teleport => {
+                if flow == TeleportDone {
+                    (self.own_teleport, self.placing) = (false, false);
+                }
                 self.held_or_recorded()
             }
             FlightEnd | BackToMainMenu | FltLoad | TeleportStart | SkipStart | BackOnTrackStart => {
@@ -139,9 +147,34 @@ impl Session {
         self.blocked = false;
     }
 
-    /// The app placed the aircraft (or, `false`, its teleport is over).
-    pub fn placing(&mut self, on: bool) {
-        self.placing = on;
+    /// The app placed the aircraft: the open flight closes now (`Close`,
+    /// else `Skip`), the frames before the placement took are dropped, and
+    /// the sim's teleport for it is the app's own (`own_teleport`). The next
+    /// flight opens at the first frame after its `TeleportDone`, or after
+    /// `settled` when the sim sends none.
+    pub fn place(&mut self) -> Action {
+        (self.placing, self.own_teleport) = (true, true);
+        if std::mem::take(&mut self.open) {
+            Action::Close
+        } else {
+            Action::Skip
+        }
+    }
+
+    /// The placement has taken, teleport reported or not: the next frame
+    /// may open the flight.
+    pub fn settled(&mut self) {
+        self.placing = false;
+    }
+
+    /// A teleport from now on is the pilot's again.
+    pub fn own_teleport_over(&mut self) {
+        self.own_teleport = false;
+    }
+
+    /// Still waiting for a placement to take.
+    pub fn is_placing(&self) -> bool {
+        self.placing
     }
 
     fn split_if(&mut self, split: bool) -> Action {
@@ -280,14 +313,34 @@ mod tests {
     }
 
     #[test]
-    fn the_apps_own_teleport_stays_in_the_flight() {
+    fn the_apps_placement_starts_a_flight_after_its_teleport() {
         use Action::*;
         let mut session = Session::default();
         assert_eq!(session.route(&frame()), Open);
-        session.placing(true);
+        assert_eq!(session.place(), Close);
+        // Frames before the placement took: still the old position.
+        assert_eq!(session.route(&frame()), Skip);
+        assert_eq!(session.route(&flow(FlowEvent::TeleportStart)), Hold);
+        assert_eq!(session.route(&frame()), Skip);
+        assert_eq!(session.route(&flow(FlowEvent::TeleportDone)), Hold);
+        assert_eq!(session.route(&frame()), Open);
+        // The next teleport is the pilot's.
+        assert_eq!(session.route(&flow(FlowEvent::TeleportStart)), Close);
+    }
+
+    #[test]
+    fn without_a_teleport_the_placement_opens_once_settled() {
+        use Action::*;
+        let mut session = Session::default();
+        assert_eq!(session.route(&frame()), Open);
+        assert_eq!(session.place(), Close);
+        assert_eq!(session.route(&frame()), Skip);
+        session.settled();
+        assert_eq!(session.route(&frame()), Open);
+        // A late teleport for it stays in the new flight.
         assert_eq!(session.route(&flow(FlowEvent::TeleportStart)), Record);
         assert_eq!(session.route(&flow(FlowEvent::TeleportDone)), Record);
-        // The next one is the pilot's.
+        session.own_teleport_over();
         assert_eq!(session.route(&flow(FlowEvent::TeleportStart)), Close);
     }
 

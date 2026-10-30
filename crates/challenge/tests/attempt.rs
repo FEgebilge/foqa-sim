@@ -1,8 +1,9 @@
 //! Attempts flown as synthetic flights (`testkit`): the stable airliner
 //! approach onto runway 20 of `TEST`, touching down 400 m past the
-//! threshold, starting about 4.6 NM out.
+//! threshold, starting about 4.6 NM out, as a 737-800 (a profile with a
+//! Vref table: every attempt is graded with the current assessment).
 
-use challenge::{Attempt, Begin, Challenge, evaluate, evaluate_after};
+use challenge::{Attempt, Begin, CURRENT, Challenge, evaluate, evaluate_after};
 use debrief::Station;
 use recorder::{AttemptMarker, AttemptPhase, SimEvent};
 use testkit::*;
@@ -23,7 +24,10 @@ fn attempt(edits: &[(&str, &str)], change: impl Fn(f64, Pt) -> Pt) -> Attempt {
         .iter()
         .fold(CHALLENGE.to_owned(), |j, (a, b)| j.replace(a, b));
     let challenge = Challenge::parse(&json).unwrap();
-    let events = [SimEvent::Airport(runway_behind_touchdown(400.0))];
+    let events = [
+        identity("B738"),
+        SimEvent::Airport(runway_behind_touchdown(400.0)),
+    ];
     let (flight, _) = fly_to(&events, AIRLINER_LB, TD_S + ROLLOUT_S, |t| {
         change(t, landing(t, TD_S, 1.2))
     });
@@ -38,8 +42,8 @@ fn failed(a: &Attempt) -> Vec<&str> {
     a.checks.iter().filter(|c| !c.ok).map(|c| c.name).collect()
 }
 
-/// Every check passes. The only imperfect part is the 300 fpm sink, a third
-/// of the way from the transport ideal (250) to half marks (400).
+/// Every check passes, and the attempt is scored by the debrief's
+/// current assessment though its definition names landing-1.
 #[test]
 fn a_clean_attempt_counts_and_scores() {
     let a = attempt(&[], |_, p| p);
@@ -54,17 +58,21 @@ fn a_clean_attempt_counts_and_scores() {
             "sim_rate",
             "slew",
             "pause",
-            "continuity"
+            "continuity",
+            "ground_strike",
+            "go_around",
+            "data"
         ]
     );
-    assert!(a.assessment.is_none(), "landing-1 carries no assessment");
+    // A definition naming landing-1 is graded with the current method.
     let score = a.score.unwrap();
-    let sink = score.parts.iter().find(|p| p.name == "sink_rate").unwrap();
-    assert!((sink.score - 0.83).abs() < 0.05, "{sink:?}");
-    for p in score.parts.iter().filter(|p| p.name != "sink_rate") {
-        assert_eq!(p.score, 1.0, "{p:?}");
-    }
-    assert!((score.total - (75.0 + 25.0 * sink.score)).abs() < 0.1);
+    assert_eq!(score.version, CURRENT);
+    let assessment = a.assessment.unwrap();
+    assert_eq!(
+        (assessment.method.as_str(), assessment.score),
+        (CURRENT, score.total)
+    );
+    assert!(score.total > 50.0, "{score:?}");
     assert!(a.gate_s.unwrap() < a.touchdown_s.unwrap());
 }
 
@@ -155,7 +163,7 @@ fn a_jump_during_a_ground_speed_dropout_breaks_continuity() {
 }
 
 /// 4 s without a position on the rollout is not leaving the runway:
-/// only a located point off it fails the stop and the rollout score.
+/// only a located point off it fails the stop.
 #[test]
 fn a_position_dropout_on_the_rollout_stays_on_the_runway() {
     let stop = r#""rules": { "stop_on_runway": true }, "scoring""#;
@@ -167,9 +175,6 @@ fn a_position_dropout_on_the_rollout_stays_on_the_runway() {
         ..p
     });
     assert!(a.valid, "{:?}", a.checks);
-    let parts = a.score.unwrap().parts;
-    let rollout = parts.iter().find(|p| p.name == "rollout").unwrap();
-    assert_eq!(rollout.score, 1.0, "{rollout:?}");
 }
 
 const REF: &str = "Qe3v1hJ0dEa9fP2kLm7xRw";

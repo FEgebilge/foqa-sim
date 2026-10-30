@@ -129,7 +129,7 @@ fn ssm_name(ssm: Ssm) -> &'static str {
     }
 }
 
-fn describe(event: &SimEvent, identity: bool) -> (String, String) {
+pub fn describe(event: &SimEvent, identity: bool) -> (String, String) {
     match event {
         // The flight file is a local path: never exported.
         SimEvent::FlightLoaded(_) => ("FlightLoaded".into(), String::new()),

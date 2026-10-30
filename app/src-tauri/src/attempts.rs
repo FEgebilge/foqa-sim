@@ -89,6 +89,16 @@ impl State {
     }
 }
 
+/// What placing an attempt gave: the fields its `placed` line logs and
+/// the flight it is bound to, with the sim time it began at in it (`None`
+/// for a flight opened by the placement: all of it is the attempt's).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Placement {
+    pub fields: Value,
+    pub flight_id: String,
+    pub begin_s: Option<f64>,
+}
+
 /// `attempt.json`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Record {
@@ -313,42 +323,89 @@ impl Attempts {
         append(&dir, event, fields)
     }
 
+    /// Logs, in plain words, what was done for a clean start: saved after
+    /// the first placement, reloaded before Fly again, or why not.
+    pub fn clean_start(&self, id: &str, text: &str) -> Result<(), String> {
+        self.note(id, "clean_start", json!({ "text": text }))
+    }
+
+    /// An attempt created but left with no flight to place it in (a reload
+    /// before it failed): `failed_start` with `e`, which is returned.
+    pub fn cannot_place(&self, id: &str, e: String) -> Result<Record, String> {
+        self.step(id, State::Placing, "placing", json!({}), |_| {})?;
+        self.failed_start(id, e)
+    }
+
+    fn failed_start(&self, id: &str, e: String) -> Result<Record, String> {
+        let fields = json!({ "error": e });
+        self.step(id, State::FailedStart, "failed_start", fields, |_| {})?;
+        Err(e)
+    }
+
     /// Places the aircraft with `place`, which returns what to log with
-    /// `placed`; on its error the attempt is `failed_start` and the error
-    /// returned. `marker_ref` is the reference its markers carry.
+    /// `placed` and the flight the attempt is bound to (the one the
+    /// placement opened); on its error the attempt is `failed_start` and the
+    /// error returned. `marker_ref` is the reference its markers carry.
     pub fn place(
         &self,
         id: &str,
-        flight_id: &str,
-        begin_s: Option<f64>,
         marker_ref: Option<&str>,
-        place: impl FnOnce(&Challenge) -> Result<Value, String>,
+        place: impl FnOnce(&Challenge) -> Result<Placement, String>,
     ) -> Result<Record, String> {
         let challenge = Challenge::parse(&self.definition(id)?)?;
         self.step(id, State::Placing, "placing", json!({}), |_| {})?;
         match place(&challenge) {
-            Ok(mut fields) => {
+            Ok(Placement {
+                mut fields,
+                flight_id,
+                begin_s,
+            }) => {
                 if let Value::Object(map) = &mut fields {
-                    map.insert("flight_id".into(), flight_id.into());
+                    map.insert("flight_id".into(), flight_id.as_str().into());
                     map.insert("ref".into(), marker_ref.into());
                 }
                 self.step(id, State::Flying, "placed", fields, |r| {
-                    r.flight_id = Some(flight_id.to_owned());
+                    r.flight_id = Some(flight_id);
                     r.marker_ref = marker_ref.map(Into::into);
                     r.begin_s = begin_s;
                 })
             }
-            Err(e) => {
-                self.step(
-                    id,
-                    State::FailedStart,
-                    "failed_start",
-                    json!({ "error": e }),
-                    |_| {},
-                )?;
-                Err(e)
-            }
+            Err(e) => self.failed_start(id, e),
         }
+    }
+
+    /// A wing, propeller or nose strike on the ground at sim time `t_s` in
+    /// `flight_id` (`rules::strike`): the open attempts flown in it since
+    /// before then get a `strike` line in words. Returns their ids, to end
+    /// as crashed.
+    /// The attempts of flight `flight_id` flying or rolling out at sim
+    /// time `t_s`: those a stop after a landing finishes.
+    pub fn landing_in(&self, flight_id: &str, t_s: f64) -> Vec<String> {
+        self.records()
+            .filter(|r| {
+                (r.state.airborne() || r.state == State::Rollout)
+                    && r.flight_id.as_deref() == Some(flight_id)
+                    && r.begin_s.is_none_or(|b| t_s >= b)
+            })
+            .map(|r| r.id)
+            .collect()
+    }
+
+    pub fn struck(&self, flight_id: &str, t_s: f64, text: &str) -> Vec<String> {
+        let struck = self.records().filter(|r| {
+            r.state.open()
+                && r.state != State::Placing
+                && r.flight_id.as_deref() == Some(flight_id)
+                && r.begin_s.is_none_or(|b| t_s >= b)
+        });
+        let fields = json!({ "sim_s": t_s, "text": text });
+        struck
+            .filter_map(|r| {
+                let noted = self.note(&r.id, "strike", fields.clone());
+                noted.map_err(|e| eprintln!("attempt {}: {e}", r.id)).ok()?;
+                Some(r.id)
+            })
+            .collect()
     }
 
     /// The recording shows the gate passed at sim time `sim_s`.
@@ -735,6 +792,14 @@ pub(crate) mod tests {
         }
     }
 
+    fn placed_in(flight_id: &str, begin_s: Option<f64>, fields: Value) -> Placement {
+        Placement {
+            fields,
+            flight_id: flight_id.into(),
+            begin_s,
+        }
+    }
+
     /// An attempt placed in flight-1 at sim time `begin_s`.
     fn flying(a: &Attempts, begin_s: f64) -> Record {
         flying_as(a, begin_s, None)
@@ -747,8 +812,12 @@ pub(crate) mod tests {
 
     fn flying_as(a: &Attempts, begin_s: f64, marker_ref: Option<&str>) -> Record {
         let r = created(a);
-        a.place(&r.id, "flight-1", Some(begin_s), marker_ref, |_| {
-            Ok(json!({ "start": { "alt_ft": 2600 } }))
+        a.place(&r.id, marker_ref, |_| {
+            Ok(placed_in(
+                "flight-1",
+                Some(begin_s),
+                json!({ "start": { "alt_ft": 2600 } }),
+            ))
         })
         .unwrap()
     }
@@ -920,12 +989,33 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn a_fly_again_binds_to_the_flight_after_its_reload_or_fails_without_one() {
+        let (_tmp, a) = attempts();
+        let r = a.create("test-20-v1", JSON).unwrap();
+        a.clean_start(&r.id, "Reloading the clean start (C172)")
+            .unwrap();
+        a.clean_start(&r.id, "Reloaded in 12.3 s").unwrap();
+        let placed = a
+            .place(&r.id, None, |_| Ok(placed_in("flight-2", None, json!({}))))
+            .unwrap();
+        assert_eq!(placed.flight_id.as_deref(), Some("flight-2"));
+        let log = &a.list()[0].log;
+        assert_eq!(log[2]["text"], "Reloaded in 12.3 s");
+        a.abandon(&r.id, "replaced").unwrap();
+        // The reload failed and no flight is left to place it in.
+        let r = a.create("test-20-v1", JSON).unwrap();
+        let err = a.cannot_place(&r.id, "no flight is loaded".into());
+        assert_eq!(err.unwrap_err(), "no flight is loaded");
+        let record = a.get(&r.id).unwrap();
+        assert_eq!((record.state, record.flight_id), (State::FailedStart, None));
+        assert_eq!(events(&a, &r.id), ["created", "placing", "failed_start"]);
+    }
+
+    #[test]
     fn a_failed_placement_or_grade_is_logged() {
         let (_tmp, a) = attempts();
         let r = a.create("test-20-v1", JSON).unwrap();
-        let err = a.place(&r.id, "flight-1", None, None, |_| {
-            Err("no answer from the sim".into())
-        });
+        let err = a.place(&r.id, None, |_| Err("no answer from the sim".into()));
         assert_eq!(err.unwrap_err(), "no answer from the sim");
         assert_eq!(a.get(&r.id).unwrap().state, State::FailedStart);
         assert!(
@@ -948,6 +1038,28 @@ pub(crate) mod tests {
             .unwrap();
         assert_eq!((done.state, done.touchdown_s), (State::Done, Some(400.0)));
         assert!(events(&a, &r.id).contains(&"touchdown".to_owned()));
+    }
+
+    #[test]
+    fn a_ground_strike_is_logged_on_the_attempts_flown_in_that_flight() {
+        let (_tmp, a) = attempts();
+        let r = flying(&a, 100.0);
+        assert_eq!(a.landed("flight-1", 400.0, 247.0, 1.29), [r.id.as_str()]);
+        let text = "Ground strike: wing strike (roll -25°, pitch -17°), ended as a crash";
+        // Another flight's, or before the attempt began: not its.
+        assert!(a.struck("flight-2", 405.0, text).is_empty());
+        assert!(a.struck("flight-1", 50.0, text).is_empty());
+        assert_eq!(a.struck("flight-1", 405.0, text), [r.id.as_str()]);
+        let done = a.finish(&r.id, "crashed", &|_, _| Ok(graded(Some(400.0))));
+        assert_eq!(done.unwrap().reason.as_deref(), Some("crashed"));
+        let log = &a.list()[0].log;
+        let strike = log.iter().find(|l| l["event"] == "strike").unwrap();
+        assert_eq!(
+            (strike["text"].as_str(), strike["sim_s"].as_f64()),
+            (Some(text), Some(405.0))
+        );
+        // Ended, it is struck no more.
+        assert!(a.struck("flight-1", 410.0, text).is_empty());
     }
 
     #[test]

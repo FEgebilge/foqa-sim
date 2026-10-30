@@ -495,7 +495,13 @@ impl Board {
                 self.landing = Some((notice.clone(), now));
                 self.next_landing = None;
             }
-            Msg::Happening(Happening::FlightSaved(_)) => {}
+            Msg::Happening(
+                Happening::FlightSaved(_)
+                | Happening::Impact(..)
+                | Happening::Strike(..)
+                | Happening::Stopped(..)
+                | Happening::FlightDiscarded(_),
+            ) => {}
             Msg::Live(live) => {
                 self.phase = Some(live.phase());
                 self.live = Some(live.clone());

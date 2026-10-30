@@ -14,7 +14,7 @@ use rules::{Aircraft, ProfileSet};
 use serde::{Deserialize, Serialize};
 
 pub use attempt::{Attempt, Begin, Check, Flown, Marker, aircraft_check, evaluate, evaluate_after};
-pub use score::{LANDING_2, LANDING_3, Part, SCORING, Score};
+pub use score::{CURRENT, LANDING_1, LANDING_2, LANDING_3, Part, Score};
 
 const M_PER_NM: f64 = 1852.0;
 const FT_PER_M: f64 = 1.0 / 0.3048;
@@ -173,7 +173,10 @@ impl Challenge {
             return Err(format!("runway `{}` is not like `06` or `27L`", c.runway));
         }
         match c.scoring.version.as_str() {
-            SCORING => {}
+            // Graded with `CURRENT` all the same; only a definition naming
+            // landing-2 or landing-3 was written for it, so only theirs must
+            // name types with a Vref source (a landing-1 file still loads).
+            LANDING_1 => {}
             LANDING_3 | LANDING_2 => c.ranked_on_speed()?,
             other => return Err(format!("unknown scoring `{other}`")),
         }

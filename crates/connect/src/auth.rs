@@ -199,7 +199,10 @@ fn read_head(stream: &mut TcpStream) -> String {
 const DONE_PAGE: &str = "<!doctype html><meta charset=utf-8><title>FOQA-Sim</title><p style=\"font:16px system-ui;margin:3em\">Signed in. You can return to FOQA-Sim.";
 const DENIED_PAGE: &str = "<!doctype html><meta charset=utf-8><title>FOQA-Sim</title><p style=\"font:16px system-ui;margin:3em\">Sign-in was cancelled. You can return to FOQA-Sim.";
 
-/// The browser address: `authorize` with A2.1's query.
+/// The browser address: `authorize` with A2.1's query. A single-page site's
+/// address routes in its fragment (`/#/foqa/authorize`): the query then goes
+/// at the end of the fragment, where the page reads it and no server or
+/// proxy log sees it; otherwise in the URL's query.
 pub fn authorize_url(
     authorize: &str,
     redirect_uri: &str,
@@ -208,13 +211,24 @@ pub fn authorize_url(
     app_version: &str,
 ) -> Result<String, String> {
     let mut url = Url::parse(authorize).map_err(|e| e.to_string())?;
-    url.query_pairs_mut()
+    let query = url::form_urlencoded::Serializer::new(String::new())
         .append_pair("client_id", CLIENT_ID)
         .append_pair("redirect_uri", redirect_uri)
         .append_pair("state", state)
         .append_pair("code_challenge", challenge)
         .append_pair("code_challenge_method", "S256")
-        .append_pair("client_name", &format!("FOQA-Sim {app_version}"));
+        .append_pair("client_name", &format!("FOQA-Sim {app_version}"))
+        .finish();
+    match url.fragment().filter(|f| !f.is_empty()) {
+        Some(route) => {
+            let joined = format!(
+                "{route}{}{query}",
+                if route.contains('?') { '&' } else { '?' }
+            );
+            url.set_fragment(Some(&joined));
+        }
+        None => url.set_query(Some(&query)),
+    }
     Ok(url.into())
 }
 
@@ -398,7 +412,12 @@ mod tests {
         // The "browser" follows the redirect with the state it was given.
         let open = |url: &str| {
             let url = Url::parse(url).unwrap();
-            let q: std::collections::HashMap<_, _> = url.query_pairs().into_owned().collect();
+            // The site routes in its fragment: the query is read from there.
+            let (route, query) = url.fragment().unwrap().split_once('?').unwrap();
+            assert_eq!((url.query(), route), (None, "/foqa/authorize"));
+            let q: std::collections::HashMap<_, _> = url::form_urlencoded::parse(query.as_bytes())
+                .into_owned()
+                .collect();
             assert_eq!(
                 (q["client_id"].as_str(), q["code_challenge_method"].as_str()),
                 ("foqa-sim", "S256")

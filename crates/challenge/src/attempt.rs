@@ -7,10 +7,10 @@ use debrief::{Analysis, CapNote, Confidence, Grade};
 use fdm_core::SimTime;
 use fdm_core::geo::distance_m;
 use recorder::{AttemptPhase, SimEvent};
-use rules::{Aircraft, Domain};
+use rules::{Domain, StrikeLimits};
 use serde::Serialize;
 
-use crate::score::{LANDING_3, Landing, Part, SCORING, Score, landing_1};
+use crate::score::{CURRENT, Part, Score};
 use crate::{Challenge, M_PER_NM};
 
 /// The rollout ends below this groundspeed.
@@ -42,7 +42,7 @@ pub struct Attempt {
     /// `None` without a landing on the challenge's runway past its gate.
     pub score: Option<Score>,
     /// A landing-3 attempt's grade, confidence and caps (docs/scoring.md),
-    /// as the debrief wire has them; absent for landing-1.
+    /// as the debrief wire has them.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub assessment: Option<Assessment>,
 }
@@ -334,21 +334,18 @@ fn landing(
             ),
         });
     }
-    // Centreline offset at each located point of the rollout; `None` once
-    // one is off the runway. A point without a position is skipped: a
-    // dropout is not leaving the runway.
-    let cross = |(lat, lon): (f64, f64)| {
-        locate(&airports, lat, lon, fix.heading_deg)
-            .filter(|f| on_runway(&f.icao, &f.runway))
-            .map(|f| f.cross_m.abs())
-    };
-    let rollout: Option<Vec<f64>> = (td_i..=end_i).filter_map(pos).map(cross).collect();
     if c.rules.stop_on_runway {
+        // Every located point of the rollout on the runway. A point without
+        // a position is skipped: a dropout is not leaving the runway.
+        let kept = (td_i..=end_i).filter_map(pos).all(|(lat, lon)| {
+            locate(&airports, lat, lon, fix.heading_deg)
+                .is_some_and(|f| on_runway(&f.icao, &f.runway))
+        });
         let stopped = track.gs_kt[end_i] < TAXI_KT;
         checks.push(check(
             "stop_on_runway",
-            stopped && rollout.is_some(),
-            match (stopped, rollout.is_some()) {
+            stopped && kept,
+            match (stopped, kept) {
                 (false, _) => "did not slow to taxi speed".into(),
                 (true, false) => "left the runway".into(),
                 (true, true) => format!("below {TAXI_KT} kt on the runway"),
@@ -356,25 +353,30 @@ fn landing(
         ));
     }
 
-    let (score, assessment) = match c.scoring.version.as_str() {
-        SCORING => (
-            Some(landing_1(&Landing {
-                class: a.selection.class.unwrap_or(Aircraft::Transport),
-                td,
-                fix,
-                bounced: a.touchdowns.get(k + 1).is_some_and(|t| t.bounce),
-                worst: a
-                    .events
-                    .iter()
-                    .filter(|e| (from..td.t).contains(&e.start))
-                    .map(|e| e.level)
-                    .max(),
-                rollout_cross_m: rollout.map(|xs| xs.into_iter().fold(0.0, f64::max)),
-            })),
-            None,
+    // A wing, propeller or nose on the runway after the touchdown: the live
+    // crash detection's measure (`rules::strike`), so it never counts.
+    let strikes = rules::strikes(track, StrikeLimits::of(a.selection.class));
+    checks.push(match rules::after_touchdown(&strikes, track, td.t) {
+        Some(s) => check(
+            "ground_strike",
+            false,
+            format!(
+                "struck the ground with a wing or the nose: {} at {:.1} s (roll {:.0}°, pitch {:.0}°)",
+                s.reason(),
+                s.t_s,
+                s.roll_deg,
+                s.pitch_deg
+            ),
         ),
-        _ => landing_3(a, k, gate_i, checks).unzip(),
-    };
+        None => check(
+            "ground_strike",
+            true,
+            "no wing, propeller or nose strike".into(),
+        ),
+    });
+
+    // Whatever method the definition names: the debrief's own (`CURRENT`).
+    let (score, assessment) = landing_3(a, k, gate_i, checks).unzip();
     Some(Graded {
         gate: from,
         touchdown: td.t,
@@ -466,7 +468,7 @@ fn landing_3(
         caps: s.caps.iter().map(|c| CapNote::of(c, None)).collect(),
     };
     let score = Score {
-        version: LANDING_3,
+        version: CURRENT,
         total: s.score,
         parts,
     };

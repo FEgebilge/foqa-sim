@@ -1,6 +1,7 @@
 //! Requests the desktop app makes of the simulator through the running
 //! service: put the user aircraft at a start (a landing challenge on final,
-//! airborne) and configure it, or fetch one airport's runways. Each request
+//! airborne) and configure it, save the flight as a clean start and load it
+//! back, or fetch one airport's runways or a runway end's ILS. Each request
 //! carries the way its answer goes back, so the caller can wait on it.
 
 use std::collections::HashMap;
@@ -8,12 +9,21 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
 use fdm_core::Airport;
+use recorder::{FlowEvent, SimEvent, Telemetry};
 pub use sim_link::InitPosition;
+pub use sim_link::ils::{Ils, IlsQuery};
 
 /// Key events a start sends; each is mapped once per connection as client
 /// event `KEY_EVENT_BASE` + its index. Names from the MSFS key event list
-/// (legacy events, still in MSFS 2024).
-pub(crate) const KEY_EVENTS: [&str; 4] = ["AUTOPILOT_OFF", "GEAR_DOWN", "GEAR_UP", "FLAPS_SET"];
+/// (legacy events, still in MSFS 2024; `NAV1_RADIO_SET_HZ` takes Hz, not
+/// BCD: Aircraft Radio Navigation Events).
+pub(crate) const KEY_EVENTS: [&str; 5] = [
+    "AUTOPILOT_OFF",
+    "GEAR_DOWN",
+    "GEAR_UP",
+    "FLAPS_SET",
+    "NAV1_RADIO_SET_HZ",
+];
 /// Above the system event ids (1..=`SYSTEM_EVENTS.len()`): client event ids
 /// share one space.
 pub(crate) const KEY_EVENT_BASE: u32 = 100;
@@ -29,11 +39,13 @@ pub struct Start {
     /// `i` of a handle with `n` steps past up is `i / n` (737 flaps 30 is
     /// 7 of 8: 0.875); the sim moves to the closest detent.
     pub flaps: Option<f64>,
+    /// Active NAV1 frequency, Hz (the landing runway's ILS); `None` leaves it.
+    pub nav1_hz: Option<u32>,
 }
 
 impl Start {
     /// The key events sent after the position, in order, with their data:
-    /// autopilot off, the gear, then the flaps if set.
+    /// autopilot off, the gear, then the flaps and NAV1 if set.
     pub fn events(&self) -> Vec<(&'static str, u32)> {
         let gear = if self.gear_down {
             "GEAR_DOWN"
@@ -42,6 +54,7 @@ impl Start {
         };
         let mut events = vec![("AUTOPILOT_OFF", 0), (gear, 0)];
         events.extend(self.flaps.map(|f| ("FLAPS_SET", flaps_set_data(f))));
+        events.extend(self.nav1_hz.map(|hz| ("NAV1_RADIO_SET_HZ", hz)));
         events
     }
 }
@@ -150,11 +163,140 @@ impl AirportAsks {
     }
 }
 
+/// ILS lookups asked for on one connection: one lookup answers every ask
+/// for the same runway end.
+#[derive(Debug, Default)]
+pub(crate) struct IlsAsks(Vec<Ask<IlsQuery, Option<Ils>>>);
+
+impl IlsAsks {
+    /// Keeps `ask`; returns its query when no lookup for it is out yet.
+    pub fn ask(&mut self, ask: Ask<IlsQuery, Option<Ils>>) -> Option<IlsQuery> {
+        let new = !self.0.iter().any(|a| a.query == ask.query);
+        let query = new.then(|| ask.query.clone());
+        self.0.push(ask);
+        query
+    }
+
+    pub fn found(&mut self, query: &IlsQuery, result: Result<Option<Ils>, String>) {
+        for ask in self.0.extract_if(.., |a| a.query == *query) {
+            ask.answer(result.clone());
+        }
+    }
+}
+
+/// A save waits this long after the last placement: the teleport, gear,
+/// flaps and NAV1 it sent have then taken effect (the sim reports the
+/// teleport done within a frame or two), so the flight saved is the start.
+pub(crate) const SAVE_AFTER: Duration = Duration::from_secs(2);
+/// The longest a reload waits for the sim to settle after the load.
+pub const RELOAD_TIMEOUT: Duration = Duration::from_secs(60);
+/// Without the sim's own move to the runway (MSFS 2020 sends no flow
+/// events; another flow may not move the aircraft) a reload is settled this
+/// long after the last `SimStart`. MSFS 2024 begins that move about 10 s
+/// after the load's `SimStart`, so it is not cut short.
+pub(crate) const QUIET_AFTER: Duration = Duration::from_secs(15);
+
+/// How a reload settled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Settled {
+    /// The sim's own move to the runway ended (`RTC_END`), as MSFS 2024
+    /// does after a flight load.
+    RunwayMove,
+    /// No such move began: `QUIET_AFTER` past the last `SimStart`.
+    Quiet,
+}
+
+/// A flight reloaded and settled, and the flight the recorder opened after
+/// it: the one to place the start in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Reloaded {
+    pub flight_id: String,
+    pub settled: Settled,
+}
+
+/// What a reload waits for once `SimConnect_FlightLoad` went out. MSFS 2024
+/// (bench, 2026-10-30): `FLIGHT_END`, `FLT_LOAD`/`FLT_LOADED`, a teleport,
+/// `SimStop`/`SimStart`; about 10 s later its own move to the runway:
+/// `FLIGHT_START`, `taxi.flt` loaded, `RTC_START`, a teleport, `runway.flt`,
+/// `RTC_END`. A start placed before that move ends is undone by it. Fed
+/// every item the sim sends, in order.
+#[derive(Debug, Clone)]
+pub(crate) struct ReloadWait {
+    sent: Instant,
+    /// The flight file loaded (`FLT_LOADED`, or MSFS 2020's `FlightLoaded`).
+    loaded: bool,
+    /// The sim's move to the runway began after the load.
+    moving: bool,
+    settled: Option<Settled>,
+    /// The last `SimStart` after the load.
+    sim_start: Option<Instant>,
+    failed: Option<&'static str>,
+}
+
+impl ReloadWait {
+    pub fn new(sent: Instant) -> Self {
+        Self {
+            sent,
+            loaded: false,
+            moving: false,
+            settled: None,
+            sim_start: None,
+            failed: None,
+        }
+    }
+
+    /// Follows one item the sim sent, at `now`.
+    pub fn see(&mut self, item: &Telemetry, now: Instant) {
+        let Telemetry::Event(event) = item else {
+            return;
+        };
+        match event {
+            SimEvent::Flow(FlowEvent::FltLoaded) | SimEvent::FlightLoaded(_) => self.loaded = true,
+            SimEvent::Flow(FlowEvent::RtcStart) if self.loaded => self.moving = true,
+            SimEvent::Flow(FlowEvent::RtcEnd) if self.moving => {
+                self.settled = Some(Settled::RunwayMove);
+            }
+            SimEvent::Flow(FlowEvent::BackToMainMenu) => {
+                self.failed = Some("the sim went back to the main menu");
+            }
+            SimEvent::SimStart if self.loaded => self.sim_start = Some(now),
+            _ => {}
+        }
+    }
+
+    /// `RELOAD_TIMEOUT` has passed since the load was sent.
+    pub fn expired(&self, now: Instant) -> bool {
+        now >= self.sent + RELOAD_TIMEOUT
+    }
+
+    /// `None` while the sim is still loading, else how it settled or why
+    /// the reload failed.
+    pub fn state(&self, now: Instant) -> Option<Result<Settled, String>> {
+        if let Some(why) = self.failed {
+            return Some(Err(why.into()));
+        }
+        if let Some(settled) = self.settled {
+            return Some(Ok(settled));
+        }
+        let quiet = self.sim_start.is_some_and(|t| now >= t + QUIET_AFTER);
+        if quiet && !self.moving {
+            return Some(Ok(Settled::Quiet));
+        }
+        self.expired(now).then(|| {
+            Err(if self.loaded {
+                "the sim did not finish loading the clean start".into()
+            } else {
+                "the sim did not load the clean start".into()
+            })
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn start(gear_down: bool, flaps: Option<f64>) -> Start {
+    fn start(gear_down: bool, flaps: Option<f64>, nav1_hz: Option<u32>) -> Start {
         let pos = InitPosition {
             latitude_deg: 40.9,
             longitude_deg: 29.3,
@@ -169,6 +311,7 @@ mod tests {
             pos,
             gear_down,
             flaps,
+            nav1_hz,
         }
     }
 
@@ -183,14 +326,19 @@ mod tests {
     }
 
     #[test]
-    fn start_events_are_ap_off_gear_then_flaps() {
-        let events = start(true, Some(1.0)).events();
+    fn start_events_are_ap_off_gear_flaps_then_nav1() {
+        let events = start(true, Some(1.0), Some(110_300_000)).events();
         assert_eq!(
             events,
-            [("AUTOPILOT_OFF", 0), ("GEAR_DOWN", 0), ("FLAPS_SET", 16383)]
+            [
+                ("AUTOPILOT_OFF", 0),
+                ("GEAR_DOWN", 0),
+                ("FLAPS_SET", 16383),
+                ("NAV1_RADIO_SET_HZ", 110_300_000)
+            ]
         );
         assert_eq!(
-            start(false, None).events(),
+            start(false, None, None).events(),
             [("AUTOPILOT_OFF", 0), ("GEAR_UP", 0)]
         );
         // Every event a start sends is mapped.
@@ -231,7 +379,7 @@ mod tests {
 
     #[test]
     fn an_ask_past_its_deadline_is_refused_not_acted_on() {
-        let (ask, answer) = Ask::<_, ()>::new(start(true, None));
+        let (ask, answer) = Ask::<_, ()>::new(start(true, None, None));
         let now = Instant::now();
         let ask = ask.live(now).expect("waited on at once");
         assert!(
@@ -252,5 +400,109 @@ mod tests {
         let (ask, answer) = Ask::<String, Airport>::new("LTBJ".into());
         drop(ask);
         assert!(answer.recv().is_err());
+    }
+
+    #[test]
+    fn one_ils_lookup_answers_every_ask_for_its_runway_end() {
+        let end = |runway: &str| IlsQuery {
+            airport: "LTBJ".into(),
+            runway: runway.into(),
+        };
+        let mut asks = IlsAsks::default();
+        let (ask, first) = Ask::new(end("16L"));
+        assert_eq!(asks.ask(ask), Some(end("16L")));
+        let (ask, second) = Ask::new(end("16L"));
+        assert_eq!(asks.ask(ask), None, "already looked up");
+        let (ask, other) = Ask::new(end("34R"));
+        assert_eq!(asks.ask(ask), Some(end("34R")));
+        asks.found(&end("16L"), Ok(None));
+        assert_eq!(first.recv().unwrap(), Ok(None));
+        assert_eq!(second.recv().unwrap(), Ok(None));
+        assert!(other.try_recv().is_err(), "another end waits on");
+    }
+
+    fn flow(f: FlowEvent) -> Telemetry {
+        Telemetry::Event(SimEvent::Flow(f))
+    }
+
+    /// The wait's state `after` the last of `items`, fed one second apart
+    /// from the load.
+    fn reload(items: &[Telemetry], after: Duration) -> Option<Result<Settled, String>> {
+        let sent = Instant::now();
+        let mut wait = ReloadWait::new(sent);
+        let mut now = sent;
+        for item in items {
+            now += Duration::from_secs(1);
+            wait.see(item, now);
+        }
+        wait.state(now + after)
+    }
+
+    #[test]
+    fn a_reload_settles_when_the_sims_move_to_the_runway_ends() {
+        use FlowEvent::*;
+        let items = [
+            flow(FlightEnd),
+            flow(FltLoad),
+            flow(FltLoaded),
+            flow(TeleportStart),
+            flow(TeleportDone),
+            Telemetry::Event(SimEvent::SimStop),
+            Telemetry::Event(SimEvent::SimStart),
+            flow(FlightStart),
+            flow(FltLoad),
+            flow(FltLoaded),
+            flow(RtcStart),
+            flow(TeleportStart),
+            flow(TeleportDone),
+        ];
+        assert_eq!(reload(&items, Duration::ZERO), None, "still moving");
+        // Moving: the quiet fallback does not cut it short.
+        assert_eq!(reload(&items, QUIET_AFTER), None);
+        let done: Vec<_> = items.iter().cloned().chain([flow(RtcEnd)]).collect();
+        assert_eq!(reload(&done, Duration::ZERO), Some(Ok(Settled::RunwayMove)));
+    }
+
+    #[test]
+    fn without_a_move_to_the_runway_a_reload_settles_after_a_quiet_spell() {
+        // MSFS 2020: no flow events, the system events only.
+        let items = [
+            Telemetry::Event(SimEvent::FlightLoaded("clean.FLT".into())),
+            Telemetry::Event(SimEvent::SimStart),
+        ];
+        let early = QUIET_AFTER - Duration::from_secs(1);
+        assert_eq!(reload(&items, early), None);
+        assert_eq!(reload(&items, QUIET_AFTER), Some(Ok(Settled::Quiet)));
+    }
+
+    #[test]
+    fn a_reload_that_never_loads_times_out() {
+        use FlowEvent::*;
+        // A flight end alone, or a SimStart before any load, is no load.
+        let items = [Telemetry::Event(SimEvent::SimStart), flow(FlightEnd)];
+        assert_eq!(reload(&items, QUIET_AFTER), None);
+        let failed = reload(&items, RELOAD_TIMEOUT).unwrap().unwrap_err();
+        assert!(failed.contains("did not load"), "{failed}");
+        let moving = [flow(FltLoaded), flow(RtcStart)];
+        let failed = reload(&moving, RELOAD_TIMEOUT).unwrap().unwrap_err();
+        assert!(failed.contains("did not finish"), "{failed}");
+    }
+
+    #[test]
+    fn unrelated_flows_leave_a_reload_waiting() {
+        use FlowEvent::*;
+        // Before the load a move to the runway is not the reload's.
+        let items = [
+            flow(RtcStart),
+            flow(RtcEnd),
+            flow(ReplayStart),
+            flow(ReplayEnd),
+            flow(TeleportStart),
+            flow(TeleportDone),
+            flow(PlaneCrash),
+        ];
+        assert_eq!(reload(&items, Duration::ZERO), None);
+        let menu = [flow(FltLoaded), flow(BackToMainMenu)];
+        assert!(reload(&menu, Duration::ZERO).unwrap().is_err());
     }
 }

@@ -5,7 +5,7 @@
 
 use analyzer::{Approach, Flight, Phase, Touchdown, Track, held, phases, wind_components};
 use fdm_core::SimTime;
-use rules::{Domain, Event, ProfileField, RefSpeeds, Rule, ScoringClass, Selection};
+use rules::{Domain, Event, ProfileField, RefSpeeds, Rule, ScoringClass, Selection, StrikeLimits};
 use serde::Serialize;
 
 use crate::method::{Context, Height, Method};
@@ -323,10 +323,19 @@ impl Method {
 
         let (from, to) = landing_span(l, &a, full_stop);
         let crashed = flight.crashes().any(|t| (from..=to).contains(&t));
+        // The live crash detection's measure, after this touchdown.
+        let strikes = rules::strikes(track, StrikeLimits::of(l.selection.class));
+        let struck = rules::after_touchdown(&strikes, track, td.t);
         let outcome = Outcome {
             undershoot: fix.short_landing,
+            crashed: crashed || struck.is_some(),
             excursion: if crashed {
                 Some("The sim reported a crash".into())
+            } else if let Some(s) = struck {
+                Some(format!(
+                    "The aircraft struck the ground with a wing or the nose ({})",
+                    s.reason()
+                ))
             } else {
                 full_stop.then(|| excursion(&a, fix)).flatten()
             },

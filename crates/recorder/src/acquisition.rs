@@ -66,13 +66,15 @@ const fn scaled(
     }
 }
 
-const fn gated(signal: &'static str, simvar: &'static str, scale: f64, flag: &'static str) -> Wire {
+const fn gated(
+    signal: &'static str,
+    (simvar, unit): (&'static str, &'static str),
+    scale: f64,
+    flag: &'static str,
+) -> Wire {
     Wire {
         signal,
-        column: Column {
-            simvar,
-            unit: "number",
-        },
+        column: Column { simvar, unit },
         scale,
         valid: Valid::Flag(flag),
     }
@@ -104,8 +106,8 @@ const WIRES: &[Wire] = &[
     w("aoa", "INCIDENCE ALPHA", "degrees"),
     w("sideslip", "INCIDENCE BETA", "degrees"),
     w("alt.radio", "RADIO HEIGHT", "feet"),
-    gated("nav.loc_dev", "NAV CDI:1", LOC_DOTS, "NAV HAS LOCALIZER:1"),
-    gated("nav.gs_dev", "NAV GSI:1", GS_DOTS, "NAV HAS GLIDE SLOPE:1"),
+    gated("nav.loc_dev", ("NAV CDI:1", "number"), LOC_DOTS, "NAV HAS LOCALIZER:1"),
+    gated("nav.gs_dev", ("NAV GSI:1", "number"), GS_DOTS, "NAV HAS GLIDE SLOPE:1"),
     w("air_ground", "SIM ON GROUND", "bool"),
     w("flap.handle", "FLAPS HANDLE INDEX", "number"),
     w("flap.te_angle", "TRAILING EDGE FLAPS LEFT ANGLE", "degrees"),
@@ -153,6 +155,9 @@ const WIRES: &[Wire] = &[
     w("sim.slew", "IS SLEW ACTIVE", "bool"),
     w("heading.true", "PLANE HEADING DEGREES TRUE", "degrees"),
     w("mach", "AIRSPEED MACH", "mach"),
+    // The SDK calls it the "localizer course heading" without saying
+    // magnetic or true; the ground segment accepts either (analyzer `ils`).
+    gated("nav.loc_course", ("NAV LOCALIZER:1", "degrees"), 1.0, "NAV HAS LOCALIZER:1"),
 ];
 
 enum Gate {
@@ -330,6 +335,24 @@ mod tests {
             value(&acq.condition(&raw).unwrap(), "nav.gs_dev"),
             Some((0.0, Ssm::NoComputedData))
         );
+    }
+
+    #[test]
+    fn the_localizer_course_is_gated_like_its_deviation() {
+        let acq = Acquisition::new(&Lfl::V1);
+        let at = |has: f64| {
+            let raw = frame(
+                &acq,
+                &[
+                    ("SIMULATION TIME", 1.0),
+                    ("NAV LOCALIZER:1", 343.0),
+                    ("NAV HAS LOCALIZER:1", has),
+                ],
+            );
+            value(&acq.condition(&raw).unwrap(), "nav.loc_course")
+        };
+        assert_eq!(at(1.0), Some((343.0, Ssm::Normal)));
+        assert_eq!(at(0.0), Some((343.0, Ssm::NoComputedData)));
     }
 
     #[test]
