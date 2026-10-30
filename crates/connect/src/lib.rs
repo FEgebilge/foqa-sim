@@ -1,8 +1,8 @@
 //! The FOQA Challenge Protocol client (docs/challenge-protocol.md, Part A
 //! and B3–B6): where challenges come from and where attempts go. Optional:
 //! no core crate depends on it, and the app builds without it (its
-//! `connect` feature). No site is named anywhere; sites are origins the
-//! user adds.
+//! `connect` feature). No site is named here: the app passes its
+//! built-in site in ([`sites::Policy`]); others are origins the user adds.
 //!
 //! - [`origin`]: what may be a site (A1 rules).
 //! - [`discovery`]: the well-known document.

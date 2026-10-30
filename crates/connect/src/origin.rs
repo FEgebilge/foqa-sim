@@ -36,7 +36,7 @@ impl Origin {
             None => return Err(format!("“{input}” has no host.")),
         };
         if local && !allow_local {
-            return Err("Local sites are off. Turn on “Allow local sites” to add one.".into());
+            return Err("Local sites need the developer switch.".into());
         }
         match url.scheme() {
             "https" => {}

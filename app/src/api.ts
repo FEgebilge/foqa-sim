@@ -142,6 +142,7 @@ const tauriApi: Api = {
   attemptsList: () => invoke<AttemptView[]>("attempts_list"),
   connectAvailable: () => invoke<boolean>("connect_available").catch(() => false),
   sitesList: () => invoke<SiteView[]>("sites_list"),
+  siteAddAllowed: () => invoke<boolean>("site_add_allowed"),
   siteAdd: (origin) => invoke<SiteView>("site_add", { origin }),
   siteSignIn: (origin, device) => invoke<SiteView>("site_sign_in", { origin, device }),
   siteSignInCancel: (origin) => invoke<void>("site_sign_in_cancel", { origin }),

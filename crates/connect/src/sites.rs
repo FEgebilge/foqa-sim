@@ -1,7 +1,9 @@
 //! The user's sites (B3): `sites.json` (origins, names, the cached
 //! well-known document, the signed-in account and the challenges taken
 //! from each; no secrets), one [`Session`] per site and the connect log
-//! (B5), all in the app's data folder, never in `Documents`.
+//! (B5), all in the app's data folder, never in `Documents`. The app may
+//! ship with one site built in; others only behind its developer switch
+//! ([`Policy`]).
 
 use std::collections::HashMap;
 use std::fs;
@@ -17,7 +19,7 @@ use serde_json::{Value, json};
 use crate::api::{Error, User};
 use crate::auth::{self, AuthError, DeviceCode};
 use crate::copy::{self, Ctx};
-use crate::discovery::{self, WellKnown};
+use crate::discovery::{self, Failed, WellKnown};
 use crate::http::Http;
 use crate::origin::Origin;
 use crate::session::{Log, Session};
@@ -28,6 +30,28 @@ const FILE: &str = "sites.json";
 const LOG: &str = "connect.log.jsonl";
 /// The well-known document is fetched again after this long (A1).
 const WELL_KNOWN_TTL_MS: i64 = 24 * 3600 * 1000;
+/// The built-in site's document, while it has none, is asked for again
+/// after this long (at once on sign-in).
+const BUILT_IN_RETRY_MS: i64 = 60 * 1000;
+
+/// The site the app ships with: listed before its well-known document
+/// could be fetched, and never removed.
+#[derive(Debug, Clone)]
+pub struct BuiltIn {
+    pub origin: Origin,
+    pub name: String,
+}
+
+/// Which sites the app may have.
+#[derive(Debug, Clone, Default)]
+pub struct Policy {
+    pub built_in: Option<BuiltIn>,
+    /// Other sites may be added, by address or by a link (the developer
+    /// switch).
+    pub others: bool,
+    /// "Allow local sites" (A1).
+    pub allow_local: bool,
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SiteRecord {
@@ -71,7 +95,9 @@ pub struct Sites {
     dir: PathBuf,
     http: Arc<Http>,
     store: Arc<dyn SecretStore>,
-    allow_local: bool,
+    policy: Policy,
+    /// When the built-in site's document was last missed, and why.
+    tried: Mutex<Option<(i64, String)>>,
     records: Mutex<Vec<SiteRecord>>,
     sessions: Mutex<HashMap<String, Arc<Session>>>,
     signing_in: Mutex<HashMap<String, Arc<AtomicBool>>>,
@@ -82,7 +108,7 @@ impl Sites {
         dir: PathBuf,
         http: Arc<Http>,
         store: Arc<dyn SecretStore>,
-        allow_local: bool,
+        policy: Policy,
     ) -> io::Result<Self> {
         fs::create_dir_all(&dir)?;
         let records = fs::read(dir.join(FILE))
@@ -93,7 +119,8 @@ impl Sites {
             dir,
             http,
             store,
-            allow_local,
+            policy,
+            tried: Mutex::new(None),
             records: Mutex::new(records),
             sessions: Mutex::new(HashMap::new()),
             signing_in: Mutex::new(HashMap::new()),
@@ -143,10 +170,62 @@ impl Sites {
         })
     }
 
-    /// Adds the site the user typed: its address checked (A1), its
-    /// well-known document fetched and checked. Adding it again refreshes it.
+    pub fn built_in(&self) -> Option<&BuiltIn> {
+        self.policy.built_in.as_ref()
+    }
+
+    pub fn is_built_in(&self, origin: &str) -> bool {
+        self.built_in().is_some_and(|b| b.origin.as_str() == origin)
+    }
+
+    /// Whether `origin` may be added: the built-in site, or any with the
+    /// developer switch.
+    pub fn allows(&self, origin: &Origin) -> bool {
+        self.policy.others || self.is_built_in(origin.as_str())
+    }
+
+    /// Why the built-in site can't be used yet; `None` once its document
+    /// is kept (or with none built in). It is fetched again on `force` or
+    /// a minute after the last try. A missing document is no error to
+    /// log: challenges just aren't open there yet.
+    pub fn built_in_closed(self: &Arc<Self>, force: bool) -> Option<String> {
+        let b = self.built_in()?;
+        if self.get(b.origin.as_str()).is_some() {
+            return None;
+        }
+        let mut tried = lock(&self.tried);
+        if let Some((at, why)) = &*tried
+            && !force
+            && now_ms() - at < BUILT_IN_RETRY_MS
+        {
+            return Some(why.clone());
+        }
+        let why = match self.fetch(b.origin.clone()) {
+            Ok(_) => {
+                *tried = None;
+                return None;
+            }
+            Err(f) if f.missing => format!("Challenges aren't open on {} yet.", b.name),
+            Err(f) => f.text,
+        };
+        *tried = Some((now_ms(), why.clone()));
+        Some(why)
+    }
+
+    /// Adds the site the user typed: its address checked (A1) and allowed
+    /// ([`Policy`]), its well-known document fetched and checked. Adding it
+    /// again refreshes it.
     pub fn add(self: &Arc<Self>, input: &str) -> Result<SiteRecord, String> {
-        let origin = Origin::parse(input, self.allow_local)?;
+        let origin = Origin::parse(input, self.policy.allow_local)?;
+        if !self.allows(&origin) {
+            let name = self.built_in().map_or("its own site", |b| b.name.as_str());
+            return Err(format!("FOQA-Sim connects to {name} only."));
+        }
+        Ok(self.fetch(origin)?)
+    }
+
+    /// Fetches and keeps `origin`'s well-known document.
+    fn fetch(self: &Arc<Self>, origin: Origin) -> Result<SiteRecord, Failed> {
         let well_known = discovery::discover(&self.http, &origin)?;
         let old = self.get(origin.as_str());
         // A refreshed document keeps the session (its tokens, its single
@@ -178,9 +257,11 @@ impl Sites {
     pub fn freshen(self: &Arc<Self>, origin: &str) {
         let stale = self
             .get(origin)
-            .is_some_and(|r| now_ms() - r.fetched_at_ms > WELL_KNOWN_TTL_MS);
-        if stale && let Err(e) = self.add(origin) {
-            self.log(json!({ "event": "well_known", "origin": origin, "error": e }));
+            .filter(|r| now_ms() - r.fetched_at_ms > WELL_KNOWN_TTL_MS);
+        if let Some(r) = stale
+            && let Err(e) = self.fetch(r.origin)
+        {
+            self.log(json!({ "event": "well_known", "origin": origin, "error": e.text }));
         }
     }
 
@@ -207,6 +288,11 @@ impl Sites {
     /// Signs in to `origin` and returns the account. Errors are the app's
     /// own words (A6).
     pub fn sign_in(self: &Arc<Self>, origin: &str, flow: Flow) -> Result<User, String> {
+        if self.is_built_in(origin)
+            && let Some(why) = self.built_in_closed(true)
+        {
+            return Err(why);
+        }
         let record = self.get_or(origin)?;
         let session = self.session(origin).ok_or("no site")?;
         let cancel = Arc::new(AtomicBool::new(false));
@@ -299,8 +385,11 @@ impl Sites {
         Ok(())
     }
 
-    /// Signs out and forgets the site.
+    /// Signs out and forgets the site; the built-in one stays.
     pub fn remove(self: &Arc<Self>, origin: &str) -> Result<(), String> {
+        if let Some(b) = self.built_in().filter(|b| b.origin.as_str() == origin) {
+            return Err(format!("{} comes with FOQA-Sim; sign out instead.", b.name));
+        }
         self.sign_out(origin)?;
         self.save(|all| all.retain(|r| r.origin.as_str() != origin))?;
         lock(&self.sessions).remove(origin);
@@ -341,16 +430,19 @@ pub(crate) mod tests {
     use crate::mock::{Mock, Reply, tokens, well_known};
     use crate::store::MemoryStore;
 
+    /// Any local site, none built in (the developer switch).
     pub fn sites(dir: &std::path::Path, store: Arc<dyn SecretStore>) -> Arc<Sites> {
-        Arc::new(
-            Sites::open(
-                dir.join("connect"),
-                Arc::new(Http::new("0.2.0")),
-                store,
-                true,
-            )
-            .unwrap(),
-        )
+        let policy = Policy {
+            built_in: None,
+            others: true,
+            allow_local: true,
+        };
+        with(dir, store, policy)
+    }
+
+    fn with(dir: &std::path::Path, store: Arc<dyn SecretStore>, policy: Policy) -> Arc<Sites> {
+        let http = Arc::new(Http::new("0.2.0"));
+        Arc::new(Sites::open(dir.join("connect"), http, store, policy).unwrap())
     }
 
     #[test]
@@ -445,6 +537,90 @@ pub(crate) mod tests {
         assert!(s.get(&origin).unwrap().fetched_at_ms > 0);
         assert!(Arc::ptr_eq(&session, &s.session(&origin).unwrap()));
         assert!(s.signed_in(&origin));
+    }
+
+    #[test]
+    fn the_built_in_site_is_listed_before_its_document_and_never_removed() {
+        let open = Arc::new(AtomicBool::new(false));
+        let gate = Arc::clone(&open);
+        let mock = Mock::start(move |req, base| match req.path.as_str() {
+            discovery::PATH if gate.load(std::sync::atomic::Ordering::SeqCst) => {
+                Reply::json(200, well_known(base))
+            }
+            _ => Reply::error(404, "not_found"),
+        });
+        let tmp = tempfile::tempdir().unwrap();
+        let origin = Origin::parse(&mock.base, true).unwrap();
+        let policy = Policy {
+            built_in: Some(BuiltIn {
+                origin: origin.clone(),
+                name: "Pilot Aptitude".into(),
+            }),
+            others: false,
+            allow_local: true,
+        };
+        let s = with(tmp.path(), Arc::new(MemoryStore::default()), policy);
+        let o = origin.as_str();
+        let closed = "Challenges aren't open on Pilot Aptitude yet.";
+        assert_eq!(s.built_in_closed(false).as_deref(), Some(closed));
+        assert_eq!(s.built_in_closed(false).as_deref(), Some(closed));
+        assert_eq!(
+            mock.hits(discovery::PATH),
+            1,
+            "not asked again within a minute"
+        );
+        assert!(s.list().is_empty() && s.remove(o).is_err());
+        let refused = s.sign_in(o, Flow::Browser(&|_| Ok(())));
+        assert_eq!(refused.unwrap_err(), closed);
+        assert_eq!(mock.hits(discovery::PATH), 2, "sign-in asks again at once");
+        assert!(
+            !fs::read_to_string(tmp.path().join("connect").join(LOG))
+                .unwrap_or_default()
+                .contains("well_known"),
+            "a missing document is no error in the log"
+        );
+
+        // Challenges open on the site: it is kept like an added one.
+        open.store(true, std::sync::atomic::Ordering::SeqCst);
+        assert_eq!(s.built_in_closed(true), None);
+        assert_eq!(
+            s.get(o).unwrap().label(),
+            format!("TestSite ({})", origin.host())
+        );
+        assert_eq!(s.built_in_closed(false), None);
+        assert_eq!(mock.hits(discovery::PATH), 3);
+        assert!(s.remove(o).unwrap_err().contains("sign out instead"));
+        assert!(s.get(o).is_some());
+    }
+
+    #[test]
+    fn other_sites_need_the_developer_switch() {
+        let mock = Mock::start(|req, base| match req.path.as_str() {
+            discovery::PATH => Reply::json(200, well_known(base)),
+            _ => Reply::error(404, "not_found"),
+        });
+        let tmp = tempfile::tempdir().unwrap();
+        let built_in = BuiltIn {
+            origin: Origin::parse("https://pilotaptitude.example", false).unwrap(),
+            name: "Pilot Aptitude".into(),
+        };
+        let other = Origin::parse(&mock.base, true).unwrap();
+        let policy = |others| Policy {
+            built_in: Some(built_in.clone()),
+            others,
+            allow_local: true,
+        };
+        let store: Arc<dyn SecretStore> = Arc::new(MemoryStore::default());
+        let off = with(tmp.path(), Arc::clone(&store), policy(false));
+        assert!(!off.allows(&other) && off.allows(&built_in.origin));
+        assert_eq!(
+            off.add(&mock.base).unwrap_err(),
+            "FOQA-Sim connects to Pilot Aptitude only."
+        );
+        assert_eq!(mock.hits(discovery::PATH), 0, "nothing fetched");
+        let on = with(tmp.path(), store, policy(true));
+        assert!(on.allows(&other));
+        assert!(on.add(&mock.base).is_ok());
     }
 
     #[test]
