@@ -11,6 +11,7 @@ mod approach;
 #[cfg(feature = "parquet")]
 pub mod export;
 mod flight;
+mod ils;
 mod landing;
 mod live;
 mod phase;
@@ -23,6 +24,7 @@ pub use approach::{
     Approach, Config, ConfigChange, Crossing, Slowed, Window, held, stable_from, sustained_worst,
 };
 pub use flight::Flight;
+pub use ils::mask_ils;
 pub use landing::{Touchdown, touchdowns};
 pub use live::{LiveInput, LivePoint, LiveTrack};
 pub use phase::{

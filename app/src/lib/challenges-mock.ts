@@ -89,7 +89,7 @@ export function mockChallenges(status: string | null): ChallengesApi {
         ];
       const weather = definition.conditions && (definition.conditions.wind || definition.conditions.crosswind_kt || definition.conditions.tailwind_kt);
       lines.push(
-        weather ? { name: "weather", state: "unknown", text: "Set by the challenge (pending in-flight verification)." } : { name: "weather", state: "ok", text: "Any weather." },
+        weather ? { name: "weather", state: "unknown", text: "Checked at touchdown against the challenge's wind limits; the app does not set the sim's weather." } : { name: "weather", state: "ok", text: "Any weather." },
         { name: "ranking", state: "ok", text: "Local challenge file: graded here only." },
       );
       return lines;

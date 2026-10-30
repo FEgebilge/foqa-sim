@@ -7,6 +7,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod attempts;
+mod clean_start;
 mod commands;
 #[cfg(feature = "connect")]
 mod connect;
@@ -28,6 +29,7 @@ use std::time::{Duration, Instant};
 use ::debrief::{LandingNotice, RecorderStatus, Station};
 use attempts::Attempts;
 use capture::{Happening, Service};
+use clean_start::CleanStarts;
 use commands::{Shared, lock};
 use library::Library;
 use serde::Serialize;
@@ -223,8 +225,19 @@ fn start(app: &mut tauri::App) -> Result<(), Failure> {
         #[cfg(feature = "connect")]
         site.attempt_changed(record);
     });
+    let clean_starts = CleanStarts::new(data.join("challenge-snapshots"))?;
     let shared = Shared::new(
-        station, dir, stopper, index, recorder, setup, sim, library, attempts, views,
+        station,
+        dir,
+        stopper,
+        index,
+        recorder,
+        setup,
+        sim,
+        library,
+        attempts,
+        clean_starts,
+        views,
     );
     #[cfg(feature = "connect")]
     let shared = shared.with_hooks(Arc::clone(&connect) as Arc<dyn commands::AttemptHooks>);
@@ -320,6 +333,22 @@ fn relay(app: &AppHandle, shared: &Arc<Shared>, tray: &Tray, happenings: Receive
             Happening::FlightSaved(summary) => {
                 shared.flight_closed(&summary.id);
                 app.emit("flight-saved", summary)
+            }
+            Happening::Impact(flight_id, impact) => {
+                shared.impact(&flight_id, &impact);
+                Ok(())
+            }
+            Happening::Strike(flight_id, strike) => {
+                shared.strike(&flight_id, &strike);
+                Ok(())
+            }
+            Happening::FlightDiscarded(flight_id) => {
+                shared.flight_closed(&flight_id);
+                Ok(())
+            }
+            Happening::Stopped(flight_id, t_s) => {
+                shared.stopped(&flight_id, t_s);
+                Ok(())
             }
             Happening::Landing(notice) => {
                 shared.landed(&notice);

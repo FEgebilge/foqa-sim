@@ -3,8 +3,9 @@
 One method grades every approach and landing. The same numbers drive the
 debrief's Good / Fair / Poor, the 0–100 challenge score and the
 leaderboard. The debrief and the leaderboard therefore tell the same story.
-`landing-1` (`crates/challenge/src/score.rs`) stays frozen for the
-challenges that name it.
+Every challenge attempt is graded with it, whatever method its
+definition names (`challenge::CURRENT`, 2026-10-30); `landing-1`, the
+first challenge score, is retired and its code removed.
 
 Status: implemented (§7 slices 1-8): profile fields, analyzer values, rule
 set v2, `crates/assess` with `scoring/landing-3.yaml`, the debrief wire
@@ -168,7 +169,7 @@ T/J bands are split at 500 ft, as S1 does.
 | | | | T/J < 500 | 3.5 \| 7 \| – \| 15 \| 30 | S1 ✔ |
 | | | | light < 300 ft | 5 \| 10 \| 15 \| 20 \| 30 | S5 (wings level by 300 ft) ✔; bands est |
 | A4 | Pitch | `pitch`, sustained 3 s | T/J | – \| – \| >10 or <−3 \| >15 or <−10 (≥ 500) / L2–L3 below | S1 ✔ |
-| A5 | ILS deviation | `nav.gs_dev`, `nav.loc_dev`, 5 s, 1000–500 ft, one criterion for the unstable rule (§4); below 500 ft the existing gate rules | all with a valid ILS | 0.25 \| 0.5 \| 1 dot \| GS 2 / LOC 1.5 \| – | S5 1 dot ✔, S1 ✔; tol ⚠ App. 9 half scale |
+| A5 | ILS deviation | `nav.gs_dev`, `nav.loc_dev`, 5 s, 1000–500 ft, one criterion for the unstable rule (§4); below 500 ft the existing gate rules | all with a valid ILS to the runway landed on | 0.25 \| 0.5 \| 1 dot \| GS 2 / LOC 1.5 \| – | S5 1 dot ✔, S1 ✔; tol ⚠ App. 9 half scale |
 | A6 | Configuration | gear or `flap.te_angle` change > 2° (**new**: config change in window), at its first movement; gear at the bottom of the window | T/J | change 1000–500 → L2; change below 500 or gear not down at the bottom → L3 | S1 ✔ (single-threshold criteria use SL2A/SL3) |
 | | | | light | flap change < 200 ft → L1; retractable gear not down < 300 ft → L3 | est; POH flaps "as desired" ✔ |
 | A7 | Low thrust | all `engN.throttle` at idle > 10 s in window (**new**) | T/J | → L1 | S1 defines it per fleet percentile; ours est. Later slice |
@@ -274,7 +275,7 @@ domain. The core set maps as follows:
 | B energy | stall-warning, stall-warning-light, flap-overspeed, vmo-exceedance, mmo-exceedance, gear-extended-overspeed, gear-operating-overspeed |
 | C point | long-landing, short-landing |
 | D lateral | off-centreline-touchdown, crosswind-above-demonstrated |
-| E contact | hard-landing, hard-landing-light, high-sink-touchdown, high-sink-touchdown-light, bounced-landing, tailstrike-risk-landing, hard-landing-inspection |
+| E contact | hard-landing, hard-landing-light, high-sink-touchdown, high-sink-touchdown-light, bounced-landing, tailstrike-risk-landing, hard-landing-inspection, ground-strike |
 | F rollout | tailwind-landing-limit |
 | other (never in a landing score) | tailstrike-risk-takeoff, rejected-takeoff, rejected-takeoff-light, rotation-rate, early-flap-retraction, overweight-landing, go-around (advisory) |
 
@@ -336,7 +337,7 @@ event that caused it.
 | **Continued unstable approach**: T/J by the D4S rule (≥ 1 A criterion at SL2B/SL3, i.e. L2/L3 below 500 ft, or ≥ 3 distinct A criteria at L1/L2 above 500 ft, glideslope and localizer counting as one A5) without a go-around; light: any A criterion at L2+ below 300 ft, or ≥ 3 at L1+ | 59 (Poor) | S1 ✔, S5 "go around" ✔; light adaptation est |
 | **Inspection-level contact**: `hard-landing-inspection` (peak g > the manufacturer's `hard_landing_g`, Decision 5; no separate sink cap), or tail margin < 0 (tail strike) | 39 | S10 ✔, S12 ⚠ |
 | **Undershoot**: touchdown before the threshold | 39 | `short-landing` |
-| **Runway excursion or crash**: left the runway sides on the landing roll (D4: before 30 kt or the turn-off), overran (F3), or a crash the sim reported in the landing span (`Crashed` / `PlaneCrash`, sent only with crash detection on) | 0, outcome shown | S6 RE.7/RE.8 |
+| **Runway excursion or crash**: left the runway sides on the landing roll (D4: before 30 kt or the turn-off), overran (F3), a crash the sim reported in the landing span (`Crashed` / `PlaneCrash`, sent only with crash detection on), or a wing, propeller or nose strike on the ground after the touchdown (`rules::strike`, the measure the live crash detection and the challenge check `ground_strike` use; titled "Crash or ground strike") | 0, outcome shown | S6 RE.7/RE.8; strike limits est |
 
 **Go-around.**
 
@@ -424,9 +425,10 @@ cite a primary document, as `profiles/` already requires.
 
 ## 6. Versioning, fairness, worked examples
 
-**Versioning.** `scoring.version` in a challenge file selects `landing-1` or
-`landing-3`. The two live side by side: landing-1 is frozen code, and
-landing-3 is a data file `scoring/landing-3.yaml` (anchors, weights,
+**Versioning.** `scoring.version` in a challenge file names a method,
+but every attempt is graded with the current one (`challenge::CURRENT`),
+as the debrief is; `score.version` in the attempt says which. landing-3
+is a data file `scoring/landing-3.yaml` (anchors, weights,
 caps, sources) built into `fdm` and checked on load, the way rules are.
 Once a version is published its file never changes; a correction becomes
 `landing-4`. The debrief always uses the newest version and states it

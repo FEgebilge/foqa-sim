@@ -27,6 +27,7 @@ const STATE: Record<AttemptState, { label: string; tone: BadgeTone }> = {
 const REASON: Record<string, string> = {
   stopped: "the rollout ended",
   finish: "Finish pressed",
+  crashed: "crashed: flying again from the clean start",
   flight_closed: "the flight closed",
   recovered: "recovered after the app restarted",
   interrupted: "the app closed mid-attempt",
@@ -41,6 +42,7 @@ const CHECK: Record<string, string> = {
   aircraft: "Aircraft", runway: "Runway", gate: "Gate", sim_rate: "Sim rate", slew: "Slew", pause: "Pause",
   continuity: "Continuous data", wind: "Wind", crosswind: "Crosswind", tailwind: "Tailwind", autopilot: "Autopilot",
   stop_on_runway: "Stopped on the runway", go_around: "No go-around", data: "Recorded data",
+  ground_strike: "No wing or nose strike",
 };
 const words = (name: string, known: Record<string, string>) => known[name] ?? name.replace(/_/g, " ");
 const sentence = (text: string) => `${text[0]!.toUpperCase()}${text.slice(1)}`;
@@ -193,12 +195,16 @@ function describe(line: AttemptLogLine): string {
     case "created": return `Created, definition ${String(f.definition_sha256 ?? "").slice(0, 12)}, app ${String(f.app ?? "?")}`;
     case "placing": return "Placing the aircraft";
     case "placed": {
-      const start = f.start as { alt_ft?: number; ias_kt?: number } | string | undefined;
-      const where = typeof start === "object" && start ? ` at ${measured(start.alt_ft ?? 0, "ft")}, ${measured(start.ias_kt ?? 0, "kt")}` : "; fly to the gate yourself";
+      const start = f.start as { alt_ft?: number; ias_kt?: number; nav1?: string } | string | undefined;
+      const where = typeof start === "object" && start ? ` at ${measured(start.alt_ft ?? 0, "ft")}, ${measured(start.ias_kt ?? 0, "kt")}${start.nav1 ? `; ${start.nav1}` : ""}` : "; fly to the gate yourself";
       return `Started in ${String(f.flight_id ?? "?")}${where}`;
     }
     case "failed_start": return `Could not start: ${String(f.error ?? "")}`;
+    // Saved after the first placement, reloaded before Fly again, or why not; in words already.
+    case "clean_start": return String(f.text ?? "");
     case "gate": return `Gate passed at ${n("sim_s", "s")} sim time`;
+    // A wing, propeller or nose on the runway, told live (rules::strike); in words already.
+    case "strike": return String(f.text ?? "Ground strike");
     case "touchdown": return `Touchdown, ${n("sink_fpm", "fpm")}, ${n("peak_g", "g")}`;
     case "finished": return `Finished: ${reason(f.reason)}`;
     case "graded_local": {
@@ -233,7 +239,7 @@ function Timeline({ log }: { log: AttemptLogLine[] }) {
       <ol className="relative flex flex-col gap-2 border-l border-line pl-4">
         {log.map((line, i) => (
           <li key={i} className="relative text-sm">
-            <span className="absolute top-1.5 -left-[1.3rem] size-2 rounded-full" style={{ background: line.event === "error" || line.event === "failed_start" ? "var(--danger)" : line.event === "graded_local" ? "var(--accent)" : "var(--text-muted)" }} aria-hidden="true" />
+            <span className="absolute top-1.5 -left-[1.3rem] size-2 rounded-full" style={{ background: line.event === "error" || line.event === "failed_start" || line.event === "strike" ? "var(--danger)" : line.event === "graded_local" ? "var(--accent)" : "var(--text-muted)" }} aria-hidden="true" />
             <span className="readout mr-2 text-xs text-fg-3">{time.format(new Date(line.at))}Z</span>
             {describe(line)}
           </li>

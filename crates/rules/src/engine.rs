@@ -9,6 +9,7 @@ use fdm_core::{SimTime, Unit};
 use crate::expr::{Expr, Values};
 use crate::profile::{Profile, ProfileField, Selection};
 use crate::rule::{Aircraft, Level, Limits, Rule, Side, TakeoffField, TdField, Trigger, Var};
+use crate::strike::{Strike, StrikeLimits, after_touchdown, strikes};
 
 const FEET_PER_METRE: f64 = 3.280_839_895;
 /// A gate re-arms when more than this passes between two points of its
@@ -69,6 +70,7 @@ pub fn evaluate(
     let phases = phase_labels(track, &selection.phases);
     let takeoffs = Takeoffs::new(flight, track, &phases);
     let tds = touchdowns(flight, track);
+    let strikes = strikes(track, StrikeLimits::of(selection.class));
     let mut events: Vec<Event> = rules
         .iter()
         .filter(|r| applies(r, selection))
@@ -80,6 +82,7 @@ pub fn evaluate(
                 track,
                 phases: &phases,
                 takeoffs: &takeoffs,
+                strikes: &strikes,
             }
             .run(&tds)
         })
@@ -133,6 +136,7 @@ struct Point<'a> {
     flight: &'a Flight,
     track: &'a Track,
     takeoffs: &'a Takeoffs,
+    strikes: &'a [Strike],
     i: usize,
     td: Option<&'a Touchdown>,
 }
@@ -190,6 +194,10 @@ impl Values<Var> for Point<'_> {
                     TdField::Roll => td.roll_deg,
                     TdField::Ias => td.ias_kt,
                     TdField::Bounce => Some(f64::from(u8::from(td.bounce))),
+                    TdField::GroundStrike => {
+                        let struck = after_touchdown(self.strikes, self.track, td.t);
+                        Some(f64::from(u8::from(struck.is_some())))
+                    }
                     TdField::Distance => feet(|f| f.along_m),
                     TdField::Cross => feet(|f| f.cross_m),
                     TdField::Crosswind => self.wind(fix?).map(|(_, cross)| cross.abs()),
@@ -230,6 +238,7 @@ struct Evaluation<'a> {
     track: &'a Track,
     phases: &'a [Phase],
     takeoffs: &'a Takeoffs,
+    strikes: &'a [Strike],
 }
 
 impl<'a> Evaluation<'a> {
@@ -253,6 +262,7 @@ impl<'a> Evaluation<'a> {
             flight: self.flight,
             track: self.track,
             takeoffs: self.takeoffs,
+            strikes: self.strikes,
             i,
             td,
         }
@@ -493,6 +503,7 @@ mod tests {
             track,
             phases,
             takeoffs: &Takeoffs::default(),
+            strikes: &[],
         }
         .run(&[])
     }
@@ -684,6 +695,7 @@ mod tests {
             flight: &flight,
             track: &track,
             takeoffs: &Takeoffs::default(),
+            strikes: &[],
             i: 0,
             td: None,
         };

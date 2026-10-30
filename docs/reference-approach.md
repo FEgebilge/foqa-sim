@@ -12,7 +12,7 @@ are the criteria's own (`CriterionAssessment.bands`), so the picture and the sco
 | Line | Reference | Source |
 |---|---|---|
 | Vertical path | 3.0° to a 50 ft threshold crossing height: `50 + dist_ft · tan 3°` | ICAO PANS-OPS Vol II (standard glide path 3°, RDH 15 m / 50 ft); FAA AIM 1-1-9 |
-| Glideslope, localizer | The recorded ILS deviation in dots, where a signal was received; that is the runway's real path, steep approaches included | criteria A5G, A5L |
+| Glideslope, localizer | The recorded ILS deviation in dots, where the landing runway's ILS was received ([format.md](format.md#ils-deviations-and-the-localizer-course)); that is the runway's real path, steep approaches included | criteria A5G, A5L |
 | Speed | `vapp_kt` (Vref plus the wind additive, `LandingAssessment.speeds`), bands of A1 | docs/scoring.md 2.4 |
 | Sink | The sink the reference path needs at the recorded ground speed: `gs_kt · 6076 / 60 · tan 3°` (about 5.3 × GS), bands of A2 | 1-in-60 rule; FSF ALAR 7.1 (1,000 fpm) |
 | Gate | `stable_from_ft` and `split_ft` (class gates, e.g. 1,000 / 500 ft transport), landing configuration by the gate (A6) | docs/scoring.md 2.2 |

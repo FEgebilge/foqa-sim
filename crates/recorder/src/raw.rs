@@ -25,6 +25,9 @@ const FLUSH_EVERY: u32 = 128;
 /// file cannot make the replay read without end or hold one huge line.
 const MAX_RAW: u64 = 1 << 30;
 const MAX_LINE: u64 = 64 << 10;
+/// The tuned localizer's identity strings, written only by 0.11.3
+/// development builds and skipped on replay (docs/format.md).
+const RETIRED_LOCALIZER: &str = "Localizer";
 
 /// Writes a raw capture while recording.
 pub struct RawWriter {
@@ -157,29 +160,40 @@ impl ReplaySource {
 
 impl TelemetrySource for ReplaySource {
     fn recv(&mut self) -> io::Result<Option<Telemetry>> {
-        let line = match self.line() {
-            Ok(None) => return Ok(None),
-            // An unfinished capture (killed recorder) ends mid-stream.
-            Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => return Ok(None),
-            line => line?.unwrap_or_default(),
-        };
-        match parse(&line)? {
-            Value::Array(row) => Ok(Some(Telemetry::Frame(
-                self.map
-                    .iter()
-                    .map(|i| i.and_then(|i| row.get(i)?.as_f64()).unwrap_or(f64::NAN))
-                    .collect(),
-            ))),
-            Value::Object(event) => event_line(&event).map(Some),
-            _ => Err(invalid("expected a frame array or an event object")),
+        loop {
+            let line = match self.line() {
+                Ok(None) => return Ok(None),
+                // An unfinished capture (killed recorder) ends mid-stream.
+                Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => return Ok(None),
+                line => line?.unwrap_or_default(),
+            };
+            match parse(&line)? {
+                Value::Array(row) => {
+                    return Ok(Some(Telemetry::Frame(
+                        self.map
+                            .iter()
+                            .map(|i| i.and_then(|i| row.get(i)?.as_f64()).unwrap_or(f64::NAN))
+                            .collect(),
+                    )));
+                }
+                Value::Object(event) => {
+                    if let Some(item) = event_line(&event)? {
+                        return Ok(Some(item));
+                    }
+                }
+                _ => return Err(invalid("expected a frame array or an event object")),
+            }
         }
     }
 }
 
-fn event_line(event: &Map<String, Value>) -> io::Result<Telemetry> {
+/// The item an event line holds; `None` for a retired event.
+fn event_line(event: &Map<String, Value>) -> io::Result<Option<Telemetry>> {
     let field = |key| event.get(key);
     let name = field("event").and_then(Value::as_str).unwrap_or_default();
-    let item = if name == "Flow" {
+    let item = if name == RETIRED_LOCALIZER {
+        return Ok(None);
+    } else if name == "Flow" {
         field("code")
             .and_then(Value::as_u64)
             .and_then(|code| FlowEvent::from_code(u32::try_from(code).ok()?))
@@ -211,7 +225,7 @@ fn event_line(event: &Map<String, Value>) -> io::Result<Telemetry> {
             field("file").and_then(Value::as_str).unwrap_or_default(),
         )
     };
-    item.ok_or_else(|| invalid("unknown event"))
+    item.map(Some).ok_or_else(|| invalid("unknown event"))
 }
 
 fn parse(line: &str) -> io::Result<Value> {
@@ -258,6 +272,22 @@ mod tests {
         }
         // NaN != NaN, so compare frames through their debug text.
         assert_eq!(format!("{replayed:?}"), format!("{items:?}"));
+    }
+
+    #[test]
+    fn a_retired_localizer_line_is_skipped() {
+        let acq = Acquisition::new(&Lfl::V1);
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("raw.jsonl.gz");
+        let mut writer = RawWriter::create(&path, acq.columns()).unwrap();
+        let retired = json!({ "event": RETIRED_LOCALIZER, "localizer": { "airport": "LTBJ" } });
+        writer.line(&retired).unwrap();
+        writer.write(&Telemetry::Event(SimEvent::Crashed)).unwrap();
+        writer.finish().unwrap();
+        let mut source = ReplaySource::open(&path, &acq).unwrap();
+        let crashed = Telemetry::Event(SimEvent::Crashed);
+        assert_eq!(source.recv().unwrap(), Some(crashed));
+        assert_eq!(source.recv().unwrap(), None);
     }
 
     #[test]

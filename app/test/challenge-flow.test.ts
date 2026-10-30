@@ -21,24 +21,26 @@ test("flowStep follows the newest attempt", () => {
   assert.equal(flowStep([line("fail")], [attempt("done", true)]), 2);
 });
 
-test("methodOf treats retired landing-2 as landing-3", () => {
+test("methodOf grades every known method with the current one", () => {
+  assert.equal(methodOf("landing-1"), "landing-3");
   assert.equal(methodOf("landing-2"), "landing-3");
-  assert.equal(methodOf("landing-1"), "landing-1");
+  assert.equal(methodOf("landing-3"), "landing-3");
   assert.equal(methodOf("landing-9"), null);
 });
 
-test("partLabel is per method: stability means two things", () => {
-  assert.equal(partLabel("landing-1", "stability"), "stability from the gate");
+test("partLabel names landing-3's domains and spells out other parts", () => {
   assert.equal(partLabel("landing-3", "stability"), "approach stability");
+  assert.equal(partLabel("landing-1", "sink_rate"), "sink rate");
   assert.equal(partLabel("landing-3", "something_new"), "something new");
 });
 
-test("scoringFact names the challenge's own parts and weights", () => {
-  assert.match(scoringFact("landing-1").note, /touchdown point 25, sink rate 25, centreline 15/);
+test("scoringFact gives the current method's parts, whatever the challenge names", () => {
   const three = scoringFact("landing-3");
   assert.match(three.note, /approach stability 25, threshold and flare energy 10, touchdown point 20/);
-  assert.doesNotMatch(three.note, /sink rate/);
-  assert.match(scoringFact("landing-2").note, /landing-2 is retired/);
+  assert.doesNotMatch(three.note, /sink rate|names landing/);
+  const one = scoringFact("landing-1");
+  assert.equal(one.value, "landing-3");
+  assert.match(one.note, /The challenge names landing-1; every challenge is graded with the current method, landing-3/);
   assert.equal(scoringFact("landing-2").value, "landing-3");
 });
 

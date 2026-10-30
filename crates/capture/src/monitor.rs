@@ -11,7 +11,10 @@ use debrief::Station;
 use fdm_core::{AircraftId, Lfl, SimTime, Ssm};
 use recorder::{Acquisition, Conditioned, SimEvent, Telemetry};
 use rules::expr::Values;
-use rules::{Aircraft, FLAP_TOLERANCE_DEG, Profile, ProfileField, Rule, Selection, Side, Var};
+use rules::{
+    Aircraft, FLAP_TOLERANCE_DEG, Profile, ProfileField, Rule, Selection, Side, Strike,
+    StrikeLimits, StrikeWatch, Var,
+};
 use serde::Serialize;
 
 use crate::panel::VERSION;
@@ -23,6 +26,13 @@ const GATES_FT: [u32; 2] = [1000, 500];
 const SINK_RULE: &str = "unstable-sink-500";
 const BANK_RULE: &str = "unstable-bank-500";
 const SPEED_RULE: &str = "flap-overspeed";
+/// How long after contact the impact's peak load is looked for: the
+/// gear's first compression and any rebound.
+const IMPACT_WINDOW_S: f64 = 1.0;
+/// Stopped after a landing: ground speed below this, held `STOP_HOLD_S`,
+/// so a taxiing aircraft or a pause in a slow rollout does not count.
+const STOP_KT: f64 = 2.0;
+const STOP_HOLD_S: f64 = 3.0;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Live {
@@ -71,6 +81,19 @@ struct Check {
     unit: &'static str,
 }
 
+/// A contact with the ground as the live frames measure it, reported
+/// `IMPACT_WINDOW_S` after it: enough to tell a crash at once, where the
+/// landing's analysis waits for the full-rate window.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Impact {
+    /// Sim seconds since the flight's first frame, as the debrief counts.
+    pub t_s: f64,
+    /// Descent rate on the last airborne frame (the sim's), fpm.
+    pub sink_fpm: f64,
+    /// Highest normal load from contact through the window, g.
+    pub peak_g: f64,
+}
+
 /// One flight followed frame by frame.
 pub struct Monitor {
     station: Arc<Station>,
@@ -83,6 +106,19 @@ pub struct Monitor {
     weight_lb: f64,
     /// Each gate's checks as they stood when it was passed, this approach.
     passed: [Option<Vec<Check>>; 2],
+    /// Air/ground and descent rate on the previous frame.
+    last: Option<(bool, f64)>,
+    /// The contact being measured, then the one measured, until taken.
+    impact: Option<(Impact, bool)>,
+    /// Wing, propeller or nose strikes on the ground (`rules::strike`).
+    strikes: StrikeWatch,
+    /// The latest strike, until taken.
+    strike: Option<Strike>,
+    /// Since a touchdown, on the ground: when the speed fell below
+    /// `STOP_KT`, and whether the stop was told; `None` in the air.
+    rollout: Option<(Option<f64>, bool)>,
+    /// When the aircraft came to a stop after a landing, until taken.
+    stopped: Option<f64>,
 }
 
 impl Monitor {
@@ -96,7 +132,78 @@ impl Monitor {
             aircraft: None,
             weight_lb: f64::NAN,
             passed: [None, None],
+            last: None,
+            impact: None,
+            strikes: StrikeWatch::default(),
+            strike: None,
+            rollout: None,
+            stopped: None,
         }
+    }
+
+    /// When the aircraft came to a stop after its latest landing, once:
+    /// what ends a challenge attempt without the pilot pressing Finish.
+    /// Times as `Impact::t_s`.
+    pub fn take_stopped(&mut self) -> Option<f64> {
+        self.stopped.take()
+    }
+
+    /// The rollout after a touchdown, until the aircraft stops.
+    fn rolling(&mut self, t_s: f64, on_ground: Option<bool>, gs_kt: f64) {
+        match on_ground {
+            Some(false) => self.rollout = None,
+            Some(true) => {
+                if let Some((slow_since, told)) = self.rollout.as_mut().filter(|(_, told)| !told) {
+                    if gs_kt < STOP_KT {
+                        let since = *slow_since.get_or_insert(t_s);
+                        if t_s - since >= STOP_HOLD_S {
+                            *told = true;
+                            self.stopped = Some(t_s);
+                        }
+                    } else {
+                        *slow_since = None;
+                    }
+                }
+            }
+            None => {}
+        }
+    }
+
+    /// The latest contact once measured, once.
+    pub fn take_impact(&mut self) -> Option<Impact> {
+        match self.impact {
+            Some((impact, true)) => {
+                self.impact = None;
+                Some(impact)
+            }
+            _ => None,
+        }
+    }
+
+    /// The latest ground strike, once: a wing, the propeller or the nose
+    /// on the runway after a touchdown, which MSFS crashes on but tells
+    /// SimConnect nothing of. Times as `Impact::t_s`.
+    pub fn take_strike(&mut self) -> Option<Strike> {
+        self.strike.take()
+    }
+
+    /// Air-to-ground transitions and the load that follows them.
+    fn contact(&mut self, t_s: f64, on_ground: Option<bool>, vs_fpm: f64, nz_g: f64) {
+        if let Some((impact, done)) = self.impact.as_mut().filter(|(_, done)| !done) {
+            impact.peak_g = impact.peak_g.max(nz_g);
+            *done = t_s - impact.t_s >= IMPACT_WINDOW_S;
+        }
+        let Some(on_ground) = on_ground else { return };
+        if let Some((false, last_vs)) = self.last.filter(|_| on_ground) {
+            let impact = Impact {
+                t_s,
+                sink_fpm: -last_vs,
+                peak_g: nz_g,
+            };
+            self.impact = Some((impact, false));
+            self.rollout = Some((None, false));
+        }
+        self.last = Some((on_ground, vs_fpm));
     }
 
     /// Follows one recorded item.
@@ -117,12 +224,19 @@ impl Monitor {
         let t0 = *self.t0.get_or_insert(frame.sim_time_s);
         let p = |name| param(&frame, name).unwrap_or(f64::NAN);
         self.weight_lb = self.weight_lb.max(p("weight.gross"));
+        let on_ground = param(&frame, "air_ground").map(|v| v >= 0.5);
+        let t_s = frame.sim_time_s - t0;
+        self.contact(t_s, on_ground, p("sim.vs"), p("accel.normal"));
+        self.rolling(t_s, on_ground, p("groundspeed"));
+        let limits = StrikeLimits::of(self.selection().class);
+        let struck = (self.strikes).step(limits, t_s, on_ground, p("roll"), p("pitch"));
+        self.strike = struck.or(self.strike);
         // The boundaries of the aircraft as known so far.
         let phases = self.selection().phases;
         let point = self.track.step(
             &LiveInput {
-                t: SimTime::from_secs_f64(frame.sim_time_s - t0),
-                on_ground: param(&frame, "air_ground").map(|v| v >= 0.5),
+                t: SimTime::from_secs_f64(t_s),
+                on_ground,
                 alt_ft: p("alt.pressure"),
                 gs_kt: p("groundspeed"),
                 ra_ft: p("alt.radio"),
@@ -478,5 +592,156 @@ mod tests {
         assert_eq!(v["phase"], "EnRoute");
         assert_eq!(v["gates"], json!([]));
         assert!(Monitor::new(station()).live().is_none());
+    }
+
+    /// Contacts at `sink` fpm with `g` on the first ground frame, then 5 g
+    /// half a second later; frames at 10 Hz.
+    fn contact(sink: f64, g: f64) -> Vec<Option<Impact>> {
+        let (mut m, acq) = (Monitor::new(station()), Acquisition::new(&Lfl::V1));
+        let mut taken = Vec::new();
+        for i in 0..30 {
+            let t = f64::from(i) / 10.0;
+            let ground = f64::from(u8::from(i >= 10));
+            let nz = match i {
+                10 => g,
+                15 => 5.0,
+                _ => 1.0,
+            };
+            let set = [
+                ("SIM ON GROUND", ground),
+                ("VERTICAL SPEED", -sink),
+                ("G FORCE", nz),
+            ];
+            m.record(&frame(&acq, t, &set));
+            taken.push(m.take_impact());
+        }
+        taken
+    }
+
+    /// A landing at 10 Hz: airborne for 1 s, then on the ground at `gs(t)`
+    /// kt; the stops taken, with their times.
+    fn stops(gs: impl Fn(f64) -> f64, until_s: f64) -> Vec<f64> {
+        let (mut m, acq) = (Monitor::new(station()), Acquisition::new(&Lfl::V1));
+        let mut stops = Vec::new();
+        for i in 0..=(until_s * 10.0) as u32 {
+            let t = f64::from(i) / 10.0;
+            let ground = f64::from(u8::from(t >= 1.0));
+            let set = [
+                ("SIM ON GROUND", ground),
+                ("GROUND VELOCITY", gs(t)),
+                ("G FORCE", 1.0),
+            ];
+            m.record(&frame(&acq, t, &set));
+            stops.extend(m.take_stopped());
+        }
+        stops
+    }
+
+    #[test]
+    fn a_stop_after_a_landing_is_told_once_after_the_hold() {
+        // 60 kt at touchdown, 4 kt/s down: below 2 kt from 15.5 s, held 3 s.
+        let stops = stops(|t| (60.0 - 4.0 * (t - 1.0)).clamp(0.0, 60.0), 30.0);
+        assert_eq!(stops.len(), 1);
+        assert!((stops[0] - 18.5).abs() < 0.15, "{stops:?}");
+    }
+
+    #[test]
+    fn a_short_slow_moment_on_the_rollout_is_no_stop() {
+        // Below 2 kt for 2 s only, then taxiing on.
+        assert!(stops(|t| if (5.0..7.0).contains(&t) { 1.0 } else { 10.0 }, 20.0).is_empty());
+    }
+
+    #[test]
+    fn an_impact_is_measured_a_second_after_contact_and_taken_once() {
+        let taken = contact(9000.0, 2.0);
+        let impacts: Vec<_> = taken
+            .iter()
+            .enumerate()
+            .filter_map(|(i, x)| x.map(|x| (i, x)))
+            .collect();
+        assert_eq!(impacts.len(), 1);
+        let (at, impact) = impacts[0];
+        assert_eq!(at, 20);
+        assert_eq!(impact.t_s, 1.0);
+        assert_eq!(impact.sink_fpm, 9000.0);
+        assert_eq!(impact.peak_g, 5.0);
+    }
+
+    /// A C172 airborne for 1 s, then on the ground at 10 Hz with the
+    /// attitude `at(t)` = (roll, pitch) in FDR signs; the strikes taken.
+    fn rollout(at: impl Fn(f64) -> (f64, f64)) -> Vec<Strike> {
+        let (mut m, acq) = (Monitor::new(station()), Acquisition::new(&Lfl::V1));
+        let id = AircraftId {
+            title: "C172SP".into(),
+            atc_model: "ATCCOM.AC_MODEL C172.0.text".into(),
+            atc_type: String::new(),
+            atc_id: String::new(),
+            facts: Default::default(),
+        };
+        m.record(&Telemetry::Event(SimEvent::Aircraft(id)));
+        let mut taken = Vec::new();
+        for i in 0..60 {
+            let t = f64::from(i) / 10.0;
+            let (roll, pitch) = at(t);
+            let set = [
+                ("SIM ON GROUND", f64::from(u8::from(t >= 1.0))),
+                ("VERTICAL SPEED", -250.0),
+                ("G FORCE", 1.0),
+                // MSFS signs: bank left-wing-down and pitch nose-down positive.
+                ("PLANE BANK DEGREES", -roll),
+                ("PLANE PITCH DEGREES", -pitch),
+            ];
+            m.record(&frame(&acq, t, &set));
+            taken.extend(m.take_strike());
+        }
+        taken
+    }
+
+    #[test]
+    fn a_normal_rollout_strikes_nothing() {
+        assert!(rollout(|t| (1.5 * (t * 4.0).sin(), 6.0 - t)).is_empty());
+    }
+
+    #[test]
+    fn a_ground_loop_onto_a_wingtip_is_a_strike_once_held() {
+        // The 2026-10-30 LTBJ 34L C172: -25 deg roll, -17 deg pitch.
+        let s = rollout(|t| if t >= 3.0 { (-25.0, -17.0) } else { (0.0, 2.0) });
+        assert_eq!(s.len(), 1, "{s:?}");
+        assert!((3.39..3.51).contains(&s[0].t_s), "{:?}", s[0]);
+        assert_eq!(s[0].reason(), "wing and prop/nose strike");
+    }
+
+    #[test]
+    fn a_single_frame_beyond_the_limits_is_noise() {
+        let s = rollout(|t| {
+            if (t - 3.0).abs() < 0.05 {
+                (30.0, -20.0)
+            } else {
+                (0.0, 2.0)
+            }
+        });
+        assert!(s.is_empty(), "{s:?}");
+    }
+
+    #[test]
+    fn a_touchdown_on_a_wingtip_is_a_strike_at_contact() {
+        let s = rollout(|t| if t < 1.05 { (14.0, 4.0) } else { (2.0, 3.0) });
+        assert_eq!(s.len(), 1, "{s:?}");
+        // Monitor time counts from the flight's first frame, t = 0.
+        assert_eq!((s[0].t_s, s[0].reason()), (1.0, "wing strike"));
+    }
+
+    #[test]
+    fn a_flight_starting_on_the_ground_makes_no_impact() {
+        let (mut m, acq) = (Monitor::new(station()), Acquisition::new(&Lfl::V1));
+        for i in 0..30 {
+            let set = [
+                ("SIM ON GROUND", 1.0),
+                ("VERTICAL SPEED", 0.0),
+                ("G FORCE", 1.0),
+            ];
+            m.record(&frame(&acq, f64::from(i) / 10.0, &set));
+            assert_eq!(m.take_impact(), None);
+        }
     }
 }

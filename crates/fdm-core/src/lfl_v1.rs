@@ -84,4 +84,7 @@ pub(crate) const SIGNALS: &[S] = &[
     // Appended in 0.11
     S::fdr(63, "heading.true", Degrees, 1.0, "4"), // the true-heading reference of item 4
     S::foqa(64, "mach", Mach, 1.0),
+    // Appended in 0.11.3: the course of the tuned localizer, which tells
+    // the ground segment which runway end `nav.loc_dev` guides to
+    S::foqa(65, "nav.loc_course", Degrees, 1.0),
 ];

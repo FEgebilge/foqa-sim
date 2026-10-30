@@ -1,12 +1,16 @@
 use std::collections::HashMap;
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use fdm_core::{AircraftId, Airport, SimFacts};
 use recorder::{Acquisition, Column, FlowEvent, SYSTEM_EVENTS, SimEvent, Telemetry};
 use sim_link::facility::{AirportFetch, Fetched};
+use sim_link::ils::IlsFetch;
 use sim_link::{Recv, SimConnect};
 
-use crate::place::{AirportAsks, Ask, KEY_EVENT_BASE, KEY_EVENTS, Start, key_event_id};
+use crate::place::{
+    AirportAsks, Ask, Ils, IlsAsks, IlsQuery, KEY_EVENT_BASE, KEY_EVENTS, Start, key_event_id,
+};
 use crate::session::Action;
 use crate::{Polled, Sim};
 
@@ -15,6 +19,8 @@ const FACILITY_DEFINE: u32 = 2;
 const IDENTITY_DEFINE: u32 = 3;
 const INIT_DEFINE: u32 = 4;
 const FACTS_DEFINE: u32 = 5;
+const ILS_RUNWAY_DEFINE: u32 = 6;
+const ILS_VOR_DEFINE: u32 = 7;
 const REQUEST: u32 = 1;
 const IDENTITY_REQUEST: u32 = 2;
 const PROBE_REQUEST: u32 = 3;
@@ -60,7 +66,7 @@ const CADENCE_WINDOW_S: f64 = 1.0;
 /// ground and fewer away from it (`Cadence`), plus the sim's
 /// own runway data for the airports the flight uses and the aircraft's
 /// identity. It also carries out the app's requests: place the aircraft
-/// at a start, fetch an airport by ICAO.
+/// at a start, fetch an airport by ICAO, find a runway end's ILS.
 pub struct LiveSource {
     sim: SimConnect,
     /// What each definition, mapping or placement call asked for, by send
@@ -69,6 +75,8 @@ pub struct LiveSource {
     trigger: Trigger,
     airports: AirportFetch,
     asks: AirportAsks,
+    ils: IlsFetch,
+    ils_asks: IlsAsks,
     identity: Identity,
     cadence: Cadence,
     next_probe: Instant,
@@ -104,12 +112,15 @@ impl LiveSource {
         sim.request_on_change(IDENTITY_REQUEST, IDENTITY_DEFINE)?;
         sim.request_on_change(FACTS_REQUEST, FACTS_DEFINE)?;
         let airports = AirportFetch::new(&mut sim, FACILITY_DEFINE)?;
+        let ils = IlsFetch::new(&mut sim, ILS_RUNWAY_DEFINE, ILS_VOR_DEFINE)?;
         Ok(Self {
             sim,
             sent,
             trigger: Trigger::new(acquisition.columns()),
             airports,
             asks: AirportAsks::default(),
+            ils,
+            ils_asks: IlsAsks::default(),
             identity: Identity::default(),
             cadence: Cadence::new(acquisition.columns()),
             next_probe: Instant::now(),
@@ -139,8 +150,20 @@ impl LiveSource {
         })
     }
 
+    /// Answers the next ILS lookup that ended; failures are logged.
+    fn next_ils(&mut self) -> Result<(), sim_link::Error> {
+        if let Some((query, found)) = self.ils.poll(&mut self.sim, Instant::now())? {
+            let found = found.map_err(|e| format!("ILS {} {}: {e}", query.airport, query.runway));
+            if let Err(e) = &found {
+                eprintln!("{e}");
+            }
+            self.ils_asks.found(&query, found);
+        }
+        Ok(())
+    }
+
     /// Puts the user aircraft at `start`'s position, then sends its key
-    /// events (autopilot off, gear, flaps). Errors are calls that failed at
+    /// events (autopilot off, gear, flaps, NAV1). Errors are calls that failed at
     /// once; a rejection arrives later as an exception, which is logged.
     fn send_start(&mut self, start: &Start) -> Result<(), sim_link::Error> {
         let send_id = self.sim.set_init_position(INIT_DEFINE, &start.pos)?;
@@ -163,6 +186,7 @@ impl LiveSource {
         if let Some(airport) = self.next_airport()? {
             return Ok(Some(Polled::Item(airport)));
         }
+        self.next_ils()?;
         let Some(msg) = self.sim.try_dispatch()? else {
             let now = Instant::now();
             if now >= self.next_probe {
@@ -204,6 +228,7 @@ impl LiveSource {
                 FlowEvent::from_code(event).map(|f| Telemetry::Event(SimEvent::Flow(f)))
             }
             Recv::Facility(reply) => {
+                self.ils.feed(reply.clone());
                 self.airports.feed(reply);
                 None
             }
@@ -216,7 +241,8 @@ impl LiveSource {
                     .sent
                     .get(&send_id)
                     .map(String::as_str)
-                    .or_else(|| self.airports.describe(send_id));
+                    .or_else(|| self.airports.describe(send_id))
+                    .or_else(|| self.ils.describe(send_id));
                 match what {
                     Some(what) => eprintln!("SimConnect rejected {what} (exception {code})"),
                     None => {
@@ -276,6 +302,31 @@ impl Sim for LiveSource {
         }
     }
 
+    /// Looks up the ILS `ask` names; answered when found or failed.
+    fn want_ils(&mut self, ask: Ask<IlsQuery, Option<Ils>>) {
+        if let Some(query) = self.ils_asks.ask(ask) {
+            self.ils.want(query);
+        }
+    }
+
+    fn save(&mut self, path: &Path) -> Result<(), String> {
+        let file = sim_path(path)?;
+        let send_id = (self.sim)
+            .flight_save(file, "FOQA-Sim clean start")
+            .map_err(|e| e.to_string())?;
+        self.sent
+            .insert(send_id, format!("saving the flight to {file}"));
+        Ok(())
+    }
+
+    fn load(&mut self, path: &Path) -> Result<(), String> {
+        let file = sim_path(path)?;
+        let send_id = self.sim.flight_load(file).map_err(|e| e.to_string())?;
+        self.sent
+            .insert(send_id, format!("loading the flight {file}"));
+        Ok(())
+    }
+
     /// Follows the session's routing of an item. Flights are delimited in one
     /// place, `Session`; this only reacts. Closing a flight drops its airport
     /// requests and the set already captured, so the next flight fetches
@@ -301,24 +352,78 @@ impl Sim for LiveSource {
     }
 }
 
+/// `path` as SimConnect takes it.
+fn sim_path(path: &Path) -> Result<&str, String> {
+    path.to_str()
+        .ok_or_else(|| format!("{} is not a path the sim can take", path.display()))
+}
+
 fn system_event(id: u32, data: u32, file: &str) -> Option<Telemetry> {
     let name = SYSTEM_EVENTS.get(usize::try_from(id).ok()?.checked_sub(1)?)?;
     Telemetry::from_system_event(name, data, file)
 }
 
-/// The aircraft identity each flight's journal must carry on its own: emitted
-/// when it changes (an aircraft swap) and again into every new flight.
-/// Emitted items go through `Session` like any event, so one reported
-/// between flights is held for the next one and settles what it is owed.
-#[derive(Debug, Default)]
-struct Identity {
-    current: Option<AircraftId>,
-    /// The latest sim facts; they arrive apart from the strings.
-    facts: SimFacts,
+/// A state each flight's journal must carry on its own: emitted when it
+/// changes and again into every new flight. Emitted items go through
+/// `Session` like any event, so one reported between flights is held for
+/// the next one and settles what it is owed.
+#[derive(Debug)]
+struct Carried<T> {
+    current: Option<T>,
     /// `current` is to be emitted.
     due: bool,
     /// The next flight to open has not been given `current`.
     owed: bool,
+}
+
+impl<T> Default for Carried<T> {
+    fn default() -> Self {
+        Self {
+            current: None,
+            due: false,
+            owed: false,
+        }
+    }
+}
+
+impl<T: Clone + PartialEq> Carried<T> {
+    /// Emits `value` when it differs from the current one.
+    fn update(&mut self, value: T) {
+        if self.current.as_ref() != Some(&value) {
+            self.current = Some(value);
+            self.due = true;
+        }
+    }
+
+    /// Follows the routing `action`; `held` when its item is this state
+    /// itself: a split on it holds it into the next flight, which is then
+    /// owed nothing.
+    fn follow(&mut self, action: Action, held: bool) {
+        match action {
+            Action::Split if held => {}
+            Action::Close | Action::Split => self.owed = true,
+            Action::Open => self.due |= std::mem::take(&mut self.owed),
+            _ => {}
+        }
+    }
+
+    /// The value to emit now, if any.
+    fn next(&mut self) -> Option<T> {
+        if !std::mem::take(&mut self.due) {
+            return None;
+        }
+        self.owed = false;
+        self.current.clone()
+    }
+}
+
+/// The aircraft identity, carried into each flight (`Carried`); a swap
+/// splits the flight.
+#[derive(Debug, Default)]
+struct Identity {
+    carried: Carried<AircraftId>,
+    /// The latest sim facts; they arrive apart from the strings.
+    facts: SimFacts,
 }
 
 impl Identity {
@@ -329,7 +434,7 @@ impl Identity {
             return;
         };
         self.facts.category = Some(category).filter(|c| !c.trim().is_empty());
-        self.update(AircraftId {
+        self.carried.update(AircraftId {
             title,
             atc_model,
             atc_type,
@@ -342,41 +447,24 @@ impl Identity {
     /// strings there is no identity to attach them to yet.
     fn facts(&mut self, values: &[f64]) {
         self.facts.from_values(values);
-        if let Some(id) = &self.current {
+        if let Some(id) = &self.carried.current {
             let id = AircraftId {
                 facts: self.facts.clone(),
                 ..id.clone()
             };
-            self.update(id);
+            self.carried.update(id);
         }
     }
 
-    /// Emits `id` when it differs from the current identity.
-    fn update(&mut self, id: AircraftId) {
-        if self.current.as_ref() != Some(&id) {
-            self.current = Some(id);
-            self.due = true;
-        }
-    }
-
-    /// `item` is the one `action` routed: a split on a new identity holds
-    /// it into the next flight, which is then owed nothing.
+    /// `item` is the one `action` routed.
     fn follow(&mut self, action: Action, item: Option<&Telemetry>) {
-        match action {
-            Action::Split if matches!(item, Some(Telemetry::Event(SimEvent::Aircraft(_)))) => {}
-            Action::Close | Action::Split => self.owed = true,
-            Action::Open => self.due |= std::mem::take(&mut self.owed),
-            _ => {}
-        }
+        let held = matches!(item, Some(Telemetry::Event(SimEvent::Aircraft(_))));
+        self.carried.follow(action, held);
     }
 
     /// The identity to emit now, if any.
     fn next(&mut self) -> Option<AircraftId> {
-        if !std::mem::take(&mut self.due) {
-            return None;
-        }
-        self.owed = false;
-        self.current.clone()
+        self.carried.next()
     }
 }
 

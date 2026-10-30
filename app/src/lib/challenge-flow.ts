@@ -25,21 +25,25 @@ export interface ScorePart { name: string; label: string; weight: number }
 const part = (name: string, label: string, weight: number): ScorePart => ({ name, label, weight });
 
 const METHODS: Record<string, ScorePart[]> = {
-  "landing-1": [part("touchdown_point", "touchdown point", 25), part("sink_rate", "sink rate", 25), part("centreline", "centreline", 15), part("stability", "stability from the gate", 10), part("peak_g", "peak g", 10), part("bounce", "bounce", 10), part("rollout", "rollout", 5)],
   // The six domains of the debrief's assessment (docs/scoring.md §2.3).
   "landing-3": [part("stability", "approach stability", 25), part("energy", "threshold and flare energy", 10), part("point", "touchdown point", 20), part("lateral", "lateral control", 15), part("contact", "touchdown contact", 20), part("rollout", "rollout", 10)],
 };
 
-/** The method a challenge is graded with: landing-2 is retired and graded as landing-3 (docs/challenges.md); null for a version this app does not know. */
-export const methodOf = (version: string) => (version === "landing-2" ? "landing-3" : version in METHODS ? version : null);
+/** Every challenge is graded with the debrief's current method, whatever it names (docs/challenges.md). */
+export const CURRENT = "landing-3";
+/** Method names a definition may carry, all graded with `CURRENT`. */
+const KNOWN = ["landing-1", "landing-2", CURRENT];
 
-/** A part's name in words; the same name means different things in landing-1 and landing-3 ("stability"). */
-export const partLabel = (version: string, name: string) => METHODS[methodOf(version) ?? ""]?.find((p) => p.name === name)?.label ?? name.replace(/_/g, " ");
+/** The method a challenge is graded with: always `CURRENT`; null for a version this app does not know. */
+export const methodOf = (version: string) => (KNOWN.includes(version) ? CURRENT : null);
+
+/** A part's name in words, as the method that scored it names it; an older landing-1 result shows its part names spelled out. */
+export const partLabel = (version: string, name: string) => METHODS[version]?.find((p) => p.name === name)?.label ?? name.replace(/_/g, " ");
 
 const points = (list: { label: string; weight: number }[]) => list.map((p) => `${p.label} ${Math.round(p.weight * 10) / 10}`).join(", ");
 
 /**
- * The Scoring fact of a briefing: the method the challenge names and its parts with their weights. `scored` is the newest
+ * The Scoring fact of a briefing: the method actually used (the current one) and its parts with their weights. `scored` is the newest
  * graded attempt's score: when landing-3 shared a domain's weight out (no data for it), the note says what that attempt used.
  */
 export function scoringFact(version: string, scored?: NonNullable<AttemptView["result"]>["score"]): { value: string; note: string } {
@@ -53,7 +57,7 @@ export function scoringFact(version: string, scored?: NonNullable<AttemptView["r
     note: [
       `0 to 100: ${points(parts)}.`,
       method === "landing-3" ? "The debrief's landing assessment run from the gate; a safety cap can hold the total below the parts' sum, and a domain without data shares its weight out." : "",
-      version !== method ? `${version} is retired: it is graded as ${method}.` : "",
+      version !== method ? `The challenge names ${version}; every challenge is graded with the current method, ${method}.` : "",
       shared ? `Latest attempt: ${points(used.map((p) => ({ label: partLabel(method, p.name), weight: p.weight })))}.` : "",
     ].filter(Boolean).join(" "),
   };

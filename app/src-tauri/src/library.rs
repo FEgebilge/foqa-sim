@@ -129,16 +129,20 @@ impl Library {
         fs::remove_file(self.path(key)?).map_err(|_| format!("no challenge {key:?}"))
     }
 
-    /// Keys are made by `key`: nothing else can name a path outside.
     fn path(&self, key: &str) -> Result<PathBuf, String> {
-        let ok = !key.is_empty()
-            && key.len() <= 80
-            && key
-                .bytes()
-                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
-        ok.then(|| self.dir.join(format!("{key}.json")))
-            .ok_or_else(|| format!("no challenge {key:?}"))
+        checked_key(key).map(|key| self.dir.join(format!("{key}.json")))
     }
+}
+
+/// `key` if it is one `key` makes: nothing else can name a path outside.
+pub(crate) fn checked_key(key: &str) -> Result<&str, String> {
+    let ok = !key.is_empty()
+        && key.len() <= 80
+        && key
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
+    ok.then_some(key)
+        .ok_or_else(|| format!("no challenge {key:?}"))
 }
 
 fn entry(c: &Challenge, json: &str) -> Entry {

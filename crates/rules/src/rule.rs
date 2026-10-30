@@ -105,6 +105,9 @@ pub enum TdField {
     Roll,
     Ias,
     Bounce,
+    /// A wing, propeller or nose strike on the ground after this touchdown,
+    /// before the next liftoff (`strike`).
+    GroundStrike,
     /// The runway values need the airport snapshot recorded in flight; they
     /// are unknown without a matched runway.
     Distance,
@@ -124,7 +127,13 @@ impl TdField {
     fn runway(self) -> bool {
         !matches!(
             self,
-            Self::Sink | Self::PeakG | Self::Pitch | Self::Roll | Self::Ias | Self::Bounce
+            Self::Sink
+                | Self::PeakG
+                | Self::Pitch
+                | Self::Roll
+                | Self::Ias
+                | Self::Bounce
+                | Self::GroundStrike
         )
     }
 }
@@ -495,6 +504,7 @@ impl RuleScope {
             "td.roll" if self.touchdown => (Var::Td(TdField::Roll), num(Unit::Degrees)),
             "td.ias" if self.touchdown => (Var::Td(TdField::Ias), num(Unit::Knots)),
             "td.bounce" if self.touchdown => (Var::Td(TdField::Bounce), Ty::Bool),
+            "td.ground_strike" if self.touchdown => (Var::Td(TdField::GroundStrike), Ty::Bool),
             "td.distance" if self.touchdown => (Var::Td(TdField::Distance), num(Unit::Feet)),
             "td.cross" if self.touchdown => (Var::Td(TdField::Cross), num(Unit::Feet)),
             "td.crosswind" if self.touchdown => (Var::Td(TdField::Crosswind), num(Unit::Knots)),

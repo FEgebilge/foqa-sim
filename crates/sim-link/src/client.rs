@@ -425,6 +425,34 @@ impl SimConnect {
         check("SimConnect_SubscribeToCommBusEvent", hr)
     }
 
+    /// Saves the current flight to `path` (a `.FLT`), as the sim's own save
+    /// does. Returns the send id, which an `Exception` carries on failure.
+    pub fn flight_save(&mut self, path: &str, title: &str) -> Result<u32, Error> {
+        let (path, title) = (c_string(path)?, c_string(title)?);
+        // SAFETY: open handle; NUL-terminated strings that outlive the call.
+        let hr = unsafe {
+            ffi::flight_save(
+                self.handle,
+                path.as_ptr(),
+                title.as_ptr(),
+                title.as_ptr(),
+                0,
+            )
+        };
+        check("SimConnect_FlightSave", hr)?;
+        self.last_sent_packet_id()
+    }
+
+    /// Loads the flight saved at `path`; `FlightLoaded` follows. Returns the
+    /// send id.
+    pub fn flight_load(&mut self, path: &str) -> Result<u32, Error> {
+        let path = c_string(path)?;
+        // SAFETY: open handle and a NUL-terminated path that outlives the call.
+        let hr = unsafe { ffi::flight_load(self.handle, path.as_ptr()) };
+        check("SimConnect_FlightLoad", hr)?;
+        self.last_sent_packet_id()
+    }
+
     fn last_sent_packet_id(&self) -> Result<u32, Error> {
         let mut id = 0;
         // SAFETY: valid out-pointer on an open handle.

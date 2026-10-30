@@ -47,6 +47,8 @@ pub const FACILITY_LIST_TYPE_AIRPORT: i32 = 0;
 pub mod facility_type {
     pub const AIRPORT: u32 = 0;
     pub const RUNWAY: u32 = 1;
+    /// Also localizers and ILS (H:341).
+    pub const VOR: u32 = 19;
     /// Runway sub-structures such as `PRIMARY_THRESHOLD` (H:345).
     pub const PAVEMENT: u32 = 23;
 }
@@ -342,6 +344,18 @@ unsafe extern "C" {
     ) -> HResult;
     #[link_name = "SimConnect_GetLastSentPacketID"]
     pub fn get_last_sent_packet_id(handle: Handle, send_id: *mut Dword) -> HResult;
+    /// H:1085.
+    #[link_name = "SimConnect_FlightLoad"]
+    pub fn flight_load(handle: Handle, file_name: *const c_char) -> HResult;
+    /// H:1086; `flags` 0.
+    #[link_name = "SimConnect_FlightSave"]
+    pub fn flight_save(
+        handle: Handle,
+        file_name: *const c_char,
+        title: *const c_char,
+        description: *const c_char,
+        flags: Dword,
+    ) -> HResult;
 }
 
 /// `WAIT_FAILED`: `WaitForSingleObject` could not wait (an invalid handle).
