@@ -7,7 +7,9 @@ protocol and publishes it in this repository (public with FOQA-Sim); a
 site depends on the protocol, its example fixtures (A11) and the open
 `fdm challenge` command, never on FOQA-Sim internals. The first
 implementer is Pilot Aptitude (Mollymawk `docs/landing-challenges.md`),
-but nothing below names it.
+and Part A names no site. The FOQA-Sim app ships tied to it: Pilot
+Aptitude is built in, and other sites only work behind a developer
+switch (B3, 2026-10-31, Ege).
 
 Status: design. Part A is the wire protocol (what a site implements).
 Part B is the app side (how FOQA-Sim implements the client without
@@ -27,9 +29,13 @@ F5 (deep links, the in-sim strip and EFB Challenges tab, toasts); see
    app feature (`connect`). No core crate (`fdm-core`, `capture`,
    `recorder`, `analyzer`, `rules`, `debrief`, `challenge`, `cli`) and no
    core app module depends on it; the app builds and runs with it off.
-3. **No site baked in.** No URL, name or key of any site in the code or
-   the build. Sites are data the user adds (by typing an address or by
-   confirming a deep link) and can remove.
+3. **One site built in, none in the protocol.** The protocol and its
+   client crate (`crates/connect`) name no site. The app names one, Pilot
+   Aptitude (`https://pilotaptitude.egebilge.com`, one constant in
+   `app/src-tauri/src/connect.rs`, B3): it is in the Sites list from the
+   start and can't be removed. Other sites, added by address or by a deep
+   link, need the developer switch. No key or secret of any site is in
+   the build.
 4. **The site trusts nothing from the client except the bytes.** It
    re-scores the uploaded recording with `fdm challenge`; the client's own
    result is display only.
@@ -75,7 +81,7 @@ Rules:
 - Served with `Content-Type: application/json`, at most 8 KiB, over
   `https` to a DNS host name. IP literals are refused; plain `http` and
   loopback (`localhost`, `127.0.0.1`) are accepted only with the app's
-  developer setting "Allow local sites" (off by default).
+  developer switch (off by default, B3).
 - **Every URL in it must be on the same origin as the site.** The app
   refuses the document otherwise, so a site cannot point the app at a
   third host.
@@ -203,6 +209,10 @@ can open it):
   version; its attempts stay), opens its briefing and, when the
   pre-flight check has nothing red, places the aircraft and starts the
   ranked attempt; with something red, the briefing says what to fix.
+- In the app as shipped, a link whose `site` is not the built-in site
+  (B3) is refused with a notice ("FOQA-Sim opens challenge links from
+  Pilot Aptitude only."), before anything is asked or fetched; with the
+  developer switch the rules below apply to any site.
 - Any other link **never acts by itself**: no fetch, no library write, no
   navigation and no placing before a click in the app. If `site` is not a
   connected site, the app shows "Connect to **<origin in ASCII>**?" and
@@ -549,7 +559,7 @@ msfs-panel/        toolbar panel strip + EFB Challenges tab (B9)
   `attempt_create(key)`, `attempt_place(id)`, `attempt_finish(id)`,
   `attempt_abandon(id)`, `attempt_fly_again(id)`, `attempts_list`,
   `attempt_log(id)`, `attempt_delete(id)`. Connect: `connect_available`,
-  `sites_list`, `site_add(origin)`, `site_sign_in(origin)`,
+  `sites_list`, `site_add_allowed`, `site_add(origin)`, `site_sign_in(origin)`,
   `site_sign_out(origin)`, `site_remove(origin, delete_attempts)`,
   `site_challenges(origin)`, `attempt_upload(id)`, `deep_link_pending`.
   Events: `attempt-changed`, `deep-link` (`{site, id, v}`),
@@ -586,8 +596,26 @@ its attempt folders). **Sign out / Remove warns** when uploads are
 pending: "2 attempts haven't uploaded yet. They'll upload when you sign
 back in as ege; signing in as someone else discards them." Global: "Open
 challenge links from websites" (on/off), "Notify when a site scores an
-attempt" (on), developer "Allow local sites" (off). Removing every site
-leaves no network activity at all.
+attempt" (on). Signed out of every site, nothing is uploaded.
+
+**The built-in site.** The app ships with Pilot Aptitude in the list: its
+origin and name are constants in `app/src-tauri/src/connect.rs` (the
+product's tie, so `crates/connect` stays site-free and takes it as
+`sites::Policy`). The pilot never types an address; they press Sign in.
+It has no Remove. Its well-known document is fetched when the Sites list
+is shown (again at most once a minute while it has none) and at once on
+Sign in. While the site has none (A1 answers 404: challenges are off
+there), the row says "Challenges aren't open on Pilot Aptitude yet." and
+Sign in says the same; that is not logged as an error. Once the document
+is fetched the site behaves like any added site.
+
+**The developer switch** is the environment variable
+`FOQA_ALLOW_LOCAL_SITES` (any value). With it, the list offers "Add site"
+by address, links from any site ask "Connect to <host>?" as in A3, and
+local sites (loopback, plain `http`) are allowed, which is how a local
+Pilot Aptitude (`http://localhost:3012`) is tested. Without it, `site_add`
+and links refuse every site but the built-in one; sites added before
+stay listed and can be removed.
 
 The two global switches are under the Sites list and kept in the app's
 config folder as `sites-settings.json` (`{ "links": true, "notify": true }`;
@@ -888,9 +916,9 @@ Each slice keeps the app fully usable with no site configured.
   (`recorder::CHALLENGE_MAX_BODY`); the app's own flights keep 256 MiB.
 - **Not in F1 yet:** the live `[begin, now]` grading during the rollout
   (B5).
-- "Allow local sites" is the environment variable
-  `FOQA_ALLOW_LOCAL_SITES=1` until the app has a developer settings
-  screen; the links and notifications switches (B3) are built, the
+- The developer switch (local sites and sites other than the built-in
+  one, B3) is the environment variable `FOQA_ALLOW_LOCAL_SITES=1`; the
+  links and notifications switches (B3) are built, the
   per-site auto-upload toggle and the stale-attempt sweep at start-up (B6)
   are not yet.
 - **Deep links (F5):** `crates/connect/src/deeplink.rs` parses A3 strictly

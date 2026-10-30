@@ -1,15 +1,18 @@
 import type { SiteAttempt, SiteChallenge, SiteSettings, SitesApi, SiteView } from "./sites";
 
-// Sites in the browser: one example site (a reserved `.example` host, not a real one), changed in memory so the
-// Sites panel can be clicked through. `?sites=none` starts with no site, `?sites=off` is a build without `connect`.
+// Sites in the browser: one example site (a reserved `.example` host, not a real one) standing for the built-in one,
+// changed in memory so the Sites panel can be clicked through. `?sites=none` starts with its challenges not open,
+// `?sites=dev` offers Add site (the developer switch), `?sites=off` is a build without `connect`.
 
 const ORIGIN = "https://landings.example";
 const settle = (ms = 600) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
 export function mockSites(mode: string | null): SitesApi {
-  const sites: SiteView[] = mode === "none" ? [] : [{
-    origin: ORIGIN, host: "landings.example", name: "Example Landings", handle: "ege", signed_in: true, pending: 1,
-    device: null, account_url: `${ORIGIN}/#/account`,
+  const closed = mode === "none";
+  const sites: SiteView[] = [{
+    origin: ORIGIN, host: "landings.example", name: "Example Landings", handle: closed ? null : "ege", signed_in: !closed,
+    pending: closed ? 0 : 1, device: null, account_url: closed ? null : `${ORIGIN}/#/account`, built_in: true,
+    closed: closed ? "Challenges aren't open on Example Landings yet." : null,
   }];
   const challenges: SiteChallenge[] = [
     { id: "ltfj-06-gusty-2026w44", version: 1, title: "Sabiha Gökçen 06, crosswind", state: "open", opens_at: "2026-10-26T00:00:00Z", closes_at: "2026-11-02T00:00:00Z", key: "ltfj-06-gusty-2026w44-v1" },
@@ -50,18 +53,20 @@ export function mockSites(mode: string | null): SitesApi {
   return {
     connectAvailable: async () => mode !== "off",
     sitesList: async () => sites.map((s) => ({ ...s })),
+    siteAddAllowed: async () => mode === "dev",
     async siteAdd(origin) {
       await settle();
       const url = new URL(origin.trim());
       if (url.protocol !== "https:") throw new Error("A site must use https.");
       if (url.pathname !== "/" || url.search || url.hash) throw new Error("Give the site's address only, like https://example.org.");
       if (!url.hostname.endsWith(".example")) throw new Error(`${url.host} doesn't publish FOQA challenges.`);
-      const added: SiteView = { origin: url.origin, host: url.host, name: "", handle: null, signed_in: false, pending: 0, device: null, account_url: null };
+      const added: SiteView = { origin: url.origin, host: url.host, name: "", handle: null, signed_in: false, pending: 0, device: null, account_url: null, built_in: false, closed: null };
       sites.push(added);
       return added;
     },
     async siteSignIn(origin, device) {
       const s = site(origin);
+      if (s.closed) { await settle(); throw new Error(s.closed); }
       if (device) s.device = { user_code: "WDJB-MJHT", verification_uri: `${origin}/#/device` };
       await settle(device ? 2500 : 1200);
       Object.assign(s, { signed_in: true, handle: "ege", device: null });
@@ -74,6 +79,7 @@ export function mockSites(mode: string | null): SitesApi {
     },
     async siteRemove(origin) {
       await settle();
+      if (site(origin).built_in) throw new Error(`${site(origin).name} comes with FOQA-Sim; sign out instead.`);
       sites.splice(sites.indexOf(site(origin)), 1);
     },
     async siteChallenges(origin) {
@@ -111,7 +117,7 @@ export function mockSites(mode: string | null): SitesApi {
       await settle();
       if (!allow) return null;
       const origin = "https://xn--pilotaptitud-yjb.example";
-      const added: SiteView = { origin, host: new URL(origin).host, name: "Look-alike", handle: null, signed_in: false, pending: 0, device: null, account_url: null };
+      const added: SiteView = { origin, host: new URL(origin).host, name: "Look-alike", handle: null, signed_in: false, pending: 0, device: null, account_url: null, built_in: false, closed: null };
       sites.push(added);
       return added;
     },

@@ -69,8 +69,9 @@ challenge protocol.
   rates per 100 flights with the newer half of your flights against the older, by aircraft and
   airport ([trends.md](docs/trends.md)).
 - **Landing challenges.** Import a challenge, check the pre-flight card, place the aircraft on
-  final and fly again from the sim. Optionally connect a website that runs the open
-  [challenge protocol](docs/challenge-protocol.md) to rank attempts; FOQA-Sim works fully without one.
+  final and fly again from the sim. Optionally sign in to [Pilot Aptitude](https://pilotaptitude.egebilge.com),
+  built in, to fly its challenges ranked over the open [challenge protocol](docs/challenge-protocol.md);
+  FOQA-Sim works fully without it.
 - **In-sim panel and EFB app.** Live approach monitor with the 1000 ft and 500 ft stabilised
   gates, event feed, recent landings with charts and scores, past flights, a Challenges tab
   with the attempt status, and controls to start, end, discard or mark a recording.

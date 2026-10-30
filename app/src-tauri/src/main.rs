@@ -96,6 +96,7 @@ fn main() {
     let commands: Commands = handler!(
         connect::connect_available,
         connect::sites_list,
+        connect::site_add_allowed,
         connect::site_add,
         connect::site_sign_in,
         connect::site_sign_in_cancel,
