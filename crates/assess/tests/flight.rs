@@ -22,6 +22,19 @@ vref:
     - { flap: 0 deg, weights_kg: [50000, 70000], ias: [135 kt, 135 kt] }
 "#;
 
+/// A light aircraft with published approach speeds and a stalling speed.
+const LIGHT_APPROACH: &str = r#"
+type: TEST
+name: Synthetic light aircraft
+class: light
+vso: { value: 40 kt, source: synthetic }
+approach_speed:
+  source: synthetic
+  flaps:
+    - { flap: 0 deg, ias: [65 kt, 75 kt] }
+    - { flap: 30 deg, ias: [60 kt, 70 kt] }
+"#;
+
 /// The stable airliner landing, its threshold 400 m back on a 3000 m
 /// runway (`airport`), assessed as `TEST` with `profiles`.
 fn assess(profiles: &ProfileSet, airport: bool, ranked: bool) -> Assessment {
@@ -38,16 +51,26 @@ fn flown(
     duration: f64,
     script: impl Fn(f64) -> Pt,
 ) -> Assessment {
+    let runway = airport.then(|| runway_behind_touchdown(400.0));
+    flown_on(profiles, runway, ranked, duration, script)
+}
+
+/// `script` flown for `duration` s onto `runway` and assessed.
+fn flown_on(
+    profiles: &ProfileSet,
+    runway: Option<fdm_core::Airport>,
+    ranked: bool,
+    duration: f64,
+    script: impl Fn(f64) -> Pt,
+) -> Assessment {
     let mut events = vec![identity("TEST")];
-    if airport {
-        events.push(SimEvent::Airport(runway_behind_touchdown(400.0)));
-    }
+    events.extend(runway.map(SimEvent::Airport));
     let (flight, track): (Flight, Track) = fly_to(&events, AIRLINER_LB, duration, script);
     let rules = load(CORE).unwrap();
     let selection = profiles.select(&flight);
     let found = evaluate(&rules, &selection, &flight, &track);
     let tds = touchdowns(&flight, &track);
-    Method::landing_3().unwrap().assess(&Landing {
+    Method::landing_4().unwrap().assess(&Landing {
         flight: &flight,
         track: &track,
         selection: &selection,
@@ -254,6 +277,90 @@ fn the_descent_rate_is_held_3_s_only_past_the_second_threshold() {
 }
 
 /// A 3 s IAS dropout in the window and no radio height at the threshold:
+/// A C172-like approach: 65 kt down a 3 degree path, flared to `td_kt` at
+/// `peak_g`, full flap, the rollout slowing to a stop.
+fn light_landing(t: f64, td_kt: f64, peak_g: f64) -> Pt {
+    let base = landing(t, TD_S, peak_g);
+    Pt {
+        alt: base.alt * 0.45,
+        speed: if t < TD_S - 10.0 {
+            65.0
+        } else if t < TD_S {
+            td_kt + (65.0 - td_kt) * (TD_S - t) / 10.0
+        } else {
+            (td_kt - (t - TD_S) * 2.0).max(0.0)
+        },
+        flaps: 30.0,
+        ..base
+    }
+}
+
+fn light_scored(script: impl Fn(f64) -> Pt) -> LandingScore {
+    let profiles = ProfileSet::load([("TEST", LIGHT_APPROACH)]).unwrap();
+    let runway = runway_behind_touchdown_of(400.0, &script);
+    match flown_on(&profiles, Some(runway), false, TD_S + ROLLOUT_S, script) {
+        Assessment::Scored { score, .. } => score,
+        other => panic!("not scored: {other:?}"),
+    }
+}
+
+/// What every class of landing must come to, whatever the bands become: the
+/// check that a number can't quietly turn a good landing bad or a bad one
+/// good.
+#[test]
+fn a_textbook_light_landing_is_good_and_complete() {
+    let s = light_scored(|t| light_landing(t, 52.0, 1.2));
+    assert_eq!(s.grade, Grade::Good, "{s:#?}");
+    assert_eq!(s.confidence, Confidence::Full, "{:?}", s.partial);
+    assert!(s.caps.is_empty(), "{:?}", s.caps);
+}
+
+#[test]
+fn a_hard_light_landing_is_capped_whatever_its_approach() {
+    let s = light_scored(|t| light_landing(t, 52.0, 2.7));
+    assert!(s.score <= 39.0, "{}: {:?}", s.score, s.caps);
+    assert_eq!(s.grade, Grade::Poor);
+}
+
+#[test]
+fn a_landing_at_the_stall_loses_on_touchdown_speed() {
+    let at = |kt: f64| {
+        let s = light_scored(|t| light_landing(t, kt, 1.2));
+        criteria(&s, "B2")[0].ell
+    };
+    assert_eq!(at(52.0), 0.0, "well above the stall");
+    assert!(at(36.0) >= 2.0, "under the 40 kt stall: {}", at(36.0));
+}
+
+/// A flight that never reached the window's top has no approach to grade:
+/// it says so, and its reference speed still comes from the flap as landed.
+#[test]
+fn a_flight_below_the_window_says_stability_was_not_graded() {
+    let profiles = ProfileSet::load([("TEST", LIGHT_APPROACH)]).unwrap();
+    let Assessment::Scored { score, speeds, .. } =
+        flown(&profiles, true, false, TD_S + ROLLOUT_S, |t| Pt {
+            alt: 15.0_f64.min(landing(t, TD_S, 1.2).alt),
+            ..landing(t, TD_S, 1.2)
+        })
+    else {
+        panic!("not scored")
+    };
+    assert_eq!(score.confidence, Confidence::Partial);
+    assert!(
+        score
+            .partial
+            .iter()
+            .any(|p| p.contains("Stability was not graded")),
+        "{:?}",
+        score.partial
+    );
+    assert_eq!(
+        speeds.map(|s| s.vapp_kt),
+        Some(70.0),
+        "the published speed, not 1.3 VSO"
+    );
+}
+
 /// A1 and B1 are n/a, not graded, and the score is partial.
 #[test]
 fn data_gaps_make_their_criteria_n_a() {
@@ -282,24 +389,20 @@ fn data_gaps_make_their_criteria_n_a() {
     );
 }
 
-/// A light aircraft aims at 150 m, not the 400 m aiming point of this
-/// 3000 m runway, and crosses the threshold against its own wheel path.
+/// A light aircraft aims at the runway's own aiming point, like any other,
+/// and crosses the threshold against its own wheel path.
 #[test]
-fn a_light_aircraft_aims_short_of_the_airline_aiming_point() {
+fn a_light_aircraft_aims_at_the_runways_aiming_point() {
     let light = "type: TEST\nname: Synthetic light aircraft\nclass: light\n";
     let profiles = ProfileSet::load([("TEST", light)]).unwrap();
     let Assessment::Scored { score, .. } = assess(&profiles, true, false) else {
         panic!("not scored")
     };
     let value = |id: &str| criteria(&score, id)[0].value;
-    // Down 400 m past the threshold: 250 m = 820 ft past the target.
-    assert!(
-        (value("C1") - 250.0 / 0.3048).abs() < 2.0,
-        "{}",
-        value("C1")
-    );
-    // 41.9 ft against 150 m x tan 3 deg = 25.8 ft less 6 ft eye to wheel.
-    assert!((value("B1") - (41.9 - 19.8)).abs() < 1.0, "{}", value("B1"));
+    // Down 400 m past the threshold, on the 400 m mark of this 3000 m runway.
+    assert!(value("C1").abs() < 2.0, "{}", value("C1"));
+    // 41.9 ft against 50 ft at most, less 6 ft eye to wheel.
+    assert!((value("B1") - (41.9 - 44.0)).abs() < 1.0, "{}", value("B1"));
 }
 
 /// A crash the sim reports during the landing caps it as an excursion.
@@ -318,7 +421,7 @@ fn a_crash_on_the_landing_caps_the_score() {
     let profiles = ProfileSet::load([("TEST", PROFILE)]).unwrap();
     let (rules, selection) = (load(CORE).unwrap(), profiles.select(&flight));
     let tds = touchdowns(&flight, &track);
-    let Assessment::Scored { score, .. } = Method::landing_3().unwrap().assess(&Landing {
+    let Assessment::Scored { score, .. } = Method::landing_4().unwrap().assess(&Landing {
         flight: &flight,
         track: &track,
         selection: &selection,

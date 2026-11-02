@@ -11,8 +11,8 @@ use rules::expr::{self, Expr, Scope, Ty, Values};
 use rules::{Domain, Level, Limits, Rule, Scalar, ScoringClass, Side};
 use serde::Deserialize;
 
-/// The shipped `landing-3` and the core rules it takes levels from.
-const LANDING_3: &str = include_str!("../../../scoring/landing-3.yaml");
+/// The shipped `landing-4` and the core rules it takes levels from.
+const LANDING_4: &str = include_str!("../../../scoring/landing-4.yaml");
 const CORE_RULES: &str = include_str!("../../../rules/core.yaml");
 
 /// The scored domains, in their order on the page.
@@ -28,7 +28,7 @@ pub const DOMAINS: [Domain; 6] = [
 /// The levels of the scale, at the anchors ideal, tolerance, L1, L2, L3.
 pub const ANCHOR_ELL: [f64; 5] = [0.0, 0.5, 1.0, 2.0, 3.0];
 
-/// A name an anchor may use (`scoring/landing-3.yaml` header).
+/// A name an anchor may use (`scoring/landing-4.yaml` header).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Var {
     Add,
@@ -40,10 +40,12 @@ pub enum Var {
     Width,
     Track,
     HardG,
+    Stall,
+    Floor,
 }
 
 impl Var {
-    const ALL: [(Self, &'static str, Unit); 9] = [
+    const ALL: [(Self, &'static str, Unit); 11] = [
         (Self::Add, "add", Unit::Knots),
         (Self::Gust, "gust", Unit::Knots),
         (Self::Rod3, "rod3", Unit::FeetPerMinute),
@@ -53,6 +55,8 @@ impl Var {
         (Self::Width, "width", Unit::Feet),
         (Self::Track, "track", Unit::Feet),
         (Self::HardG, "hard_g", Unit::G),
+        (Self::Stall, "stall", Unit::Knots),
+        (Self::Floor, "floor", Unit::Knots),
     ];
 }
 
@@ -79,6 +83,10 @@ pub struct Context {
     pub width_ft: Option<f64>,
     pub track_ft: Option<f64>,
     pub hard_g: Option<f64>,
+    /// The stalling speed at this weight, off the band's reference speed.
+    pub stall_kt: Option<f64>,
+    /// 5% above that stalling speed, off the same reference speed.
+    pub floor_kt: Option<f64>,
 }
 
 impl Values<Var> for Context {
@@ -93,6 +101,8 @@ impl Values<Var> for Context {
             Var::Width => self.width_ft,
             Var::Track => self.track_ft,
             Var::HardG => self.hard_g,
+            Var::Stall => self.stall_kt,
+            Var::Floor => self.floor_kt,
         }
     }
 }
@@ -332,10 +342,10 @@ fn quantity(path: &str, value: &Scalar, unit: Unit) -> Result<f64, MethodError> 
 }
 
 impl Method {
-    /// The shipped `landing-3`, its levels taken from the core rules.
-    pub fn landing_3() -> Result<Self, MethodError> {
+    /// The shipped `landing-4`, its levels taken from the core rules.
+    pub fn landing_4() -> Result<Self, MethodError> {
         let rules = rules::load(CORE_RULES).map_err(|e| MethodError(e.to_string()))?;
-        Self::load(LANDING_3, &rules)
+        Self::load(LANDING_4, &rules)
     }
 
     /// Loads a method, taking `levels_from` thresholds from `rules`.

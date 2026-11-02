@@ -6,10 +6,13 @@
 
 use serde::Serialize;
 
-/// The shared landing assessment (docs/scoring.md), crates/assess.
+/// The shared landing assessment before landing-4; a challenge naming it is
+/// graded with `CURRENT`.
 pub const LANDING_3: &str = "landing-3";
+/// The shared landing assessment (docs/scoring.md), crates/assess.
+pub const LANDING_4: &str = "landing-4";
 /// The method every attempt is graded with.
-pub const CURRENT: &str = LANDING_3;
+pub const CURRENT: &str = LANDING_4;
 /// Retired (0.10): its measures changed in code, so it cannot be
 /// reproduced; a challenge naming it is graded with `CURRENT`.
 pub const LANDING_2: &str = "landing-2";

@@ -115,5 +115,5 @@ fn approach_values_of_the_pattern_landing() {
     // Only the flap handle is recorded: no flap angle, no changes.
     assert!(a.config_changes.is_empty());
     assert_eq!(a.threshold, None);
-    assert_eq!((a.crab_deg, a.drift_kt, a.slowed), (None, None, None));
+    assert_eq!((a.crab_deg, a.drift_deg, a.slowed), (None, None, None));
 }

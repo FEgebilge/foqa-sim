@@ -148,7 +148,7 @@ pub struct Approach {
     pub crab_deg: Option<f64>,
     /// Ground speed across the runway over the last second, rightward
     /// positive, kt.
-    pub drift_kt: Option<f64>,
+    pub drift_deg: Option<f64>,
     /// From contact to the first deceleration means in use (reverser,
     /// ground spoilers, brakes, or a deceleration past 0.1 g held 1 s), s;
     /// known to the 1-2 Hz recording rate.
@@ -205,11 +205,13 @@ impl Approach {
                 let magnetic = flight.at("heading.mag", td.t);
                 crab_deg(f, flight.try_at("heading.true", td.t), magnetic)
             }),
-            drift_kt: fix.zip(gs).and_then(|(f, gs)| {
+            drift_deg: fix.and_then(|f| {
                 let a = position(flight, td.t.add_us(-DRIFT_SPAN_US))?;
                 let b = position(flight, td.t)?;
-                (distance_m(a, b) >= DRIFT_MIN_M)
-                    .then(|| gs * (ground_track_deg(a, b) - f.heading_deg).to_radians().sin())
+                (distance_m(a, b) >= DRIFT_MIN_M).then(|| {
+                    let off = (ground_track_deg(a, b) - f.heading_deg).to_radians();
+                    off.sin().asin().to_degrees()
+                })
             }),
             decel_delay_s: decel_delay_s(flight, td.t),
             required_decel_g: fix.zip(gs).and_then(|(f, gs)| {

@@ -1187,6 +1187,11 @@ impl ProfileSet {
         Ok(Self(set))
     }
 
+    /// Every profile, by type designator.
+    pub fn iter(&self) -> impl Iterator<Item = &Profile> {
+        self.0.iter()
+    }
+
     /// The profiles shipped in `profiles/`.
     pub fn shipped() -> Result<Self, ProfileError> {
         Self::load(SHIPPED.iter().copied())

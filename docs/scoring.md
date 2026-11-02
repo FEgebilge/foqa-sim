@@ -1,4 +1,4 @@
-# Landing assessment `landing-3` (design, draft)
+# Landing assessment `landing-4` (design, draft)
 
 One method grades every approach and landing. The same numbers drive the
 debrief's Good / Fair / Poor, the 0–100 challenge score and the
@@ -8,8 +8,8 @@ definition names (`challenge::CURRENT`, 2026-10-30); `landing-1`, the
 first challenge score, is retired and its code removed.
 
 Status: implemented (§7 slices 1-8): profile fields, analyzer values, rule
-set v2, `crates/assess` with `scoring/landing-3.yaml`, the debrief wire
-(`assessment_detail`, [debrief-api.md](debrief-api.md)), `landing-3`
+set v2, `crates/assess` with `scoring/landing-4.yaml`, the debrief wire
+(`assessment_detail`, [debrief-api.md](debrief-api.md)), `landing-4`
 challenges ([challenges.md](challenges.md)), the app's assessment panel
 and the EFB summary. Not yet: go-around approaches assessed on A and B
 (§4; the debrief scores touchdowns only), A7 low thrust, a challenge's own
@@ -161,7 +161,7 @@ T/J bands are split at 500 ft, as S1 does.
 |---|---|---|---|---|---|
 | A1 | IAS − target | `ias` vs Vapp (tol) and Vref (L1+), sustained 3 s | T/J ≥ 500 ft | Vapp±2.5 \| Vapp±5 \| >Vref+20 or <Vref−5 \| >Vref+35 or <Vref−10 \| – | S2 tol, S1 L1/L2 ✔ |
 | | | | T/J < 500 ft | Vapp±2.5 \| Vapp±5 \| – \| >Vref+20 or <Vref−5 \| >Vref+35 or <Vref−10 | S1 SL2B/SL3 ✔ |
-| | | | light | Vapp +5/−2.5 \| +10/−5 \| +15/−7.5 \| +20/−10 \| +30/−15 | S3/S4 ideal/tol ✔; L1–L3 est |
+| | | | light | POH range \| +5/−2.5 past it \| +15/−7.5 \| +20/−10 \| +30/−15 | POH range ✔; S3/S4 tol ✔; L1–L3 est |
 | A2 | Descent rate | `−vs`, sustained 5 s; past 1500 fpm (S1's second threshold) 3 s | T/J ≥ 500 | ≤ ROD₃°+200 \| 1000 \| 1200 \| 1500 \| – | S5/S6 tol ✔, S1 ✔; ideal est |
 | | | ROD₃° = 5.31 × GS kt (**new**, trivial) | T/J < 500 | ≤ ROD₃°+200 \| 1000 \| – \| 1200 \| 1500 | S1 ✔ |
 | | | | light | ≤ ROD₃°+200 \| 1000 \| 1200 \| 1500 \| 2000 | S5 tol ✔; levels est |
@@ -188,9 +188,9 @@ shows it as "Stable from 1000 ft" or "Not stable until 380 ft".
 
 | Id | Measured | How | Class | ideal \| tol \| L1 \| L2 \| L3 | Standard |
 |---|---|---|---|---|---|
-| B1 | Threshold crossing height (TCH) | **new**: wheel height above the threshold (RA, else AAL against the threshold elevation) interpolated at `along_m = 0` on the approach, against the wheel height of the 3° path to the target (C): min(target · tan 3°, 50 ft), an eye/antenna height, less the eye-to-wheel height (the profile's `eye_to_wheel`, else light 6, turboprop 10, jet 15 ft, from the FAA Order 8260.3 height groups, est). Jet: 35 ft; light to 150 m: 20 ft | all | ref +5/−5 \| +15/−10 \| +25/−20 \| +50/−30 \| +100/−40 ft | S8: 50 ft standard, +200 ft per 10 ft ✔; bands est |
-| B2 | Touchdown IAS | `td.ias_kt` (exists, unused) vs Vref | T/J | Vref −2/+3 \| ±5 (+gust) \| +10/−7 \| +15/−10 \| +25/−15 | S9 ≥ Vref−5, Vref−10 tail clearance ✔; L1, L3 est |
-| | | vs Vapp | light | ≤ Vapp−10 \| ≤ Vapp−5 \| > Vapp \| > Vapp+10 \| > Vapp+20 | POH main wheels first ✔; bands est |
+| B1 | Threshold crossing height (TCH) | **new**: wheel height above the threshold (RA, else AAL against the threshold elevation) interpolated at `along_m = 0` on the approach, against the wheel height of the 3° path to the target (C): min(target · tan 3°, 50 ft), an eye/antenna height, less the eye-to-wheel height (the profile's `eye_to_wheel`, else light 6, turboprop 10, jet 15 ft, from the FAA Order 8260.3 height groups, est). Jet: 35 ft; a light aircraft by its aiming point | all | ref +5/−5 \| +15/−10 \| +25/−20 \| +50/−30 \| +100/−40 ft | S8: 50 ft standard, +200 ft per 10 ft ✔; bands est |
+| B2 | Touchdown IAS | `td.ias_kt` (exists, unused) vs Vref | T/J | Vref −2/add−2 \| −5/add (+gust) \| add+5/−7 \| add+10/−10 \| add+20/−15 | S9 ≥ Vref−5, Vref−10 tail clearance ✔; L1, L3 est |
+| | | vs Vapp | light | ≤ Vapp−10 \| ≤ Vapp−5 \| > Vapp or < 1.05 Vs \| > Vapp+10 or < Vs \| > Vapp+20 or < Vs−5 | POH main wheels first, stall (Section 5) ✔; bands est |
 | B3 | Float time | **new**: time from 50 ft above the runway to main-gear contact | T/J | 8 \| 10 \| 12 \| 15 \| 20 s | S7 RE28 measure ✔; S9 flare 4–8 s ✔; bands est |
 | | | | light | 10 \| 12 \| 15 \| 20 \| 25 s | est |
 
@@ -200,11 +200,7 @@ window.
 #### C. Touchdown point (W 20)
 
 `x = fix.along_m − target`. Target: the challenge's `target_m` if set.
-Else T/J use the aiming-point marking (`fix.aiming_point_m`), and light
-aircraft 150 m: the Annex 14 aiming point of runways under 800 m (Vol I
-Table 5-1), the code 1 runways their field length is laid out for. The
-airline aiming point of a long runway (up to 400 m) is no light-aircraft
-target, and its 3° path would cross the threshold at 69 ft. TDZ end =
+Else every class uses the runway's aiming-point marking (`fix.aiming_point_m`, Annex 14 Vol I Table 5-1): what the pilot sees on that runway. TDZ end =
 `fix.tdz_m`.
 
 | Id | Side | Class | ideal \| tol \| L1 \| L2 \| L3 | Standard |
@@ -226,7 +222,7 @@ goes away: outside the TDZ is level 2, not zero.
 | D1 | Centreline offset at touchdown | `fix.cross_m` | all | ½ tol \| ½ main-gear track \| 7.6 m \| 12.2 m \| 18.3 m, or outer main gear within 3 m of the edge | S2 "centreline between the main gear" ✔; L1–L3 = `off-centreline-touchdown` 25/40/60 ft est |
 | D2 | Crab at touchdown | **new**: \|true heading − runway true heading\| at contact | light | 1° \| 3° \| 5° \| 8° \| 12° | S3/S4 "axis aligned" ✔; numbers est |
 | | | | T/J | 2° \| 5° \| 7° \| 10° \| 15° | S9: crab touchdown accepted ✔; numbers est |
-| D3 | Drift at touchdown | **new**: GS · sin(track − runway), track over the 1 s before contact | all | 1 \| 2 \| 4 \| 6 \| 8 kt | S3/S4 "no side drift" ✔; numbers est |
+| D3 | Drift at touchdown | **new**: track − runway, track over the 1 s before contact | all | 1 \| 2 \| 3 \| 4 \| 5° | S3/S4 "no side drift" ✔; numbers est |
 | D4 | Rollout centreline | max \|cross\| from touchdown to 30 kt, the turn-off or the next liftoff (`rollout_cross_m`). A turn-off is a ground track ≥ 15° off the runway at ≤ 50 kt past the TDZ: rapid exits leave at 25–45° and are designed for 50 kt (ICAO Annex 14 Vol I 3.9, Doc 9157 Part 2), so a fast exit is no excursion; a veer-off there cannot be told from an exit without taxiway data | all | ½ track \| 3 m \| 7.6 m \| 12.2 m \| runway exit → cap | S6 RE.7 ✔ (measure); numbers est |
 
 Main-gear track: new profile field `main_gear_track` (with its source).
@@ -240,7 +236,7 @@ Fallbacks, all est: light 2.5 m, turboprop 4 m, jet 6 m.
 | | | | light | 1.3 \| 1.6 \| 1.8 \| 2.2 \| 2.6 g | `hard-landing-light` est |
 | E2 | Sink at touchdown | `td.sink_fpm` (no lower bound: soft is not rewarded, S9 ✔) | T/J | 240 \| 360 \| 360+ \| 480 \| 600 fpm | S10 6 / 10 ft/s ✔; 240 ⚠ Boeing service experience; L2 est |
 | | | | light | 240 \| 300 \| 400 \| 500 \| 700 fpm | est (CS-23 not checked) |
-| E3 | Bounce | next touchdown has `bounce` | all | – \| – \| – \| bounce \| bounce airborne > 2 s or > 5 ft | S7 RE30 count > 1 ✔; L3 est |
+| E3 | Bounce | next touchdown has `bounce`: size, 1 at airborne 2 s or 5 ft | all | 0.25 \| – \| 0.5 \| 1 \| 1.5 | S7 RE30 count > 1 ✔; L3 est |
 | E4 | Pitch at touchdown | tail margin = `tail_contact.landing − td.pitch`; nose-first = pitch < 0° | T/J | – \| margin ≥ 2° \| – \| < 2° or pitch < 0° \| < 1° | `tailstrike-risk-landing` (EOFDM 2° ⚠); nose-first ⚠ EOFDM example |
 | | | | light | – \| ≥ 0° \| – \| < 0° \| – | POH main wheels first ✔; threshold est |
 | E5 | \|Roll\| at touchdown | `td.roll_deg` | T/J | 2° \| 3° \| 4° \| 6° \| 8° | S12 roll ≤ 2° ⚠; 8° ⚠ EOFDM example; rest est |
@@ -255,7 +251,7 @@ so a hard landing is not counted twice.
 |---|---|---|---|---|---|
 | F1 | Deceleration delay | **new**: main-gear contact → first of reverser unlocked (`engN.reverser`), ground spoilers > 50% (`spoiler.handle`), brakes > 30%, or a deceleration (`accel.long`) past 0.1 g held 1 s, which catches autobrake, prop beta and add-on systems the controls do not show (free roll at idle ~0.05 g, est; the hold skips the wheel spin-up at contact) | T/J | 1 \| 2 \| 4 \| 6 \| 10 s | S8: 1 s per action, +200 ft per s beyond 2 s ✔; S9 immediate reverse ✔; L1–L3 est |
 | | | | light | n/a by design (POH: "braking minimum required" ✔) | |
-| F2 | Required deceleration | **new**: a = GS² / (2 · (LDA − along)) at touchdown, in g | all | 0.10 \| 0.15 \| 0.20 \| 0.30 \| 0.40 g | S6 RE.8 formula ✔; bands est |
+| F2 | Required deceleration | **new**: a = GS² / (2 · (LDA − along)) at touchdown, in g | all | 0.15 \| 0.20 \| 0.25 \| 0.35 \| 0.45 g | S6 RE.8 formula ✔; bands est |
 | F3 | Stopped on the runway | **new**: runway remaining when GS ≤ 20 kt (S2 taxi speed ✔) | all | ≥ 0 → ok; overrun or exit → excursion cap | S2 ✔ |
 
 Reversers and brakes are recorded at 1 Hz and spoilers at 2 Hz, so F1 is
@@ -294,7 +290,7 @@ How a finding is scored:
 - **The thresholds have one home.** The L1–L3 anchors of a criterion that
   has a rule (A2 ↔ unstable-sink-500 / high-sink-below-1000, E1 ↔
   hard-landing, D1 ↔ off-centreline-touchdown, …) are taken from that rule,
-  through `levels_from: <rule-id>` in the scoring definition. landing-3 adds
+  through `levels_from: <rule-id>` in the scoring definition. landing-4 adds
   only the ideal and tolerance anchors. As part of this work the rule set
   moves to v2 with thresholds equal to §2.5 (e.g. `unstable-speed-500`
   against Vref, D4S height split as two rules ≥ 500 / < 500 ft).
@@ -304,11 +300,11 @@ How a finding is scored:
   points it cost.
 
 **Relation to today's assessment** (`Assessment::of`: high 4 / medium 2 /
-low 1; Good ≤ 1, Fair ≤ 5, Poor ≥ 6). landing-3 replaces it for every
+low 1; Good ≤ 1, Fair ≤ 5, Poor ≥ 6). landing-4 replaces it for every
 flight with a scoreable landing. The grade bands were chosen to agree with
 it:
 
-| Today | Points | landing-3 | Typical score |
+| Today | Points | landing-4 | Typical score |
 |---|---|---|---|
 | Nothing or one low | 0–1 | One L1 in any domain | 91–97 → Good |
 | Two lows or one medium | 2 | L2 caps the score at 84.9 (§4) | ≤ 84.9 → Fair |
@@ -335,7 +331,7 @@ event that caused it.
 |---|---|---|
 | Any criterion or finding at level ≥ 2 | 84.9 (cannot be Good) | A material FDM event; same as today's grades |
 | **Continued unstable approach**: T/J by the D4S rule (≥ 1 A criterion at SL2B/SL3, i.e. L2/L3 below 500 ft, or ≥ 3 distinct A criteria at L1/L2 above 500 ft, glideslope and localizer counting as one A5) without a go-around; light: any A criterion at L2+ below 300 ft, or ≥ 3 at L1+ | 59 (Poor) | S1 ✔, S5 "go around" ✔; light adaptation est |
-| **Inspection-level contact**: `hard-landing-inspection` (peak g > the manufacturer's `hard_landing_g`, Decision 5; no separate sink cap), or tail margin < 0 (tail strike) | 39 | S10 ✔, S12 ⚠ |
+| **Inspection-level contact**: `hard-landing-inspection` (peak g > the manufacturer's `hard_landing_g`, Decision 5; without one, E1 past its top level; no separate sink cap), or tail margin < 0 (tail strike) | 39 | S10 ✔, S12 ⚠ |
 | **Undershoot**: touchdown before the threshold | 39 | `short-landing` |
 | **Runway excursion or crash**: left the runway sides on the landing roll (D4: before 30 kt or the turn-off), overran (F3), a crash the sim reported in the landing span (`Crashed` / `PlaneCrash`, sent only with crash detection on), or a wing, propeller or nose strike on the ground after the touchdown (`rules::strike`, the measure the live crash detection and the challenge check `ground_strike` use; titled "Crash or ground strike") | 0, outcome shown | S6 RE.7/RE.8; strike limits est |
 
@@ -390,7 +386,7 @@ is no break: the recorder keeps no frames while sim time stands still.
 
 D4S (S1, p. 20 ✔) uses Vref in this order: a recorded Vref; a table by gross
 weight and flap; a table by gross weight at a fixed landing flap.
-landing-3 does the same:
+landing-4 does the same:
 
 1. **Profile table by weight and flap** (new profile field; source
    required, as for every profile value):
@@ -427,14 +423,43 @@ cite a primary document, as `profiles/` already requires.
 
 **Versioning.** `scoring.version` in a challenge file names a method,
 but every attempt is graded with the current one (`challenge::CURRENT`),
-as the debrief is; `score.version` in the attempt says which. landing-3
-is a data file `scoring/landing-3.yaml` (anchors, weights,
+as the debrief is; `score.version` in the attempt says which. landing-4
+is a data file `scoring/landing-4.yaml` (anchors, weights,
 caps, sources) built into `fdm` and checked on load, the way rules are.
 Once a version is published its file never changes; a correction becomes
 `landing-4`. The debrief always uses the newest version and states it
 (`assessment.method`). The challenge server re-scores an uploaded slice
 with the version the challenge names, so the leaderboard is unaffected
 by app updates.
+
+**landing-4** (0.13) replaces it everywhere at once: challenges, boards, the
+app, the EFB and the in-sim panel (decided 2026-11-03). An audit found scores
+that looked complete but were not. A flight below the window's top had no
+approach, so its flap was unknown and its reference speed fell silently to
+1.3 VSO (a C172 graded against 52 kt, not 65-75), and Stability was left out
+without a word.
+
+- **Nothing unmeasured goes unsaid.** A value a landing should have and lacks
+  is listed in `partial`; a ranked attempt then does not count. The flap and
+  the weight are read as landed. A landing left unscored makes the flight's
+  confidence partial.
+- **B2, light:** a floor at the stall (`stall`, `floor`: VSO at this weight,
+  so light weights stall lower). est.
+- **Inspection cap:** without a manufacturer's `hard_landing_g`, E1 past its
+  top level calls for the inspection (light 2.6 g). est.
+- **D3:** an angle, 1/2/3/4/5 deg, so a type's speed does not change the grade.
+  est.
+- **E3:** a size, 1 at airborne 2 s or 5 ft: under 0.25 is no bounce, 0.5 L1,
+  1 L2, 1.5 L3. **E4N:** flat is tolerance, -1 deg L1, -2 deg L2. est.
+- **A1, light:** the POH's whole range is ideal (`add`, its half width).
+- **C1 and B1, light:** the target is the runway's Annex 14 aiming point, not
+  150 m on every runway.
+- **B2, jet and turboprop:** the upper side moves with the wind additive; the
+  same numbers in calm air.
+- **F2:** 0.15/0.20/0.25/0.35/0.45 g. est.
+
+`rules/` tests hold every shipped profile to what it must be (`crates/rules/tests/profiles.rs`), and
+`crates/assess/tests/flight.rs` flies textbook, hard and stall landings.
 
 **landing-2** (0.10) is retired. landing-3 (0.11) keeps its numbers but
 measures differently: peak g at 16 samples/s (E1), a light aircraft's
@@ -443,10 +468,10 @@ that is no excursion (D4), the crash cap, touchdowns on a displaced
 threshold, a held deceleration as a means (F1), the gear checked on every
 light approach, and touchdowns after slew, teleport or reload left out.
 Those changes are code, so landing-2 cannot be reproduced and no longer
-scores: a challenge that names it parses and is graded with landing-3,
+scores: a challenge that names it parses and is graded with landing-4,
 and its attempts say so (`score.version`, `assessment.method`). An attempt
 graded before keeps the method and score it recorded; a site that wants a
-landing-3 board publishes a new challenge version.
+landing-4 board publishes a new challenge version.
 
 **Fairness.**
 
@@ -465,8 +490,7 @@ landing-3 board publishes a new challenge version.
 ### Worked example 1: C172, normal landing
 
 Runway: LDA 1600 m, width 30 m, aiming point 300 m (Annex 14), TDZ 533 m,
-in a challenge whose target is that aiming point (without one a light
-aircraft aims at 150 m, §C).
+in a challenge whose target is that aiming point (the same point without one, §C).
 Flaps full, Vapp 65 kt (S11 60–70 mid), calm. Light bands. Main-gear track
 is the light fallback, half-track 1.25 m.
 
@@ -547,7 +571,7 @@ results.
    domain (load-time), existing rule tests updated, one new test per
    changed threshold.
 4. **Scoring module** (new crate `crates/assess`, used by `debrief` and
-   `challenge`): `scoring/landing-3.yaml` (anchors, `levels_from`,
+   `challenge`): `scoring/landing-4.yaml` (anchors, `levels_from`,
    weights, caps, sources), ℓ interpolation, loss curve, domain max,
    caps, n/a redistribution, confidence, Vref resolution. Tests: the
    anchor/loss tables, each cap, the D4S unstable rule (3 × SL1 versus
@@ -559,11 +583,11 @@ results.
    unit, ell, level, bands, standard }], findings[event ids], sets_by }] }],
    other_findings[], legacy_points }`. Tests: wire snapshot, and the grade
    bands agreeing with today's for single findings (the table in §3).
-6. **Challenge** (`crates/challenge`): `landing-3` accepted by
+6. **Challenge** (`crates/challenge`): `landing-4` accepted by
    `Challenge::parse` (requires a Vref source for the allowed types);
    `evaluate` calls the shared module; check `data`; go-around attempts
    not ranked; boards keyed by scoring class. Tests: landing-1 results
-   unchanged (frozen), landing-3 for the fixtures, parse rejections.
+   unchanged (frozen), landing-4 for the fixtures, parse rejections.
 7. **UI** (`app/src/components/debrief`, `msfs-panel/efb`): the debrief
    header shows score, grade, confidence and any cap banner. The
    assessment panel shows six horizontal domain bars (weight as the track,
@@ -588,7 +612,7 @@ as a competitive sim pilot, Codex) under Ege's standing instruction.
    per-flight debrief and never counts for a ranked challenge; a type with
    no sourced Vref cannot be ranked on speed (n/a, as in §5).
 2. **Touchdown target (2 of 3):** the runway's aiming-point marking by
-   default (a light aircraft's: that of a code 1 runway, 150 m, §C); a challenge may specify another point (ACS "specified point",
+   default; a challenge may specify another point (ACS "specified point",
    e.g. the 1000 ft markers). The resolved target and tolerance are
    published in the challenge and shown before the attempt.
 3. **Flight grade (2 of 3):** the last full-stop landing sets the flight

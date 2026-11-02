@@ -22,30 +22,30 @@ test("flowStep follows the newest attempt", () => {
 });
 
 test("methodOf grades every known method with the current one", () => {
-  assert.equal(methodOf("landing-1"), "landing-3");
-  assert.equal(methodOf("landing-2"), "landing-3");
-  assert.equal(methodOf("landing-3"), "landing-3");
+  assert.equal(methodOf("landing-1"), "landing-4");
+  assert.equal(methodOf("landing-2"), "landing-4");
+  assert.equal(methodOf("landing-4"), "landing-4");
   assert.equal(methodOf("landing-9"), null);
 });
 
-test("partLabel names landing-3's domains and spells out other parts", () => {
-  assert.equal(partLabel("landing-3", "stability"), "approach stability");
+test("partLabel names landing-4's domains and spells out other parts", () => {
+  assert.equal(partLabel("landing-4", "stability"), "approach stability");
   assert.equal(partLabel("landing-1", "sink_rate"), "sink rate");
-  assert.equal(partLabel("landing-3", "something_new"), "something new");
+  assert.equal(partLabel("landing-4", "something_new"), "something new");
 });
 
 test("scoringFact gives the current method's parts, whatever the challenge names", () => {
-  const three = scoringFact("landing-3");
+  const three = scoringFact("landing-4");
   assert.match(three.note, /approach stability 25, threshold and flare energy 10, touchdown point 20/);
   assert.doesNotMatch(three.note, /sink rate|names landing/);
   const one = scoringFact("landing-1");
-  assert.equal(one.value, "landing-3");
-  assert.match(one.note, /The challenge names landing-1; every challenge is graded with the current method, landing-3/);
-  assert.equal(scoringFact("landing-2").value, "landing-3");
+  assert.equal(one.value, "landing-4");
+  assert.match(one.note, /The challenge names landing-1; every challenge is graded with the current method, landing-4/);
+  assert.equal(scoringFact("landing-2").value, "landing-4");
 });
 
 test("scoringFact says when an attempt shared a domain's weight out", () => {
-  const score = { version: "landing-3", total: 80, parts: [{ name: "stability", weight: 27.8, score: 1, value: null, unit: "" }, { name: "point", weight: 22.2, score: 1, value: null, unit: "" }] };
-  assert.match(scoringFact("landing-3", score).note, /Latest attempt: approach stability 27.8, touchdown point 22.2/);
-  assert.doesNotMatch(scoringFact("landing-3").note, /Latest attempt/);
+  const score = { version: "landing-4", total: 80, parts: [{ name: "stability", weight: 27.8, score: 1, value: null, unit: "" }, { name: "point", weight: 22.2, score: 1, value: null, unit: "" }] };
+  assert.match(scoringFact("landing-4", score).note, /Latest attempt: approach stability 27.8, touchdown point 22.2/);
+  assert.doesNotMatch(scoringFact("landing-4").note, /Latest attempt/);
 });
