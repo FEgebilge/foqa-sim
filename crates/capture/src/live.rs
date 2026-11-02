@@ -8,6 +8,7 @@ use sim_link::facility::{AirportFetch, Fetched};
 use sim_link::ils::IlsFetch;
 use sim_link::{Recv, SimConnect};
 
+use crate::hold::{HOLD_VARS, Holding, throttle_set_data, trim_set_data};
 use crate::place::{
     AirportAsks, Ask, Ils, IlsAsks, IlsQuery, KEY_EVENT_BASE, KEY_EVENTS, Start, key_event_id,
 };
@@ -21,10 +22,12 @@ const INIT_DEFINE: u32 = 4;
 const FACTS_DEFINE: u32 = 5;
 const ILS_RUNWAY_DEFINE: u32 = 6;
 const ILS_VOR_DEFINE: u32 = 7;
+const HOLD_DEFINE: u32 = 8;
 const REQUEST: u32 = 1;
 const IDENTITY_REQUEST: u32 = 2;
 const PROBE_REQUEST: u32 = 3;
 const FACTS_REQUEST: u32 = 4;
+const HOLD_REQUEST: u32 = 5;
 /// The identification SimVars, in `AircraftId` field order, then the
 /// category of `SimFacts` (the one text fact).
 const IDENTITY: [&str; 5] = ["TITLE", "ATC MODEL", "ATC TYPE", "ATC ID", "CATEGORY"];
@@ -82,6 +85,8 @@ pub struct LiveSource {
     next_probe: Instant,
     /// Until when frames wait for the sim's first state reply.
     state_by: Option<Instant>,
+    /// The placed start being held for the pilot.
+    holding: Option<Holding>,
 }
 
 impl LiveSource {
@@ -97,6 +102,9 @@ impl LiveSource {
         }
         for (simvar, unit) in SimFacts::SIMVARS {
             sent.insert(sim.add_f64(FACTS_DEFINE, simvar, unit)?, simvar.to_owned());
+        }
+        for (simvar, unit) in HOLD_VARS {
+            sent.insert(sim.add_f64(HOLD_DEFINE, simvar, unit)?, simvar.to_owned());
         }
         for (id, name) in (KEY_EVENT_BASE..).zip(KEY_EVENTS) {
             sent.insert(sim.map_event(id, name)?, format!("key event {name}"));
@@ -125,6 +133,7 @@ impl LiveSource {
             cadence: Cadence::new(acquisition.columns()),
             next_probe: Instant::now(),
             state_by: Some(Instant::now() + STATE_WAIT),
+            holding: None,
         })
     }
 
@@ -173,6 +182,40 @@ impl LiveSource {
             let send_id = self.sim.transmit_event(id, data)?;
             self.sent.insert(send_id, format!("{name} {data}"));
         }
+        self.holding = None;
+        if let Some(until) = start.hold {
+            self.holding = Some(Holding::new(until, Instant::now()));
+            self.sim.request_sim_frames(HOLD_REQUEST, HOLD_DEFINE, 0)?;
+        }
+        Ok(())
+    }
+
+    /// The pilot has the aircraft again, or the flight it was held in ended.
+    fn end_hold(&mut self) -> Result<(), sim_link::Error> {
+        if self.holding.take().is_some() {
+            self.sim.stop_request(HOLD_REQUEST, HOLD_DEFINE)?;
+        }
+        Ok(())
+    }
+
+    /// One frame of a hold under way: sends what it commands.
+    fn follow_hold(&mut self, values: &[f64]) -> Result<(), sim_link::Error> {
+        let Some(holding) = &mut self.holding else {
+            return Ok(());
+        };
+        let Some(out) = holding.follow(values, Instant::now()) else {
+            return self.end_hold();
+        };
+        let commands = [
+            out.lever_pct
+                .map(|l| ("THROTTLE_SET", throttle_set_data(l))),
+            out.trim_pct
+                .map(|t| ("ELEVATOR_TRIM_SET", trim_set_data(t))),
+        ];
+        for (name, data) in commands.into_iter().flatten() {
+            let id = key_event_id(name).expect("a hold sends mapped key events only");
+            self.sim.transmit_event(id, data)?;
+        }
         Ok(())
     }
 
@@ -203,6 +246,13 @@ impl LiveSource {
                 self.identity.facts(&values);
                 None
             }
+            Recv::Data {
+                request_id: HOLD_REQUEST,
+                values,
+            } => {
+                self.follow_hold(&values)?;
+                None
+            }
             Recv::Data { .. } if self.state_by.is_some_and(|t| Instant::now() < t) => None,
             Recv::Data { values, .. } => {
                 self.state_by = None;
@@ -225,7 +275,14 @@ impl LiveSource {
             Recv::Event { id, data } => system_event(id, data, ""),
             Recv::EventFilename { id, file } => system_event(id, 0, &file),
             Recv::Flow { event, .. } => {
-                FlowEvent::from_code(event).map(|f| Telemetry::Event(SimEvent::Flow(f)))
+                let flow = FlowEvent::from_code(event);
+                if matches!(
+                    flow,
+                    Some(FlowEvent::FlightEnd | FlowEvent::BackToMainMenu | FlowEvent::FltLoad)
+                ) {
+                    self.end_hold()?;
+                }
+                flow.map(|f| Telemetry::Event(SimEvent::Flow(f)))
             }
             Recv::Facility(reply) => {
                 self.ils.feed(reply.clone());

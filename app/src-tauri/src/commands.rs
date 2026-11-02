@@ -16,8 +16,8 @@ use ::debrief::{
     TrendFilter, Trends,
 };
 use capture::{
-    ASK_TIMEOUT, Ils, Impact, InitPosition, PreflightLine, RELOAD_TIMEOUT, Settled, SimRequests,
-    SiteStrip, Start, Stopper, Strike, Views,
+    ASK_TIMEOUT, HoldUntil, Ils, Impact, InitPosition, PreflightLine, RELOAD_TIMEOUT, Settled,
+    SimRequests, SiteStrip, Start, Stopper, Strike, Views,
 };
 use challenge::{Attempt, Begin, Challenge, Mode, StartState};
 use recorder::{AttemptMarker, AttemptPhase};
@@ -406,6 +406,14 @@ impl Shared {
             on_ground: 0,
             airspeed_kt: s.ias_kt.round() as u32,
         };
+        let hold = challenge
+            .gate_fix(&airport)
+            .map(|(lat, lon, gate_m)| HoldUntil {
+                ias_kt: s.ias_kt,
+                threshold_lat_deg: lat,
+                threshold_lon_deg: lon,
+                gate_m,
+            });
         let start = Start {
             pos,
             gear_down: challenge.start.gear_down,
@@ -415,6 +423,7 @@ impl Shared {
                 .ok()
                 .and_then(|i| i.as_ref())
                 .map(|i| i.frequency_hz),
+            hold,
         };
         let flight_id = answer(self.sim.place(start))?;
         let placed = Placed {
@@ -476,7 +485,15 @@ impl Shared {
             None => (aircraft_line(c, None), None, None),
         };
         let conditions = &c.conditions;
-        let weather = if conditions.wind.is_none()
+        let weather = if let Some(sky) = conditions.weather {
+            let at = conditions.time.as_ref().map_or(String::new(), |t| {
+                format!(", {} local on {}", t.local, t.date)
+            });
+            Line::ok(
+                "weather",
+                format!("The challenge sets the sim's weather: {}{at}.", sky.name()),
+            )
+        } else if conditions.wind.is_none()
             && conditions.crosswind_kt.is_none()
             && conditions.tailwind_kt.is_none()
         {
@@ -605,7 +622,7 @@ impl Shared {
         self.place(c)?;
         answer(self.sim.save(&path))?;
         self.clean_starts.written(&path, SAVE_WRITTEN)?;
-        self.clean_starts.saved(&path, icao)?;
+        self.clean_starts.saved(&path, icao, c)?;
         Ok(icao)
     }
 

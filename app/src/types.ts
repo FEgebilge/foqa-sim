@@ -631,6 +631,8 @@ export interface ChallengeDefinition {
     crosswind_kt?: Band;
     tailwind_kt?: Band;
     preset?: string;
+    weather?: string;
+    time?: { date: string; local: string };
   };
   rules?: { ap_off_by_height_ft?: number; stop_on_runway?: boolean };
   scoring: { version: string };

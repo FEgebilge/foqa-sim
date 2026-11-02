@@ -196,6 +196,8 @@ function facts(d: ChallengeDefinition, attempts: AttemptView[]): { label: string
     { label: "Gate", value: `${d.gate.distance_nm} NM`, note: "Grading starts here, so settling after the start never counts." },
     { label: "Aircraft", value: types.length ? types.join(" or ") : classes.length ? classes.map((c) => `${c[0]!.toUpperCase()}${c.slice(1)}`).join(" or ") : "Any", note: types.length && classes.length ? `${classes.join(" or ")} class` : undefined },
   ];
+  if (conditions.weather) list.push({ label: "Weather", value: conditions.weather, note: "Set in the sim for every attempt" });
+  if (conditions.time) list.push({ label: "Time", value: `${conditions.time.local} local`, note: `On ${conditions.time.date}, at the airport` });
   if (conditions.wind) {
     const w = conditions.wind;
     list.push({ label: "Wind", value: `${pad3(w.from_deg)}° ${w.speed_kt} kt`, note: `±${w.tolerance_deg}°, ±${w.tolerance_kt} kt, mean from the gate to touchdown` });

@@ -396,10 +396,12 @@ the move undoes it. The reload is therefore settled at `RTC_END` after the
 load (`ReloadWait`, `crates/capture/src/place.rs`).
 
 **Fallback:** without that move (MSFS 2020 sends no flow events; another
-flow may not move the aircraft) the reload is settled 15 s after the last
-`SimStart` after the load (`QUIET_AFTER`; the move starts about 10 s
-after it), and the log says `Reloaded in … s, the sim did not move it to
-the runway`. Nothing loaded within `RELOAD_TIMEOUT` (30 s), a move that
+flow may not move the aircraft) the reload is settled 45 s after the sim's
+last event since the load's `SimStart` (`QUIET_AFTER`; the move starts 9 to
+20.4 s after it, the most with scenery far away, bench 2026-11-02: 15 s here
+placed a start 0.7 s before the move undid it), and the log says
+`Reloaded in … s, the sim did not move it to the runway`. Nothing loaded
+within `RELOAD_TIMEOUT` (90 s), a move that
 never ends, or a return to the main menu is a failed reload: the start is
 placed as is in the flight recording then, or fails if there is none.
 
@@ -427,8 +429,11 @@ traffic: the saved file gets `[AirTraffic] Status=0`, as the sim's own live
 events and mission templates have (not their `[TrafficManager] disable=True`:
 with it the sim never ended its move to the runway after a load, bench
 2026-10-31) (2026-10-30: an airliner crossed a final and its wake upset the
-approach). The first attempt takes the reload's 15 s too. A reload that
-does not settle within 60 s places nothing (the sim would move the aircraft
+approach). The saved `[Departure]` becomes the challenge's airport and runway:
+the sim saves the runway the flight began on and moves the aircraft there after
+a load, so a challenge at another airport went back there (bench 2026-11-02).
+The first attempt takes the reload's 15 to 30 s too. A reload that
+does not settle within 90 s places nothing (the sim would move the aircraft
 back to the runway when it ends): the attempt asks for Fly again. Not yet verified
 in the sim: that these sections turn the traffic off.
 
@@ -471,6 +476,28 @@ the strike at 201.5 s, the check failed for a definition naming
 landing-1 or landing-3, the score held at 0. Still to check live: that a real ground loop or
 nose-over is told within half a second, and that hard but normal crosswind
 landings (wing low at contact, up to 10° in a light aircraft) never are.
+
+**A start holds itself until the pilot takes it** (`crates/capture/src/hold.rs`):
+a placement sets the speed and attitude but not the thrust and trim that keep
+them (bench 2026-11-02: lever 60%, the nose up 8 degrees in 3 s, the speed
+gone). From the placement the app sends `THROTTLE_SET` to hold `start.ias_kt`
+and `ELEVATOR_TRIM_SET` to hold level flight. The lever is the pilot's once it
+moves off what was commanded; the trim once the yoke or the trim moves, or
+the bank passes 15 degrees (nobody is keeping the wings level). Both end at
+the gate at the latest, so all that is scored is flown by hand. A start the
+aircraft cannot hold (100 kt with full flap in a C172: 70 kt at full throttle)
+stays at full throttle and level, below its speed. Every start also sets the
+mixture full rich and the trim to 10% nose up, not as the pilot last left them.
+Tune and check with
+`foqa-hold-lab`. Only the C172 has been flown with it so far.
+
+**Sky and clock:** `conditions.weather` (`clear`, `few`, `scattered`, `broken`,
+`high`, `overcast`, `rain`, `storm`, `snow`) and `conditions.time`
+(`{"date":"2026-07-15","local":"18:30"}`, local at the airport) go into the
+clean start, so every attempt loads them. With `weather` the sim gets a weather
+file of ours (`app/src-tauri/src/weather_file.rs`) with `conditions.wind` as its
+wind: the sim's presets all blow from 270. Bench 2026-11-02: wind read back
+040/12 at 2500 ft, 040/6 on the ground; Hours are local with `UseZuluTime=False`.
 
 **The reload still takes about 15 s** (bench 2026-10-30: 15.4 s), most of
 it the sim's own move to the runway: a saved free flight says

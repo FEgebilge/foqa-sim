@@ -8,6 +8,7 @@
 
 mod discard;
 mod history;
+mod hold;
 mod live;
 mod monitor;
 mod panel;
@@ -28,6 +29,7 @@ use recorder::{Acquisition, AttemptMarker, Column, RawWriter, Recorder, SimEvent
 
 use discard::Usage;
 pub use discard::{Discard, MENU_POSITION, MENU_TOLERANCE_DEG, MIN_FLIGHT_S, backlog, recover};
+pub use hold::HoldUntil;
 pub use live::LiveSource;
 pub use monitor::Impact;
 pub use place::{
@@ -157,7 +159,7 @@ const OWN_TELEPORT: Duration = Duration::from_secs(10);
 /// second drains the frames of the old position already on their way.
 /// It costs at most this much of the approach's start, never a frame of
 /// where the aircraft was.
-const PLACE_SETTLE: Duration = Duration::from_secs(1);
+pub(crate) const PLACE_SETTLE: Duration = Duration::from_secs(1);
 /// How often the open flight's journal is flushed to its file, about what
 /// a killed process loses (the raw capture makes the same trade, `raw.rs`):
 /// one write a second instead of one each frame. Events are flushed at
@@ -907,6 +909,7 @@ mod tests {
             gear_down: true,
             flaps: None,
             nav1_hz: None,
+            hold: None,
         };
         // On the runway for 30 s, placed, a frame of the old position still
         // on its way, the sim's teleport, then the start.
