@@ -224,6 +224,22 @@ impl Challenge {
                 .map(|t| (t, r.elevation_m))
         })
     }
+
+    /// Why `start_state` found no start at `airport`, with the runways the
+    /// sim has there: its scenery is what counts, and a new parallel runway
+    /// renames the old one (LTFJ 06 became 06L).
+    pub fn no_runway(&self, airport: &Airport) -> String {
+        let mut names: Vec<String> = (airport.runways.iter())
+            .flat_map(|r| analyzer::thresholds(r, airport.magvar_deg))
+            .map(|t| t.runway)
+            .collect();
+        names.sort();
+        let (icao, runway) = (&self.airport, &self.runway);
+        match names.join(", ") {
+            none if none.is_empty() => format!("{icao} has no runway {runway} in the sim"),
+            names => format!("{icao} has no runway {runway} in the sim, only {names}"),
+        }
+    }
 }
 
 /// `06`, `27L`: two digits 01 to 36 and an optional L, C or R. `get`, not
@@ -325,6 +341,10 @@ mod tests {
         let mut other = c.clone();
         other.runway = "09".into();
         assert_eq!(start_state(&other, &airport()), None);
+        assert_eq!(
+            other.no_runway(&airport()),
+            "TEST has no runway 09 in the sim, only 02, 20"
+        );
     }
 
     #[test]

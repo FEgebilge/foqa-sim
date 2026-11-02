@@ -393,7 +393,7 @@ impl Shared {
         }
         let airport = answer(self.sim.airport(&challenge.airport))?;
         let s = challenge::start_state(challenge, &airport)
-            .ok_or_else(|| format!("{} has no runway {}", challenge.airport, challenge.runway))?;
+            .ok_or_else(|| challenge.no_runway(&airport))?;
         // Without its ILS the start still goes ahead, NAV1 as the pilot left it.
         let ils = answer(self.sim.ils(&challenge.airport, &challenge.runway));
         let pos = InitPosition {
