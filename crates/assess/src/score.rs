@@ -400,9 +400,15 @@ impl Method {
             .iter()
             .find(|f| f.rule == "hard-landing-inspection");
         let tail_strike = scored.iter().find(|(_, c)| c.id == "E4" && c.value < 0.0);
+        // Without the manufacturer's limit: the class's top level.
+        let over_class = scored
+            .iter()
+            .find(|(_, c)| c.id == "E1" && c.ell >= 3.0)
+            .filter(|_| m.context.hard_g.is_none());
         let inspect = inspection
             .map(|f| f.title.clone())
-            .or_else(|| tail_strike.map(|_| "Tail strike at touchdown".into()));
+            .or_else(|| tail_strike.map(|_| "Tail strike at touchdown".into()))
+            .or_else(|| over_class.map(|(_, c)| self.item(c, split)));
         if let Some(cause) = inspect {
             let why = format!("{cause} calls for an inspection, which holds this landing");
             let title = "Touchdown severe enough to need an inspection";

@@ -14,7 +14,7 @@ use rules::{Aircraft, ProfileSet};
 use serde::{Deserialize, Serialize};
 
 pub use attempt::{Attempt, Begin, Check, Flown, Marker, aircraft_check, evaluate, evaluate_after};
-pub use score::{CURRENT, LANDING_1, LANDING_2, LANDING_3, Part, Score};
+pub use score::{CURRENT, LANDING_1, LANDING_2, LANDING_3, LANDING_4, Part, Score};
 
 const M_PER_NM: f64 = 1852.0;
 const FT_PER_M: f64 = 1.0 / 0.3048;
@@ -256,22 +256,22 @@ impl Challenge {
         }
         match c.scoring.version.as_str() {
             // Graded with `CURRENT` all the same; only a definition naming
-            // landing-2 or landing-3 was written for it, so only theirs must
+            // landing-2 or landing-4 was written for it, so only theirs must
             // name types with a Vref source (a landing-1 file still loads).
             LANDING_1 => {}
-            LANDING_3 | LANDING_2 => c.ranked_on_speed()?,
+            LANDING_4 | LANDING_3 | LANDING_2 => c.ranked_on_speed()?,
             other => return Err(format!("unknown scoring `{other}`")),
         }
         Ok(c)
     }
 
-    /// landing-3 ranks on the approach speed, so every type allowed needs
+    /// landing-4 ranks on the approach speed, so every type allowed needs
     /// a Vref source in its profile: never the pilot's selected speed
     /// (docs/scoring.md §5, Decision 1).
     fn ranked_on_speed(&self) -> Result<(), String> {
         let types = &self.aircraft.types;
         if types.is_empty() {
-            return Err("landing-3 needs `aircraft.types`, each with a Vref source".into());
+            return Err("landing-4 needs `aircraft.types`, each with a Vref source".into());
         }
         let profiles = ProfileSet::shipped().map_err(|e| e.to_string())?;
         let lacking: Vec<&str> = types
@@ -287,7 +287,7 @@ impl Challenge {
         match lacking[..] {
             [] => Ok(()),
             _ => Err(format!(
-                "no Vref source for {}: landing-3 cannot rank it",
+                "no Vref source for {}: landing-4 cannot rank it",
                 lacking.join(", ")
             )),
         }

@@ -22,11 +22,12 @@ vlo: { value: 235 kt, source: *ng, note: "retract 235 kt, extend 270 kt; lower v
 max_crosswind: { value: 33 kt, source: "Boeing 737 FCTM max demonstrated crosswind (dry runway, 10 m wind), from memory", approximate: true, note: "demonstrated value, not a limitation; not re-verified online" }
 max_tailwind: { value: 15 kt, source: "EASA TCDS IM.A.120 Issue 29 (shared with FAA TCDS A16WE), https://www.easa.europa.eu/en/downloads/7297/en", note: "TCDS 'Max takeoff and landing tailwind 15 knots'; EASA operational approval only up to 10 kt without further approval" }
 vref:
-  source: "Boeing, Aerodrome Reference Code and Approach Speeds, Rev A, table row 737-800: approach speed 142 kt, MLW 66,361 kg, https://www.boeing.com/content/dam/boeing/v2/airports/faq/arcandapproachspeeds.pdf"
-  approximate: true
-  note: "published value is the ICAO threshold speed at maximum landing weight and the maximum certificated landing flap; lighter weights scaled by sqrt(W/MLW) (Vref is 1.3 Vs and Vs goes with sqrt(W) at constant CL max); other landing flaps read a few kt higher, not published"
+  source: "Boeing 737-800 QRH (FCOM vol. 1), Performance Inflight, 737-800/CFM56-7B27 JAA, p. PI-QRH.10.4 VREF, July 17 2009, https://allafricanairways.com/wp-content/uploads/2023/07/737-800-Quick-Reference-Handbook-QRH-1.pdf"
+  note: "agrees with Boeing's Aerodrome Reference Code table, 142 kt at MLW 66,361 kg; a winglet variant's table on p. PI-QRH.20.4 is 1-2 kt lower"
   flaps:
-    - { flap: 40 deg, weights_kg: [43100, 49800, 56400, 66361], ias: [114 kt, 123 kt, 131 kt, 142 kt] }
+    - { flap: 15 deg, weights_kg: [40000, 45000, 50000, 55000, 60000, 65000, 70000, 75000, 80000, 85000], ias: [121 kt, 128 kt, 136 kt, 143 kt, 149 kt, 156 kt, 161 kt, 167 kt, 172 kt, 177 kt] }
+    - { flap: 30 deg, weights_kg: [40000, 45000, 50000, 55000, 60000, 65000, 70000, 75000, 80000, 85000], ias: [115 kt, 122 kt, 129 kt, 136 kt, 142 kt, 148 kt, 153 kt, 158 kt, 163 kt, 168 kt] }
+    - { flap: 40 deg, weights_kg: [40000, 45000, 50000, 55000, 60000, 65000, 70000, 75000, 80000, 85000], ias: [108 kt, 115 kt, 122 kt, 128 kt, 135 kt, 141 kt, 146 kt, 151 kt, 155 kt, 160 kt] }
 flaps:
   - { up_to: 5 deg, vfe: { value: 250 kt, source: *ng, note: "flaps 1, 2, 5" } }
   - { up_to: 10 deg, vfe: { value: 210 kt, source: *ng, note: "flaps 10" } }

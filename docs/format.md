@@ -335,7 +335,7 @@ stale file is rebuilt from the flights, and it can be deleted at any time.
 ```
 
 - `station`: hash of the rule set, the type profiles, the landing
-  assessment method (`scoring/landing-3.yaml`) and the analysis source
+  assessment method (`scoring/landing-4.yaml`) and the analysis source
   (`crates/debrief/build.rs`). Any change drops every entry, so new rules,
   bands or code regrade every flight.
 

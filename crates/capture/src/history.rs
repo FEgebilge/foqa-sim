@@ -332,7 +332,7 @@ struct CompactFlight {
     #[serde(flatten)]
     item: FlightItem,
     profile: String,
-    /// `landing-3`, or `points` without a scored landing.
+    /// `landing-4`, or `points` without a scored landing.
     method: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     score: Option<f64>,
@@ -664,8 +664,9 @@ mod tests {
             identity("B738"),
             SimEvent::Airport(runway_behind_touchdown(400.0)),
         ];
-        let (flight, _) = fly_to(&events, AIRLINER_LB, TD_S + ROLLOUT_S, |t| {
-            landing(t, TD_S, 1.6)
+        let (flight, _) = fly_to(&events, AIRLINER_LB, TD_S + ROLLOUT_S, |t| testkit::Pt {
+            flaps: 40.0,
+            ..landing(t, TD_S, 1.6)
         });
         let station = Station::core().unwrap();
         let debrief = station.analyse("f".into(), flight).unwrap().debrief();
@@ -681,7 +682,7 @@ mod tests {
         assert_eq!((mini[5].1, mini[5].3), (None, 0.0));
         let doc = serde_json::to_string(&CompactDebrief::from(debrief)).unwrap();
         let f = &serde_json::from_str::<Value>(&doc).unwrap()["flight"];
-        assert_eq!(f["method"], "landing-3");
+        assert_eq!(f["method"], "landing-4");
         assert!(f["score"].as_f64().is_some_and(|s| s > 0.0 && s <= 100.0));
         let bars = f["bars"].as_array().unwrap();
         assert_eq!(bars.len(), 6);

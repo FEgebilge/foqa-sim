@@ -1,4 +1,4 @@
-//! The landing-3 score from given measures: the worked examples of
+//! The landing-4 score from given measures: the worked examples of
 //! docs/scoring.md §6 as golden tests, the caps, the Data4Safety unstable
 //! rule, n/a redistribution and the flight grade.
 
@@ -8,7 +8,7 @@ use rules::{Domain, Level, RefSpeeds, ScoringClass};
 const FT_PER_M: f64 = 1.0 / 0.3048;
 
 fn method() -> Method {
-    Method::landing_3().unwrap_or_else(|e| panic!("{e}"))
+    Method::landing_4().unwrap_or_else(|e| panic!("{e}"))
 }
 
 fn scalar(id: &str, height: Height, x: f64) -> (String, Value) {
@@ -39,6 +39,7 @@ fn runway(target_m: f64, tdz_m: f64, lda_m: f64, width_m: f64, track_ft: f64) ->
         width_ft: Some(width_m * FT_PER_M),
         track_ft: Some(track_ft),
         hard_g: None,
+        ..Context::default()
     }
 }
 
@@ -274,6 +275,86 @@ fn n_a_domains_redistribute_their_weight() {
     assert_eq!(m.score(&partial).confidence, Confidence::Partial);
 }
 
+/// One more value on worked example 1, and its grade on the scale.
+fn with_value(id: &str, x: f64) -> LandingScore {
+    let mut m = example_1();
+    m.values.push(scalar(id, Height::All, x));
+    method().score(&m)
+}
+
+fn ell(s: &LandingScore, id: &str) -> f64 {
+    s.domains
+        .iter()
+        .flat_map(|d| &d.criteria)
+        .find(|c| c.id == id)
+        .unwrap()
+        .ell
+}
+
+/// landing-4: a light aircraft's touchdown has a floor at the stall, with
+/// no floor where the profile gives no stalling speed.
+#[test]
+fn a_touchdown_near_the_stall_loses_and_none_above_it_does() {
+    let at = |x: f64, stall: Option<f64>| {
+        let mut m = example_1();
+        m.context.stall_kt = stall;
+        m.context.floor_kt = stall.map(|s| s + 2.0);
+        m.values.push(scalar("B2", Height::All, x));
+        method().score(&m)
+    };
+    // Reference 65 kt, stall 40 kt: -25 kt, floor -23 kt.
+    assert_eq!(ell(&at(-15.0, Some(-25.0)), "B2"), 0.0, "50 kt");
+    assert_eq!(ell(&at(-23.0, Some(-25.0)), "B2"), 1.0, "at the floor");
+    assert_eq!(ell(&at(-25.0, Some(-25.0)), "B2"), 2.0, "at the stall");
+    assert_eq!(ell(&at(-30.0, Some(-25.0)), "B2"), 3.0, "5 kt under it");
+    assert_eq!(ell(&at(-40.0, None), "B2"), 0.0, "no stalling speed");
+}
+
+/// landing-4: without the manufacturer's limit the class's top level is what
+/// calls for an inspection.
+#[test]
+fn a_touchdown_past_the_class_limit_is_capped_without_a_published_limit() {
+    let inspected = |s: &LandingScore| s.caps.iter().any(|c| c.kind == CapKind::Inspection);
+    let mut hard = example_1();
+    hard.values.retain(|(id, _)| id != "E1");
+    hard.values.push(scalar("E1", Height::All, 2.69));
+    let s = method().score(&hard);
+    assert!(inspected(&s), "{:?}", s.caps);
+    assert!(s.score <= 39.0, "{}", s.score);
+    let mut firm = example_1();
+    firm.values.retain(|(id, _)| id != "E1");
+    firm.values.push(scalar("E1", Height::All, 2.5));
+    assert!(!inspected(&method().score(&firm)));
+    // A published limit decides instead.
+    hard.context.hard_g = Some(3.0);
+    assert!(!inspected(&method().score(&hard)));
+}
+
+/// landing-4: grace, then in proportion: no jump at the first sign of it.
+#[test]
+fn small_bounces_and_a_level_nose_are_not_material() {
+    assert_eq!(ell(&with_value("E3", 0.0), "E3"), 0.0, "no bounce");
+    assert_eq!(ell(&with_value("E3", 0.2), "E3"), 0.0, "a skip");
+    assert_eq!(ell(&with_value("E3", 0.5), "E3"), 1.0);
+    assert_eq!(ell(&with_value("E3", 1.0), "E3"), 2.0, "2 s or 5 ft");
+    assert_eq!(
+        ell(&with_value("E4N", 2.0), "E4N"),
+        0.0,
+        "main wheels first"
+    );
+    assert_eq!(ell(&with_value("E4N", 0.0), "E4N"), 0.5, "flat");
+    assert_eq!(ell(&with_value("E4N", -1.0), "E4N"), 1.0);
+    assert_eq!(ell(&with_value("E4N", -2.0), "E4N"), 2.0, "nose first");
+}
+
+/// landing-4: drift is an angle, so speed does not change its grade.
+#[test]
+fn drift_is_graded_as_an_angle() {
+    assert_eq!(ell(&with_value("D3", 1.0), "D3"), 0.0);
+    assert_eq!(ell(&with_value("D3", 3.0), "D3"), 1.0);
+    assert_eq!(ell(&with_value("D3", 5.0), "D3"), 3.0);
+}
+
 #[test]
 fn a_series_is_graded_by_its_sustained_worst_and_gives_the_stable_height() {
     let m = method();
@@ -389,7 +470,7 @@ fn reference_speeds_follow_the_vref_sources() {
 #[test]
 fn a_method_is_checked_when_loaded() {
     let rules = rules::load(include_str!("../../../rules/core.yaml")).unwrap();
-    let yaml = include_str!("../../../scoring/landing-3.yaml");
+    let yaml = include_str!("../../../scoring/landing-4.yaml");
     let err = |from: &str, to: &str| {
         Method::load(&yaml.replace(from, to), &rules)
             .unwrap_err()

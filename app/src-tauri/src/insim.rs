@@ -546,7 +546,7 @@ mod tests {
         );
         assert_eq!(
             lines.last().unwrap(),
-            "Scoring: landing-3 (the challenge names landing-1). Source: File."
+            "Scoring: landing-4 (the challenge names landing-1). Source: File."
         );
     }
 }
