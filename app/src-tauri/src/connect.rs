@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use ::connect::api::Error;
+use ::connect::api::{ChallengeEntry, Error};
 use ::connect::copy::{self, Ctx};
 use ::connect::deeplink::{self, Consent, Gate, Link, Pending};
 use ::connect::http::Http;
@@ -423,9 +423,7 @@ impl Connect {
         let host = site.origin.host();
         let session = self.sites.session(origin).ok_or("no site")?;
         let entries = session.challenges().map_err(|e| plain(&e, &site))?;
-        let entry = entries
-            .into_iter()
-            .find(|e| e.id == id)
+        let entry = linked_entry(entries, id, version)
             .ok_or_else(|| format!("This challenge is no longer on {host}."))?;
         if let Some(why) = version_mismatch(host, version, entry.version) {
             return Err(why);
@@ -507,6 +505,20 @@ fn policy(dev: bool) -> Policy {
 fn foreign(sites: &Sites, link: &Link) -> Option<String> {
     (!sites.allows(link.site()))
         .then(|| format!("FOQA-Sim opens challenge links from {BUILT_IN_NAME} only."))
+}
+
+/// The entry a link asks for: its version, else the first of that id, the
+/// live one (an admin's list has drafts after it), to say why it can't open.
+fn linked_entry(
+    entries: Vec<ChallengeEntry>,
+    id: &str,
+    version: Option<u32>,
+) -> Option<ChallengeEntry> {
+    let mut of_id: Vec<_> = entries.into_iter().filter(|e| e.id == id).collect();
+    let at = of_id
+        .iter()
+        .position(|e| version.is_none_or(|v| e.version == v));
+    (!of_id.is_empty()).then(|| of_id.swap_remove(at.unwrap_or(0)))
 }
 
 /// Why a link's challenge version can't open: the site has another one.
@@ -870,6 +882,23 @@ pub fn attempt_upload(id: Option<String>, c: Connected<'_>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_link_opens_its_version_and_otherwise_the_live_one() {
+        let entries = || -> Vec<ChallengeEntry> {
+            serde_json::from_str(
+                r#"[{"id":"a","version":1,"title":"","state":"open","definition_sha256":"","definition":{}},
+                    {"id":"a","version":2,"title":"","state":"open","definition_sha256":"","definition":{}},
+                    {"id":"b","version":1,"title":"","state":"open","definition_sha256":"","definition":{}}]"#,
+            )
+            .unwrap()
+        };
+        let version = |v| linked_entry(entries(), "a", v).map(|e| e.version);
+        assert_eq!(version(Some(2)), Some(2), "a draft's test flight link");
+        assert_eq!(version(None), Some(1), "no version: the live one, first");
+        assert_eq!(version(Some(9)), Some(1), "said to be another version");
+        assert!(linked_entry(entries(), "c", None).is_none());
+    }
 
     #[test]
     fn a_link_for_another_version_is_refused_with_why() {
