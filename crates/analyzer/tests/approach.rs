@@ -39,7 +39,7 @@ fn a_stable_landing_has_the_values_of_its_script() {
     let c = a.threshold.as_ref().unwrap();
     assert!(near(c.height_ft, 41.9, 1.0), "{c:?}");
     assert_eq!((c.ias_kt, c.gs_kt), (140.0, 140.0));
-    assert!(near(a.crab_deg.unwrap(), 0.0, 0.01) && near(a.drift_kt.unwrap(), 0.0, 0.1));
+    assert!(near(a.crab_deg.unwrap(), 0.0, 0.01) && near(a.drift_deg.unwrap(), 0.0, 0.05));
     // 140 kt with 2600 m left: 72.0² / 5200 m/s², 0.102 g.
     assert!(near(a.required_decel_g.unwrap(), 0.1017, 0.002));
     assert!(a.rollout_cross_m.unwrap() < 1.0, "{:?}", a.rollout_cross_m);
@@ -58,7 +58,7 @@ fn crab_and_drift_come_from_heading_and_track() {
     });
     assert!(near(a.crab_deg.unwrap(), 5.0, 0.01), "{:?}", a.crab_deg);
     // 140 kt at 2 deg to the runway: 4.9 kt to the right.
-    assert!(near(a.drift_kt.unwrap(), 4.89, 0.2), "{:?}", a.drift_kt);
+    assert!(near(a.drift_deg.unwrap(), 2.0, 0.1), "{:?}", a.drift_deg);
 }
 
 #[test]

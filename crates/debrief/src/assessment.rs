@@ -1,4 +1,4 @@
-//! The flight's landing-3 assessment (docs/scoring.md): every landing
+//! The flight's landing-4 assessment (docs/scoring.md): every landing
 //! scored by `assess`, its findings pointing at `Debrief.events`, the
 //! flight graded by its last full-stop landing (Decision 3) and the rest of
 //! the flight. A flight without a scored landing keeps the points method.
@@ -105,7 +105,13 @@ impl Analysis<'_> {
         detail.method = method.name.clone();
         detail.score = Some(flight.score);
         detail.grade = flight.grade.into();
-        detail.confidence = Some(grading.confidence.into());
+        // A landing left unscored can't be vouched for by another one.
+        let unscored = scores.iter().any(Option::is_none);
+        detail.confidence = Some(if unscored {
+            assess::Confidence::Partial.into()
+        } else {
+            grading.confidence.into()
+        });
         detail.graded_by = Some(index);
         detail
     }
@@ -269,7 +275,7 @@ fn set_by_text(d: &DomainAssessment, events: &[Event]) -> Option<String> {
 fn partial_note(landings: &[LandingAssessment]) -> Option<String> {
     let items: Vec<&str> = landings
         .iter()
-        .flat_map(|l| &l.partial)
+        .flat_map(|l| l.partial.iter().chain(&l.note))
         .map(String::as_str)
         .collect();
     (!items.is_empty()).then(|| {

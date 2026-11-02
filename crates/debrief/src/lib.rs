@@ -185,7 +185,7 @@ pub fn delete_flight(dir: &Path, id: &str) -> io::Result<usize> {
 pub struct Station {
     rules: Vec<Rule>,
     profiles: ProfileSet,
-    /// The landing assessment (`scoring/landing-3.yaml`).
+    /// The landing assessment (`scoring/landing-4.yaml`).
     method: Method,
     /// Hash of the rules, the profiles, the scoring method and the analysis
     /// code (`build.rs`): a summary made by another station is stale.
@@ -195,7 +195,7 @@ pub struct Station {
 impl Station {
     pub fn new(rules: Vec<Rule>) -> Result<Self, Error> {
         let profiles = ProfileSet::shipped()?;
-        let method = Method::landing_3()?;
+        let method = Method::landing_4()?;
         let mut h = DefaultHasher::new();
         format!("{rules:?}{profiles:?}{method:?}{}", env!("SOURCE_HASH")).hash(&mut h);
         Ok(Self {

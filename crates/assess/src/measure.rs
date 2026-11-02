@@ -21,11 +21,6 @@ const ROD3_FPM_PER_KT: f64 = 5.31;
 const TCH_FT: f64 = 50.0;
 /// The glidepath to the touchdown target: 3 deg (ICAO PANS-OPS, S8).
 const GLIDEPATH_DEG: f64 = 3.0;
-/// A light aircraft aims at the Annex 14 aiming point of runways under
-/// 800 m (Vol I Table 5-1, 150 m), the code 1 runways its field length is
-/// laid out for, on any runway: the airline aiming point (up to 400 m) of a
-/// long runway is no touchdown target for it.
-const LIGHT_AIM_M: f64 = 150.0;
 /// A longer stretch without data in the window makes the score partial.
 const MAX_GAP_US: i64 = 1_500_000;
 /// Gear counts as down from here, %.
@@ -55,6 +50,11 @@ pub struct Landing<'a> {
     /// aiming point.
     pub target_m: Option<f64>,
 }
+
+/// The touchdown speed floor over the stall.
+const FLOOR_OVER_STALL: f64 = 1.05;
+/// A selected speed below this is no IAS (a Mach number, an unset bug).
+const MIN_SELECTED_KT: f64 = 30.0;
 
 /// Where the reference speeds came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -185,18 +185,26 @@ impl Method {
         let w = &a.window;
         let mut partial = Vec::new();
         let at = |name: &str, t: Option<&SimTime>| t.and_then(|&t| flight.at(name, t));
-        let below_500 = w.height_ft.iter().position(|&h| h < 500.0);
-        let landing_flap = below_500
-            .or(w.t.len().checked_sub(1))
-            .and_then(|i| at("flap.te_angle", w.t.get(i)));
-        let profile = l
-            .selection
-            .profile
-            .and_then(|p| p.ref_speeds(at("weight.gross", w.t.first()), landing_flap));
+        // As landed, and known without an approach window too: a flight that
+        // stayed below its top has none (2026-11-02: a C172 graded against
+        // 1.3 VSO, 52 kt, for its 65-75 kt).
+        let landing_flap = at("flap.te_angle", Some(&td.t));
+        let weight = at("weight.gross", w.t.first().or(Some(&td.t)));
+        let chosen = l.selection.profile;
+        let profile = chosen.and_then(|p| p.ref_speeds(weight, landing_flap));
+        if chosen.is_some_and(|p| {
+            (p.vref.is_some() && (weight.is_none() || landing_flap.is_none()))
+                || (p.vref.is_none() && p.approach_speed.is_some() && landing_flap.is_none())
+        }) {
+            partial.push(
+                "The reference speed is an estimate: the recording lacks the weight or flap angle it is read from"
+                    .to_owned(),
+            );
+        }
         let selected = median(
             w.t.iter()
                 .filter_map(|&t| flight.at("sel.speed", t))
-                .filter(|&s| s > 0.0),
+                .filter(|&s| s >= MIN_SELECTED_KT),
         );
         let headwind = mean(w.t.iter().filter_map(|&t| {
             let (speed, from) = (flight.at("wind.speed", t)?, flight.at("wind.dir", t)?);
@@ -210,6 +218,18 @@ impl Method {
                 "No reference speed (Vref) for {icao}, so speed items were not graded"
             ));
         }
+        if speeds
+            .as_ref()
+            .is_some_and(|s| s.source == SpeedSource::Selected)
+        {
+            partial.push("The reference speed is the selected speed, not the type's".to_owned());
+        }
+        if class != ScoringClass::Light && headwind.is_none() && !autothrottle {
+            partial.push("The approach speed has no wind correction: no wind recorded".to_owned());
+        }
+        if a.slowed.is_none() && a.liftoff.is_none() {
+            partial.push("The recording ends during the rollout".to_owned());
+        }
         let light = class == ScoringClass::Light;
         let reference = speeds
             .as_ref()
@@ -217,17 +237,24 @@ impl Method {
         let profile_value = |f| l.selection.profile.and_then(|p| p.value(f, || None));
         let track_ft =
             profile_value(ProfileField::MainGearTrack).unwrap_or(self.fallback_track_ft[&class]);
-        let aim_m = if light {
-            LIGHT_AIM_M
-        } else {
-            fix.aiming_point_m
-        };
-        let target_m = l.target_m.unwrap_or(aim_m);
+        // What the pilot sees on that runway (Annex 14), in every class.
+        let target_m = l.target_m.unwrap_or(fix.aiming_point_m);
         // The glidepath to the target at the threshold, at the wheels.
         let path_ft = target_m * FT_PER_M * GLIDEPATH_DEG.to_radians().tan();
         let eye_ft = profile_value(ProfileField::EyeToWheel).unwrap_or(eye_to_wheel_ft(class));
         let tch_ft = path_ft.min(TCH_FT) - eye_ft;
+        // Light weights stall lower (lift goes with the speed squared).
+        let vso = profile_value(ProfileField::Vso).map(|vso| {
+            let mlw = profile_value(ProfileField::Mlw);
+            let scale = weight
+                .zip(mlw)
+                .map_or(1.0, |(w, m)| (w / m).sqrt().min(1.0));
+            vso * scale
+        });
+        let off_reference = |speed: f64| reference.map(|r| speed - r);
         let context = Context {
+            stall_kt: vso.and_then(off_reference),
+            floor_kt: vso.and_then(|v| off_reference(FLOOR_OVER_STALL * v)),
             add_kt: speeds.as_ref().map(|s| s.vapp_kt - s.vref_kt),
             gust_kt: Some(0.0),
             rod3_fpm: mean(w.gs_kt.iter().copied().filter(|g| g.is_finite()))
@@ -283,6 +310,17 @@ impl Method {
             false,
         );
 
+        // Heights the window never had: the approach cannot be graded, and
+        // neither can the unstable cap fire.
+        let approach_held = values.iter().any(|(_, v)| match v {
+            Value::Series { high, low } => high.iter().chain(low).any(|x| x.is_finite()),
+            Value::Scalar(..) => false,
+        });
+        if !approach_held {
+            partial.push(format!(
+                "Stability was not graded: no approach from {top:.0} ft was flown"
+            ));
+        }
         let mut crossing = a.threshold.as_ref();
         if crossing.is_some_and(|c| track.ra_ft[track.index_at(c.t)].is_nan()) {
             partial.push(
@@ -303,7 +341,7 @@ impl Method {
             ("C1", Some((fix.along_m - target_m) * FT_PER_M)),
             ("D1", Some(fix.cross_m.abs() * FT_PER_M)),
             ("D2", a.crab_deg.map(f64::abs)),
-            ("D3", a.drift_kt.map(f64::abs)),
+            ("D3", a.drift_deg.map(f64::abs)),
             (
                 "D4",
                 a.rollout_cross_m
@@ -319,6 +357,23 @@ impl Method {
             ("F1", a.decel_delay_s.filter(|_| full_stop)),
             ("F2", a.required_decel_g.filter(|_| full_stop)),
         ];
+        for (id, x) in &scalars {
+            // What this landing should have, so its absence is reported.
+            let expected = match *id {
+                "E4N" | "E5" => true,
+                "B1" => !w.t.is_empty() && a.threshold.is_none(),
+                "B3" | "D2" | "D3" => !w.t.is_empty(),
+                // F1 has no value when no means was used: that is measured.
+                "D4" | "F2" => full_stop,
+                _ => false,
+            };
+            if expected
+                && x.is_none()
+                && let Some(c) = self.criterion(id)
+            {
+                partial.push(format!("{} was not graded: its data is missing", c.title));
+            }
+        }
         values.extend(scalars.map(|(id, x)| (id.to_owned(), Value::Scalar(Height::All, x))));
 
         let (from, to) = landing_span(l, &a, full_stop);
@@ -439,8 +494,8 @@ fn configuration(a: &Approach, light: bool, split: f64) -> Option<f64> {
     Some(level)
 }
 
-/// E3 as a level: 1 for a bounce after this touchdown, 2 when it was
-/// airborne over 2 s or rose over 5 ft (est); 0 without one.
+/// E3 as a size: 1 for a bounce after this touchdown airborne 2 s or 5 ft
+/// high (est), in proportion below and above that; 0 without one.
 fn bounce(track: &Track, tds: &[Touchdown], index: usize) -> f64 {
     let Some(next) = tds.get(index + 1).filter(|t| t.bounce) else {
         return 0.0;
@@ -451,11 +506,7 @@ fn bounce(track: &Track, tds: &[Touchdown], index: usize) -> f64 {
         .map(|i| track.ra_ft[i])
         .filter(|h| h.is_finite())
         .fold(0.0, f64::max);
-    if airborne > BIG_BOUNCE_US || rose > BIG_BOUNCE_FT {
-        2.0
-    } else {
-        1.0
-    }
+    (airborne as f64 / BIG_BOUNCE_US as f64).max(rose / BIG_BOUNCE_FT)
 }
 
 /// Leaving the runway on the rollout, in words.

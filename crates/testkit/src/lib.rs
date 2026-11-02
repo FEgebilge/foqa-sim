@@ -213,7 +213,12 @@ pub fn telemetry(
 /// airliner landing (`landing`) touches down. The flight is flown once to
 /// find that point.
 pub fn runway_behind_touchdown(along_m: f64) -> Airport {
-    let (flight, _) = fly(AIRLINER_LB, TD_S + 1.0, |t| landing(t, TD_S, 1.2));
+    runway_behind_touchdown_of(along_m, |t| landing(t, TD_S, 1.2))
+}
+
+/// `runway_behind_touchdown` for the touchdown `script` flies.
+pub fn runway_behind_touchdown_of(along_m: f64, script: impl Fn(f64) -> Pt) -> Airport {
+    let (flight, _) = fly(AIRLINER_LB, TD_S + 1.0, script);
     let t = touchdowns(&flight, &Track::new(&flight).unwrap())[0].t;
     let (lat, lon) = (
         flight.at("pos.lat", t).unwrap(),

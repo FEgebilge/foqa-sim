@@ -26,11 +26,13 @@ const part = (name: string, label: string, weight: number): ScorePart => ({ name
 
 const METHODS: Record<string, ScorePart[]> = {
   // The six domains of the debrief's assessment (docs/scoring.md §2.3).
+  "landing-4": [part("stability", "approach stability", 25), part("energy", "threshold and flare energy", 10), part("point", "touchdown point", 20), part("lateral", "lateral control", 15), part("contact", "touchdown contact", 20), part("rollout", "rollout", 10)],
+  // A result kept from before it: the same six domains.
   "landing-3": [part("stability", "approach stability", 25), part("energy", "threshold and flare energy", 10), part("point", "touchdown point", 20), part("lateral", "lateral control", 15), part("contact", "touchdown contact", 20), part("rollout", "rollout", 10)],
 };
 
 /** Every challenge is graded with the debrief's current method, whatever it names (docs/challenges.md). */
-export const CURRENT = "landing-3";
+export const CURRENT = "landing-4";
 /** Method names a definition may carry, all graded with `CURRENT`. */
 const KNOWN = ["landing-1", "landing-2", CURRENT];
 
@@ -44,7 +46,7 @@ const points = (list: { label: string; weight: number }[]) => list.map((p) => `$
 
 /**
  * The Scoring fact of a briefing: the method actually used (the current one) and its parts with their weights. `scored` is the newest
- * graded attempt's score: when landing-3 shared a domain's weight out (no data for it), the note says what that attempt used.
+ * graded attempt's score: when landing-4 shared a domain's weight out (no data for it), the note says what that attempt used.
  */
 export function scoringFact(version: string, scored?: NonNullable<AttemptView["result"]>["score"]): { value: string; note: string } {
   const method = methodOf(version);
@@ -56,7 +58,7 @@ export function scoringFact(version: string, scored?: NonNullable<AttemptView["r
     value: method,
     note: [
       `0 to 100: ${points(parts)}.`,
-      method === "landing-3" ? "The debrief's landing assessment run from the gate; a safety cap can hold the total below the parts' sum, and a domain without data shares its weight out." : "",
+      method === "landing-4" || method === "landing-3" ? "The debrief's landing assessment run from the gate; a safety cap can hold the total below the parts' sum, and a domain without data shares its weight out." : "",
       version !== method ? `The challenge names ${version}; every challenge is graded with the current method, ${method}.` : "",
       shared ? `Latest attempt: ${points(used.map((p) => ({ label: partLabel(method, p.name), weight: p.weight })))}.` : "",
     ].filter(Boolean).join(" "),

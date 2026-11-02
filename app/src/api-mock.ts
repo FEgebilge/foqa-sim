@@ -65,7 +65,7 @@ async function historyFlights(): Promise<FlightSummary[]> {
     id: `c172-pattern${COPY}${flight_id}`, started_utc: started_utc ?? undefined, duration_s: 3600 + facts.t_s, aircraft: aircraft ? { icao: aircraft, title: aircraft } : undefined,
     departure: facts.icao, arrival: facts.icao, landings: 1, worst_level: facts.grade === "good" ? undefined : "medium",
     event_counts: { advisory: 1, low: 0, medium: facts.grade === "good" ? 0 : 1, high: facts.grade === "poor" ? 1 : 0 },
-    assessment: { grade: facts.grade ?? "fair", points: 0, findings: 0, method: "landing-3", score: facts.score, confidence: facts.confidence },
+    assessment: { grade: facts.grade ?? "fair", points: 0, findings: 0, method: "landing-4", score: facts.score, confidence: facts.confidence },
     landings_detail: [facts],
   })).reverse();
 }

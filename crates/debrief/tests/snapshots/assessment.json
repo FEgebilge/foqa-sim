@@ -61,18 +61,18 @@
                   null
                 ]
               },
-              "ell": 0.2688,
+              "ell": 0.3407,
               "height": "above",
               "height_text": "above 500 ft",
               "id": "A1",
               "level": 0,
-              "loss": 0.0538,
+              "loss": 0.0681,
               "sets": false,
-              "standard": "S2 ATP ACS +/-5 kt (tol); S1 Data4Safety Vref+20/+35, Vref-5/-10; light S3/S4 +10/-5 (tol), levels est",
+              "standard": "S2 ATP ACS +/-5 kt (tol); S1 Data4Safety Vref+20/+35, Vref-5/-10; light: the POH range is ideal (add is its half width), S3/S4 +10/-5 (tol), levels est",
               "title": "IAS off the approach speed",
               "unit": "kt",
-              "value": 1.1562,
-              "value_text": "+1.2 kt",
+              "value": 0.7965,
+              "value_text": "+0.8 kt",
               "worst_s": 80.0
             },
             {
@@ -108,18 +108,18 @@
                   "-10 kt"
                 ]
               },
-              "ell": 0.2688,
+              "ell": 0.3407,
               "height": "below",
               "height_text": "below 500 ft",
               "id": "A1",
               "level": 0,
-              "loss": 0.0538,
+              "loss": 0.0681,
               "sets": true,
-              "standard": "S2 ATP ACS +/-5 kt (tol); S1 Data4Safety Vref+20/+35, Vref-5/-10; light S3/S4 +10/-5 (tol), levels est",
+              "standard": "S2 ATP ACS +/-5 kt (tol); S1 Data4Safety Vref+20/+35, Vref-5/-10; light: the POH range is ideal (add is its half width), S3/S4 +10/-5 (tol), levels est",
               "title": "IAS off the approach speed",
               "unit": "kt",
-              "value": 1.1562,
-              "value_text": "+1.2 kt",
+              "value": 0.7965,
+              "value_text": "+0.8 kt",
               "worst_s": 117.5
             },
             {
@@ -454,9 +454,9 @@
           "findings": [],
           "id": "stability",
           "level": 0,
-          "loss": 0.0538,
-          "points": 1.3,
-          "set_by_text": "IAS off the approach speed +1.2 kt below 500 ft",
+          "loss": 0.0681,
+          "points": 1.7,
+          "set_by_text": "IAS off the approach speed +0.8 kt below 500 ft",
           "sets_by": "A1 below",
           "short": "Approach",
           "summary": "Speed, descent rate, bank, pitch, glideslope and configuration on final",
@@ -551,11 +551,11 @@
               "level": 0,
               "loss": 0.0,
               "sets": false,
-              "standard": "S9 no lower than Vref-5, Vref-10 tail clearance; light POH main wheels first; L1, L3 and light bands est",
+              "standard": "S9 no lower than Vref-5, Vref-10 tail clearance; light POH main wheels first; light floor at the stall (POH Section 5) est; L1, L3 and light bands est",
               "title": "Touchdown IAS",
               "unit": "kt",
-              "value": 1.1562,
-              "value_text": "+1.2 kt"
+              "value": 0.7965,
+              "value_text": "+0.8 kt"
             },
             {
               "bands": {
@@ -776,9 +776,9 @@
                 "above": [
                   1.0,
                   2.0,
+                  3.0,
                   4.0,
-                  6.0,
-                  8.0
+                  5.0
                 ],
                 "below": [
                   null,
@@ -790,11 +790,11 @@
               },
               "bands_text": {
                 "above": [
-                  "1 kt",
-                  "2 kt",
-                  "4 kt",
-                  "6 kt",
-                  "8 kt"
+                  "1°",
+                  "2°",
+                  "3°",
+                  "4°",
+                  "5°"
                 ],
                 "below": [
                   null,
@@ -811,11 +811,11 @@
               "level": 0,
               "loss": 0.0,
               "sets": false,
-              "standard": "S3/S4 no side drift; numbers est",
+              "standard": "S3/S4 no side drift; an angle, so a type's speed does not change the grade; numbers est",
               "title": "Drift at touchdown",
-              "unit": "kt",
-              "value": 0.0472,
-              "value_text": "0.0 kt"
+              "unit": "deg",
+              "value": 0.0193,
+              "value_text": "0.0°"
             },
             {
               "bands": {
@@ -973,11 +973,11 @@
             {
               "bands": {
                 "above": [
+                  0.25,
                   null,
-                  null,
-                  null,
+                  0.5,
                   1.0,
-                  2.0
+                  1.5
                 ],
                 "below": [
                   null,
@@ -989,9 +989,9 @@
               },
               "bands_text": {
                 "above": [
+                  "L0",
                   null,
-                  null,
-                  null,
+                  "L1",
                   "L1",
                   "L2"
                 ],
@@ -1010,7 +1010,7 @@
               "level": 0,
               "loss": 0.0,
               "sets": false,
-              "standard": "S7 RE30 main-gear air-to-ground count > 1; airborne > 2 s or > 5 ft est",
+              "standard": "S7 RE30 main-gear air-to-ground count > 1; size 1 is airborne 2 s or 5 ft high (est); under 0.25 is no bounce (est)",
               "title": "Bounce",
               "unit": null,
               "value": 0.0,
@@ -1074,8 +1074,8 @@
                 "below": [
                   null,
                   0.0,
-                  null,
-                  0.0,
+                  -1.0,
+                  -2.0,
                   null
                 ]
               },
@@ -1090,8 +1090,8 @@
                 "below": [
                   null,
                   "0°",
-                  null,
-                  "0°",
+                  "-1°",
+                  "-2°",
                   null
                 ]
               },
@@ -1172,11 +1172,11 @@
             {
               "bands": {
                 "above": [
-                  0.1,
                   0.15,
                   0.2,
-                  0.3,
-                  0.4
+                  0.25,
+                  0.35,
+                  0.45
                 ],
                 "below": [
                   null,
@@ -1188,11 +1188,11 @@
               },
               "bands_text": {
                 "above": [
-                  "0.10 g",
                   "0.15 g",
                   "0.20 g",
-                  "0.30 g",
-                  "0.40 g"
+                  "0.25 g",
+                  "0.35 g",
+                  "0.45 g"
                 ],
                 "below": [
                   null,
@@ -1202,13 +1202,13 @@
                   null
                 ]
               },
-              "ell": 0.0172,
+              "ell": 0.0,
               "height": "all",
               "height_text": null,
               "id": "F2",
               "level": 0,
-              "loss": 0.0034,
-              "sets": true,
+              "loss": 0.0,
+              "sets": false,
               "standard": "S6 RE.8 a = GS^2 / 2d; bands est",
               "title": "Required deceleration",
               "unit": "g",
@@ -1219,10 +1219,10 @@
           "findings": [],
           "id": "rollout",
           "level": 0,
-          "loss": 0.0034,
+          "loss": 0.0,
           "points": 0.0,
-          "set_by_text": "Required deceleration 0.10 g",
-          "sets_by": "F2",
+          "set_by_text": null,
+          "sets_by": null,
           "short": "Rollout",
           "summary": "How soon braking began and how hard it had to be to stop",
           "title": "Rollout and stopping",
@@ -1231,7 +1231,7 @@
       ],
       "facts": [
         "Graded with jet limits",
-        "Reference speed 139 kt, approach speed 144 kt (approximate, from the aircraft profile)",
+        "Reference speed 139 kt, approach speed 144 kt",
         "Approach stable from 1,000 ft down"
       ],
       "full_stop": true,
@@ -1239,14 +1239,14 @@
       "missing": [],
       "note": null,
       "partial": [],
-      "raw": 91.4,
-      "score": 91.4,
+      "raw": 91.1,
+      "score": 91.1,
       "speeds": {
-        "approximate": true,
-        "basis": "Boeing, Aerodrome Reference Code and Approach Speeds, Rev A, table row 737-800: approach speed 142 kt, MLW 66,361 kg, https://www.boeing.com/content/dam/boeing/v2/airports/faq/arcandapproachspeeds.pdf",
+        "approximate": false,
+        "basis": "Boeing 737-800 QRH (FCOM vol. 1), Performance Inflight, 737-800/CFM56-7B27 JAA, p. PI-QRH.10.4 VREF, July 17 2009, https://allafricanairways.com/wp-content/uploads/2023/07/737-800-Quick-Reference-Handbook-QRH-1.pdf",
         "source": "profile",
-        "vapp_kt": 143.8438,
-        "vref_kt": 138.8438
+        "vapp_kt": 144.2035,
+        "vref_kt": 139.2035
       },
       "split_ft": 500.0,
       "stable_from_ft": 1000.0,
@@ -1256,9 +1256,9 @@
   ],
   "legacy_findings": 0,
   "legacy_points": 0,
-  "method": "landing-3",
+  "method": "landing-4",
   "other_findings": [],
   "partial_note": null,
   "parts": [],
-  "score": 91.4
+  "score": 91.1
 }

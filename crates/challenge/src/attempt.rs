@@ -41,16 +41,16 @@ pub struct Attempt {
     pub touchdown_s: Option<f64>,
     /// `None` without a landing on the challenge's runway past its gate.
     pub score: Option<Score>,
-    /// A landing-3 attempt's grade, confidence and caps (docs/scoring.md),
+    /// A landing-4 attempt's grade, confidence and caps (docs/scoring.md),
     /// as the debrief wire has them.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub assessment: Option<Assessment>,
 }
 
-/// The assessment of a ranked landing-3 attempt: `score` is `score.total`.
+/// The assessment of a ranked landing-4 attempt: `score` is `score.total`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Assessment {
-    /// `landing-3`.
+    /// `landing-4`.
     pub method: String,
     pub score: f64,
     pub grade: Grade,
@@ -91,7 +91,7 @@ fn check(name: &'static str, ok: bool, detail: String) -> Check {
 struct Graded {
     gate: SimTime,
     touchdown: SimTime,
-    /// `None` when landing-3 lacks the data any score needs.
+    /// `None` when landing-4 lacks the data any score needs.
     score: Option<Score>,
     assessment: Option<Assessment>,
 }
@@ -385,7 +385,7 @@ fn landing(
     })
 }
 
-/// The landing-3 score of touchdown `k` (docs/scoring.md), the shared
+/// The landing-4 score of touchdown `k` (docs/scoring.md), the shared
 /// assessment as a ranked attempt flown from the gate: no selected-speed
 /// fallback, the window starting at the gate where it is lower. Adds the
 /// `go_around` check (an attempt that went around is not ranked) and the

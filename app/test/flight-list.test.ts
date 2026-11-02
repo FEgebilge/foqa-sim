@@ -8,11 +8,11 @@ const NONE = { advisory: 0, low: 0, medium: 0, high: 0 };
 const flight = (id: string, over: Partial<FlightSummary> = {}): FlightSummary => ({
   id, started_utc: "2026-10-26T18:05:32Z", duration_s: 600, landings: 1, event_counts: NONE,
   aircraft: { icao: "C172", title: "C172SP G1000" }, departure: "LTBL", arrival: "LTBL",
-  assessment: { grade: "good", points: 0, findings: 0, method: "landing-3", score: 90, parts: [], bands: [] }, kind: "flight", ...over,
+  assessment: { grade: "good", points: 0, findings: 0, method: "landing-4", score: 90, parts: [], bands: [] }, kind: "flight", ...over,
 });
 const rows = [
   flight("a", { meta: { title: "Gusty circuits", notes: "Crosswind 28L", tags: ["practice", "crosswind"] } }),
-  flight("b", { aircraft: { icao: "A20N", title: "A320neo" }, departure: "LTFJ", arrival: "LTAI", started_utc: "2026-10-01T10:00:00Z", assessment: { grade: "poor", points: 6, findings: 2, method: "landing-3", parts: [], bands: [] } }),
+  flight("b", { aircraft: { icao: "A20N", title: "A320neo" }, departure: "LTFJ", arrival: "LTAI", started_utc: "2026-10-01T10:00:00Z", assessment: { grade: "poor", points: 6, findings: 2, method: "landing-4", parts: [], bands: [] } }),
   flight("c", { kind: "ground_only", meta: { tags: ["Practice"] } }),
 ].map(toRow);
 const view = (change: Partial<ListState> = {}) => ({ ...INITIAL, ...change });

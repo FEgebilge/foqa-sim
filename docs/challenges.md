@@ -196,10 +196,10 @@ not prevention, which matches the stakes.
 with the one its challenge names, so app updates never move a board.
 
 **`landing-2`** (0.10) is retired: a challenge naming it is graded with
-landing-3, and its attempts say `landing-3` ([scoring.md](scoring.md) §6).
+landing-4, and its attempts say `landing-4` ([scoring.md](scoring.md) §6).
 
 **Every attempt is graded with the debrief's current method**
-(`challenge::CURRENT`, today `landing-3`; decided 2026-10-30), whatever
+(`challenge::CURRENT`, today `landing-4`; decided 2026-10-30), whatever
 the definition's `scoring.version` names: a challenge and the debrief
 never grade one landing two ways. `scoring.version` must still be a known
 name (`landing-1`, `landing-2`, `landing-3`; an unknown one needs a newer
@@ -466,14 +466,14 @@ value, the profiles cannot tell the gear layout).
   `crashed`, logs `Ground strike: wing strike (roll -25°, pitch -17°),
   ended as a crash` and starts Fly again, like a crash impact.
 - **Grade:** the check `ground_strike` fails (`struck the ground with a
-  wing or the nose: …`), so the attempt never counts; the landing-3
+  wing or the nose: …`), so the attempt never counts; the landing-4
   assessment is held at 0 by the excursion cap, titled "Crash or ground
   strike"; the debrief shows the High event `ground-strike`.
 
 Regression: `fixtures/c172-ltbj-34l-ground-strike.fqz` (that landing, `fdm
 slice --from 150 --to 240`), `crates/challenge/tests/ground_strike.rs`:
 the strike at 201.5 s, the check failed for a definition naming
-landing-1 or landing-3, the score held at 0. Still to check live: that a real ground loop or
+landing-1 or landing-4, the score held at 0. Still to check live: that a real ground loop or
 nose-over is told within half a second, and that hard but normal crosswind
 landings (wing low at contact, up to 10° in a light aircraft) never are.
 

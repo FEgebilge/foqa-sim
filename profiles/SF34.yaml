@@ -4,6 +4,7 @@
 type: SF34
 name: Saab 340B
 class: transport
+mlw: { value: 28500 lb, source: "EASA TCDS EASA.A.068 Issue 26 (20 Dec 2023), 340B post Modification No. 2438: landing 12,930 kg (28,500 lb), https://www.easa.europa.eu/lv/downloads/7388/en" }
 scoring_class: turboprop
 airframe: { kind: airplane, engine: turboprop, engines: 2, gear: retractable }
 vmo: { value: 250 kt, source: "Airliners.net https://www.airliners.net/forum/viewtopic.php?t=745789 and brainscape Saab 340 limitations flashcards", approximate: true, note: "250 KIAS up to 16,000 ft, decreasing to about 210 kt at FL250; forum/flashcards, EASA TCDS A.068 Issue 26 only says refer to the AFM" }
