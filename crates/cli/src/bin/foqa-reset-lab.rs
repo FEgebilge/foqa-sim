@@ -49,12 +49,17 @@ const WATCH: [(&str, &str); 9] = [
     ("SIM ON GROUND", "bool"),
     ("PLANE ALT ABOVE GROUND", "feet"),
 ];
-const WHERE: [(&str, &str); 5] = [
+const WHERE: [(&str, &str); 10] = [
     ("PLANE LATITUDE", "degrees"),
     ("PLANE LONGITUDE", "degrees"),
     ("PLANE ALTITUDE", "feet"),
     ("PLANE HEADING DEGREES TRUE", "degrees"),
     ("AIRSPEED INDICATED", "knots"),
+    ("AMBIENT WIND DIRECTION", "degrees"),
+    ("AMBIENT WIND VELOCITY", "knots"),
+    ("AMBIENT PRECIP STATE", "mask"),
+    ("LOCAL TIME", "seconds"),
+    ("ZULU TIME", "seconds"),
 ];
 
 fn main() -> Result<(), Box<dyn Error>> {

@@ -11,24 +11,36 @@ use std::time::{Duration, Instant};
 use fdm_core::Airport;
 use recorder::{FlowEvent, SimEvent, Telemetry};
 pub use sim_link::InitPosition;
+
+use crate::hold::HoldUntil;
+use crate::hold::trim_set_data;
 pub use sim_link::ils::{Ils, IlsQuery};
 
 /// Key events a start sends; each is mapped once per connection as client
 /// event `KEY_EVENT_BASE` + its index. Names from the MSFS key event list
 /// (legacy events, still in MSFS 2024; `NAV1_RADIO_SET_HZ` takes Hz, not
 /// BCD: Aircraft Radio Navigation Events).
-pub(crate) const KEY_EVENTS: [&str; 5] = [
+pub(crate) const KEY_EVENTS: [&str; 8] = [
     "AUTOPILOT_OFF",
     "GEAR_DOWN",
     "GEAR_UP",
     "FLAPS_SET",
     "NAV1_RADIO_SET_HZ",
+    "THROTTLE_SET",
+    "ELEVATOR_TRIM_SET",
+    "MIXTURE_SET",
 ];
 /// Above the system event ids (1..=`SYSTEM_EVENTS.len()`): client event ids
 /// share one space.
 pub(crate) const KEY_EVENT_BASE: u32 = 100;
 /// `FLAPS_SET` data of the fully extended handle.
 const FLAPS_FULL: f64 = 16383.0;
+/// `MIXTURE_SET` data of the full rich lever, the before-landing setting.
+const MIXTURE_RICH: u32 = 16383;
+/// Trim a start begins with, percent nose up: about a light aircraft's on
+/// final (bench, 2026-11-02: C172 level at 70 kt, full flap, 10 to 14), not
+/// wherever the pilot last left it. The hold takes it from there.
+const START_TRIM_PCT: f64 = 10.0;
 
 /// Where and how a start puts the user aircraft.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -41,18 +53,26 @@ pub struct Start {
     pub flaps: Option<f64>,
     /// Active NAV1 frequency, Hz (the landing runway's ILS); `None` leaves it.
     pub nav1_hz: Option<u32>,
+    /// Holds the speed and level flight until the pilot takes over.
+    pub hold: Option<HoldUntil>,
 }
 
 impl Start {
     /// The key events sent after the position, in order, with their data:
-    /// autopilot off, the gear, then the flaps and NAV1 if set.
+    /// autopilot off, the gear, full rich, the start's trim, then the flaps
+    /// and NAV1 if set.
     pub fn events(&self) -> Vec<(&'static str, u32)> {
         let gear = if self.gear_down {
             "GEAR_DOWN"
         } else {
             "GEAR_UP"
         };
-        let mut events = vec![("AUTOPILOT_OFF", 0), (gear, 0)];
+        let mut events = vec![
+            ("AUTOPILOT_OFF", 0),
+            (gear, 0),
+            ("MIXTURE_SET", MIXTURE_RICH),
+            ("ELEVATOR_TRIM_SET", trim_set_data(START_TRIM_PCT)),
+        ];
         events.extend(self.flaps.map(|f| ("FLAPS_SET", flaps_set_data(f))));
         events.extend(self.nav1_hz.map(|hz| ("NAV1_RADIO_SET_HZ", hz)));
         events
@@ -189,12 +209,14 @@ impl IlsAsks {
 /// teleport done within a frame or two), so the flight saved is the start.
 pub(crate) const SAVE_AFTER: Duration = Duration::from_secs(2);
 /// The longest a reload waits for the sim to settle after the load.
-pub const RELOAD_TIMEOUT: Duration = Duration::from_secs(60);
+pub const RELOAD_TIMEOUT: Duration = Duration::from_secs(90);
 /// Without the sim's own move to the runway (MSFS 2020 sends no flow
 /// events; another flow may not move the aircraft) a reload is settled this
-/// long after the last `SimStart`. MSFS 2024 begins that move about 10 s
-/// after the load's `SimStart`, so it is not cut short.
-pub(crate) const QUIET_AFTER: Duration = Duration::from_secs(15);
+/// long after the sim last did anything. MSFS 2024 begins that move 9 to
+/// 20.4 s after the load's `SimStart`, the most with scenery far away
+/// (bench, 2026-11-02), so it is not cut short; its `RTC_END` settles the
+/// reload at once.
+pub(crate) const QUIET_AFTER: Duration = Duration::from_secs(45);
 
 /// How a reload settled.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -202,7 +224,7 @@ pub enum Settled {
     /// The sim's own move to the runway ended (`RTC_END`), as MSFS 2024
     /// does after a flight load.
     RunwayMove,
-    /// No such move began: `QUIET_AFTER` past the last `SimStart`.
+    /// No such move began: `QUIET_AFTER` past the sim's last event.
     Quiet,
 }
 
@@ -228,8 +250,8 @@ pub(crate) struct ReloadWait {
     /// The sim's move to the runway began after the load.
     moving: bool,
     settled: Option<Settled>,
-    /// The last `SimStart` after the load.
-    sim_start: Option<Instant>,
+    /// The sim's last event since the load's `SimStart`.
+    active: Option<Instant>,
     failed: Option<&'static str>,
 }
 
@@ -240,7 +262,7 @@ impl ReloadWait {
             loaded: false,
             moving: false,
             settled: None,
-            sim_start: None,
+            active: None,
             failed: None,
         }
     }
@@ -259,7 +281,8 @@ impl ReloadWait {
             SimEvent::Flow(FlowEvent::BackToMainMenu) => {
                 self.failed = Some("the sim went back to the main menu");
             }
-            SimEvent::SimStart if self.loaded => self.sim_start = Some(now),
+            SimEvent::SimStart if self.loaded => self.active = Some(now),
+            SimEvent::Flow(_) if self.active.is_some() => self.active = Some(now),
             _ => {}
         }
     }
@@ -278,7 +301,7 @@ impl ReloadWait {
         if let Some(settled) = self.settled {
             return Some(Ok(settled));
         }
-        let quiet = self.sim_start.is_some_and(|t| now >= t + QUIET_AFTER);
+        let quiet = self.active.is_some_and(|t| now >= t + QUIET_AFTER);
         if quiet && !self.moving {
             return Some(Ok(Settled::Quiet));
         }
@@ -312,6 +335,7 @@ mod tests {
             gear_down,
             flaps,
             nav1_hz,
+            hold: None,
         }
     }
 
@@ -333,13 +357,20 @@ mod tests {
             [
                 ("AUTOPILOT_OFF", 0),
                 ("GEAR_DOWN", 0),
+                ("MIXTURE_SET", 16383),
+                ("ELEVATOR_TRIM_SET", 1638),
                 ("FLAPS_SET", 16383),
                 ("NAV1_RADIO_SET_HZ", 110_300_000)
             ]
         );
         assert_eq!(
             start(false, None, None).events(),
-            [("AUTOPILOT_OFF", 0), ("GEAR_UP", 0)]
+            [
+                ("AUTOPILOT_OFF", 0),
+                ("GEAR_UP", 0),
+                ("MIXTURE_SET", 16383),
+                ("ELEVATOR_TRIM_SET", 1638)
+            ]
         );
         // Every event a start sends is mapped.
         assert!(events.iter().all(|(name, _)| key_event_id(name).is_some()));
@@ -473,6 +504,25 @@ mod tests {
         let early = QUIET_AFTER - Duration::from_secs(1);
         assert_eq!(reload(&items, early), None);
         assert_eq!(reload(&items, QUIET_AFTER), Some(Ok(Settled::Quiet)));
+    }
+
+    #[test]
+    fn the_sims_events_before_its_move_keep_a_reload_waiting() {
+        use FlowEvent::*;
+        // 2026-11-02: the move began 15.2 s after the load's `SimStart`; a
+        // start placed then was undone 0.7 s later by its `RTC_END`.
+        let sent = Instant::now();
+        let mut wait = ReloadWait::new(sent);
+        wait.see(&flow(FltLoaded), sent);
+        wait.see(&Telemetry::Event(SimEvent::SimStart), sent);
+        let later = sent + QUIET_AFTER - Duration::from_secs(1);
+        wait.see(&flow(FlightStart), later);
+        assert_eq!(wait.state(sent + QUIET_AFTER), None);
+        assert_eq!(
+            wait.state(later + QUIET_AFTER),
+            Some(Ok(Settled::Quiet)),
+            "no move followed after all"
+        );
     }
 
     #[test]
