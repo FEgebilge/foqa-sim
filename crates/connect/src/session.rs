@@ -204,13 +204,20 @@ impl Session {
         Ok(api::decode::<Me>(r)?.user)
     }
 
-    /// Open and upcoming challenges.
+    /// Open and upcoming challenges. Signed in, the token goes along: a
+    /// site's admin also gets its drafts, to test fly before publishing.
     pub fn challenges(&self) -> Result<Vec<ChallengeEntry>, Error> {
         #[derive(Deserialize)]
         struct List {
             challenges: Vec<ChallengeEntry>,
         }
-        let r = self.http.get(&self.url("/challenges"), None, 1024 * 1024)?;
+        let url = self.url("/challenges");
+        let limit = 1024 * 1024;
+        let r = if self.has_grant() {
+            self.authed(|t| self.http.get(&url, Some(t), limit))?
+        } else {
+            self.http.get(&url, None, limit)?
+        };
         Ok(api::decode::<List>(r)?.challenges)
     }
 
@@ -430,6 +437,7 @@ mod tests {
                 "application/json",
                 br#"{"attempt":{"id":"a1","ref":"Qe3v1hJ0dEa9fP2kLm7xRw","challenge_id":"ltfj-06","challenge_version":1,"definition_sha256":"x","issued_at":"t","fly_within_s":1800,"upload_within_s":86400},"definition":{"id": "ltfj-06",  "version":1}}"#.to_vec(),
             ),
+            ("GET", "/api/challenges") => Reply::json(200, json!({ "challenges": [] })),
             ("POST", "/api/token/revoke") => Reply::raw(204, "application/json", vec![]),
             _ => Reply::error(404, "not_found"),
         }
@@ -448,6 +456,13 @@ mod tests {
         let req = &mock.requests()[0];
         assert_eq!(req.json()["client_attempt_id"], "local-1");
         assert_eq!(req.header("authorization"), Some("Bearer access-1"));
+        assert!(s.challenges().unwrap().is_empty());
+        let list = mock.requests().pop().unwrap();
+        assert_eq!(
+            (list.path.as_str(), list.header("authorization")),
+            ("/api/challenges", Some("Bearer access-1")),
+            "signed in, the catalog is asked with the token: an admin's drafts"
+        );
         s.revoke().unwrap();
         assert!(!s.has_grant() && store.get(&mock.base).unwrap().is_none());
         assert_eq!(mock.hits("/api/token/revoke"), 1);
