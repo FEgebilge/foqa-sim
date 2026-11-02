@@ -24,12 +24,19 @@ name = "foqa-reset-lab"
 path = "src/bin/foqa-reset-lab.rs"
 required-features = ["sim"]
 
+# Bench test of the hands-off hold of a challenge's start (live sim).
+[[bin]]
+name = "foqa-hold-lab"
+path = "src/bin/foqa-hold-lab.rs"
+required-features = ["sim"]
+
 [features]
 default = ["sim"]
-sim = ["dep:sim-link"]
+sim = ["dep:sim-link", "dep:capture"]
 
 [dependencies]
 analyzer = { path = "../analyzer" }
+capture = { path = "../capture", optional = true }
 challenge = { path = "../challenge" }
 debrief = { path = "../debrief", features = ["parquet"] }
 fdm-core = { path = "../fdm-core" }

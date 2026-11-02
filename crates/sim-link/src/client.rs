@@ -267,6 +267,11 @@ impl SimConnect {
         self.request(request_id, define_id, ffi::PERIOD_SIM_FRAME, 0, skip)
     }
 
+    /// Stops a request's stream.
+    pub fn stop_request(&mut self, request_id: u32, define_id: u32) -> Result<(), Error> {
+        self.request(request_id, define_id, ffi::PERIOD_NEVER, 0, 0)
+    }
+
     /// Sends a definition for the user aircraft now, then whenever one of its
     /// values changes, checked once per second.
     pub fn request_on_change(&mut self, request_id: u32, define_id: u32) -> Result<(), Error> {

@@ -19,6 +19,7 @@ mod links;
 mod setup;
 mod store;
 mod updated;
+mod weather_file;
 
 use std::panic::{self, AssertUnwindSafe};
 use std::sync::Arc;

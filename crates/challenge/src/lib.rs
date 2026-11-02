@@ -96,10 +96,14 @@ pub struct Gate {
     pub distance_nm: f64,
 }
 
-/// Measured, not set: an attempt counts only inside these bands.
+/// The bands are measured: an attempt counts only inside them. `weather` and
+/// `time` are set: the clean start every attempt loads carries them, and
+/// with `weather` set the band's wind is the one blown.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Conditions {
+    pub weather: Option<Sky>,
+    pub time: Option<Clock>,
     /// The mean wind from the gate to touchdown.
     pub wind: Option<WindBand>,
     /// At touchdown, on the runway.
@@ -107,6 +111,76 @@ pub struct Conditions {
     pub tailwind_kt: Option<Band>,
     /// A weather preset shipped for the pilot to pick; a convenience.
     pub preset: Option<String>,
+}
+
+/// The sky an attempt is flown under, the sim's own weather types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Sky {
+    Clear,
+    Few,
+    Scattered,
+    Broken,
+    High,
+    Overcast,
+    Rain,
+    Storm,
+    Snow,
+}
+
+impl Sky {
+    pub fn name(self) -> &'static str {
+        match self {
+            Sky::Clear => "clear sky",
+            Sky::Few => "few clouds",
+            Sky::Scattered => "scattered clouds",
+            Sky::Broken => "broken clouds",
+            Sky::High => "high clouds",
+            Sky::Overcast => "overcast",
+            Sky::Rain => "rain",
+            Sky::Storm => "thunderstorm",
+            Sky::Snow => "snow",
+        }
+    }
+}
+
+/// The date and the time at the airport an attempt starts at.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Clock {
+    /// `2026-07-15`.
+    pub date: String,
+    /// `18:30`, local at the airport.
+    pub local: String,
+}
+
+impl Clock {
+    /// Year and day of the year (1 is 1 January), as a saved flight has them.
+    pub fn day_of_year(&self) -> Option<(u32, u32)> {
+        let mut parts = self.date.split('-');
+        let year = fixed_digits(parts.next()?, 4)?;
+        let month = fixed_digits(parts.next()?, 2)?;
+        let day = fixed_digits(parts.next()?, 2)?;
+        let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+        let feb = if leap { 29 } else { 28 };
+        let months = [31, feb, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+        let length = *months.get(month.checked_sub(1)? as usize)?;
+        let before: u32 = months[..month as usize - 1].iter().sum();
+        (parts.next().is_none() && (1..=length).contains(&day)).then_some((year, before + day))
+    }
+
+    /// Hours and minutes.
+    pub fn hour_minute(&self) -> Option<(u32, u32)> {
+        let (hours, minutes) = self.local.split_once(':')?;
+        let (hours, minutes) = (fixed_digits(hours, 2)?, fixed_digits(minutes, 2)?);
+        (hours < 24 && minutes < 60).then_some((hours, minutes))
+    }
+}
+
+fn fixed_digits(s: &str, len: usize) -> Option<u32> {
+    (s.len() == len && s.bytes().all(|b| b.is_ascii_digit()))
+        .then(|| s.parse().ok())
+        .flatten()
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -172,6 +246,14 @@ impl Challenge {
         if !is_runway(&c.runway) {
             return Err(format!("runway `{}` is not like `06` or `27L`", c.runway));
         }
+        if let Some(clock) = &c.conditions.time {
+            if clock.day_of_year().is_none() {
+                return Err("`conditions.time.date` is a date like `2026-07-15`".into());
+            }
+            if clock.hour_minute().is_none() {
+                return Err("`conditions.time.local` is a time like `18:30`".into());
+            }
+        }
         match c.scoring.version.as_str() {
             // Graded with `CURRENT` all the same; only a definition naming
             // landing-2 or landing-3 was written for it, so only theirs must
@@ -223,6 +305,13 @@ impl Challenge {
                 .find(|t| t.runway.eq_ignore_ascii_case(&self.runway))
                 .map(|t| (t, r.elevation_m))
         })
+    }
+
+    /// The landing threshold at `airport`, latitude and longitude, and the
+    /// gate's distance from it, m.
+    pub fn gate_fix(&self, airport: &Airport) -> Option<(f64, f64, f64)> {
+        let (t, _) = self.threshold(airport)?;
+        Some((t.lat_deg, t.lon_deg, self.gate.distance_nm * M_PER_NM))
     }
 
     /// Why `start_state` found no start at `airport`, with the runways the
@@ -297,6 +386,55 @@ mod tests {
       "gate": { "distance_nm": 3 },
       "scoring": { "version": "landing-1" }
     }"#;
+
+    #[test]
+    fn a_clock_is_read_as_a_saved_flight_has_it() {
+        let clock = |date: &str, local: &str| Clock {
+            date: date.into(),
+            local: local.into(),
+        };
+        assert_eq!(
+            clock("2026-11-02", "").day_of_year(),
+            Some((2026, 306)),
+            "as the sim saved that day"
+        );
+        assert_eq!(clock("2026-01-01", "").day_of_year(), Some((2026, 1)));
+        assert_eq!(clock("2024-12-31", "").day_of_year(), Some((2024, 366)));
+        for bad in [
+            "2026-02-29",
+            "2026-13-01",
+            "2026-00-10",
+            "26-01-01",
+            "2026-1-1",
+            "x",
+        ] {
+            assert_eq!(clock(bad, "").day_of_year(), None, "{bad}");
+        }
+        assert_eq!(clock("", "18:30").hour_minute(), Some((18, 30)));
+        for bad in ["24:00", "18:60", "8:30", "1830"] {
+            assert_eq!(clock("", bad).hour_minute(), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_definition_sets_its_sky_and_clock() {
+        let with = |conditions: &str| {
+            let json = JSON.replace(
+                r#""gate": { "distance_nm": 3 },"#,
+                &format!(r#""gate": {{ "distance_nm": 3 }}, "conditions": {conditions},"#),
+            );
+            Challenge::parse(&json)
+        };
+        let c = with(r#"{"weather":"storm","time":{"date":"2026-07-15","local":"18:30"}}"#);
+        let c = c.unwrap().conditions;
+        assert_eq!(c.weather, Some(Sky::Storm));
+        assert_eq!(c.time.unwrap().local, "18:30");
+        assert!(with(r#"{"weather":"hail"}"#).is_err());
+        let bad = with(r#"{"time":{"date":"2026-02-30","local":"18:30"}}"#);
+        assert!(bad.unwrap_err().contains("conditions.time.date"));
+        let bad = with(r#"{"time":{"date":"2026-02-20","local":"25:00"}}"#);
+        assert!(bad.unwrap_err().contains("conditions.time.local"));
+    }
 
     fn airport() -> Airport {
         let end = |number| RunwayEnd {

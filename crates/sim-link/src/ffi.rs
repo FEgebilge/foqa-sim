@@ -30,6 +30,8 @@ pub const GROUP_PRIORITY_HIGHEST: Dword = 1;
 /// `SIMCONNECT_EVENT_FLAG_GROUPID_IS_PRIORITY` (H:406): the group id of
 /// `TransmitClientEvent` is a priority, no notification group needed.
 pub const EVENT_FLAG_GROUPID_IS_PRIORITY: Dword = 0x10;
+/// `SIMCONNECT_PERIOD_NEVER`.
+pub const PERIOD_NEVER: i32 = 0;
 /// `SIMCONNECT_PERIOD_SIM_FRAME`.
 pub const PERIOD_SIM_FRAME: i32 = 3;
 /// `SIMCONNECT_PERIOD_SECOND`.
